@@ -4,6 +4,7 @@ import { Provider, useSelector, useDispatch } from "react-redux";
 import { store } from "./store/store";
 import { initLocation } from "./store/locationSlice";
 import Toasts from "./components/Toasts";
+import NotificationPopup from "./components/NotificationPopup";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -36,8 +37,11 @@ import "./App.css";
 // Guests + customers can view; admins -> /admin, cooks -> cook dashboard.
 const NonAdminRoute = ({ children }) => {
   const user = useSelector((s) => s.auth.user);
+  const token = useSelector((s) => s.auth.token);
   const loading = useSelector((s) => s.auth.loading);
   if (loading) return <div className="loading">Loading...</div>;
+  // Only honor the role when a real token backs it — otherwise treat as guest.
+  if (!token || !user) return children;
   if (user?.role === "admin") return <Navigate to="/admin" replace />;
   if (user?.role === "cook") return <Navigate to="/dashboard/cook-bookings" replace />;
   return children;
@@ -52,11 +56,29 @@ const LocationBootstrap = () => {
   return null;
 };
 
+// Revalidate any stored session when the app boots so a suspended/deleted
+// account (or an expired token) cannot linger as a fake logged-in state.
+const SessionBootstrap = () => {
+  const dispatch = useDispatch();
+  useEffect(() => {
+    try {
+      const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+      if (token) {
+        import("./store/authSlice").then((m) => dispatch(m.fetchCurrentUser()));
+      }
+    } catch {
+      // storage unavailable — stay logged out
+    }
+  }, [dispatch]);
+  return null;
+};
+
 function App() {
   return (
     <Provider store={store}>
         <Router>
         <LocationBootstrap />
+        <SessionBootstrap />
         <ScrollToTop />
         <div className="App">
           <FestiveOfferBillboard />
@@ -199,6 +221,7 @@ function App() {
         </div>
         <BackToTop />
         <Toasts />
+        <NotificationPopup />
       </Router>
     </Provider>
   );

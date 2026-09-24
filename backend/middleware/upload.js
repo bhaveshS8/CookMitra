@@ -3,8 +3,9 @@ const path = require("path");
 const fs = require("fs");
 
 // Local disk storage for cook verification documents (Aadhaar / PAN / photo).
-// Files go to <backend>/uploads/cook-docs and are served via /uploads.
-const uploadDir = path.join(__dirname, "..", "uploads", "cook-docs");
+// Directory comes from utils/storage (UPLOAD_DIR-aware) so writer, static
+// mount and signed-URL viewer can never disagree on the location (F-01).
+const { uploadDir } = require("../utils/storage");
 fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -42,9 +43,9 @@ const fileFilter = (req, file, cb) => {
 const cookDocUpload = multer({
   storage,
   fileFilter,
-  // 5 MB per file, at most 3 files / 5 fields per request — a single-file
+  // 2 MB per file, at most 3 files / 5 fields per request — a single-file
   // cap alone still allows disk-fill via many small parts.
-  limits: { fileSize: 5 * 1024 * 1024, files: 3, fields: 5 },
+  limits: { fileSize: 2 * 1024 * 1024, files: 3, fields: 5 },
 });
 
 module.exports = { cookDocUpload, cookDocUploadDir: uploadDir };

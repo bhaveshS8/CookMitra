@@ -76,11 +76,23 @@ td, th { padding: 0.7rem 0.5rem; }
 /* Lead capture left copy */
 .lead-copy .section-title { margin-bottom: 0.6rem; }
 
-/* Login form layout */
-.login-form { display: flex; flex-direction: column; gap: 0.55rem; }
+/* Login form layout — matches register form rhythm (0.85rem stack gap) */
+.login-form { display: flex; flex-direction: column; gap: 0.85rem; }
 .login-input {
   padding-left: 2.6rem;
   border-radius: 14px;
+  min-height: 50px;
+  background: rgba(255, 255, 255, 0.85);
+  border-color: var(--slate-200);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.login-input::placeholder {
+  color: var(--slate-400);
+}
+.login-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(232, 89, 12, 0.1);
+  background: #fff;
 }
 
 /* Best-match card top row */
@@ -103,6 +115,8 @@ td, th { padding: 0.7rem 0.5rem; }
   align-items: center;
   justify-content: center;
   padding: 1.25rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   animation: loginModalFade 0.2s ease;
 }
 .login-modal {
@@ -177,6 +191,37 @@ td, th { padding: 0.7rem 0.5rem; }
 }
 .login-modal-maybe:hover { color: var(--slate-700); }
 
+/* Shared dialog arrangement: laptop/tablet use the centered card above;
+   phones and small tablets go near-full-width so BookingRequestModal,
+   AddCookModal, CouponModal and LoginPromptModal all clear the navbar
+   with room to breathe and scroll when taller than the viewport. */
+@media (max-width: 560px) {
+  .login-modal-overlay {
+    padding: 0.75rem;
+    padding-left: max(0.75rem, env(safe-area-inset-left));
+    padding-right: max(0.75rem, env(safe-area-inset-right));
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .login-modal-overlay .login-modal,
+  .login-modal-overlay .add-cook-modal,
+  .login-modal-overlay .brm-card {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100vh - 1.5rem);
+    max-height: calc(100dvh - 1.5rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin: auto;
+  }
+}
+/* Very small phones: reclaim overlay gutter so dialogs (incl. the cook's
+   booking-request popup) keep usable content width. */
+@media (max-width: 400px) {
+  .login-modal-overlay { padding: 0.5rem; }
+  .login-modal { padding: 1.75rem 1.1rem; }
+  .add-cook-modal { padding: 1.4rem 1rem; }
+}
+
 /* ---- Add cook (admin) modal ---- */
 .add-cook-modal {
   position: relative;
@@ -192,6 +237,143 @@ td, th { padding: 0.7rem 0.5rem; }
   animation: loginModalPop 0.22s ease;
 }
 .add-cook-head { text-align: center; margin-bottom: 1.25rem; margin-top: 0.5rem; }
+/* Booking-request dialog: pin Accept / Decline while long addresses/notes
+   scroll — the 5-minute window leaves no time to hunt for the buttons. */
+.add-cook-modal .booking-actions-row {
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  border-top: 1px solid var(--slate-100);
+  padding: 0.7rem 0 0.15rem;
+  margin-top: 0.9rem;
+}
+
+/* ---- Booking request dialog (cook + admin "Respond to Request") ----
+   Own compact card (no longer borrows the add-cook form modal): gradient
+   beam, icon header, live countdown pill, detail sheet, sticky actions. */
+.brm-card {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 2.5rem);
+  max-height: calc(100dvh - 2.5rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 22px;
+  box-shadow: var(--shadow-lg);
+  padding: 1.5rem 1.5rem 1.25rem;
+  animation: loginModalPop 0.22s ease;
+}
+.brm-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--primary) 0%, #ffb020 55%, transparent 100%);
+  pointer-events: none;
+}
+.brm-head { display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.85rem; padding-right: 2.25rem; }
+.brm-icon {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 15px;
+  background: var(--primary-gradient);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-brand);
+}
+.brm-head-text { min-width: 0; }
+.brm-head-text h3 { margin: 0 0 0.25rem; font-size: 1.2rem; }
+.brm-head-text p { margin: 0; color: var(--slate-600); font-size: 0.86rem; line-height: 1.5; }
+.brm-timer-row { margin-bottom: 0.85rem; }
+.brm-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+  color: var(--primary-700);
+  background: var(--primary-light);
+  border: 1px solid #fed7aa;
+  border-radius: 99px;
+  padding: 0.3rem 0.75rem;
+}
+.brm-timer.is-urgent {
+  color: #be123c;
+  background: #ffe4e6;
+  border-color: #fda4af;
+  animation: brmBlink 1s ease-in-out infinite;
+}
+.brm-timer.is-expired { color: var(--slate-500); background: var(--slate-100); border-color: var(--slate-200); animation: none; }
+.brm-timer.is-static { font-family: inherit; }
+@keyframes brmBlink { 50% { opacity: 0.55; } }
+.brm-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  background: var(--slate-50);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 0.8rem 0.9rem;
+}
+.brm-row {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--slate-700);
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
+.brm-row svg { flex-shrink: 0; color: var(--primary); margin-top: 0.15em; }
+.brm-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--slate-300); flex-shrink: 0; align-self: center; }
+.brm-amount strong { font-size: 1rem; color: var(--slate-900); }
+.brm-note {
+  margin: 0;
+  font-size: 0.84rem;
+  font-style: italic;
+  color: var(--slate-600);
+  background: #fffdf5;
+  border-left: 3px solid #fdba74;
+  border-radius: 0 10px 10px 0;
+  padding: 0.45rem 0.65rem;
+  overflow-wrap: break-word;
+}
+.brm-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 0.6rem;
+  background: #fff;
+  border-top: 1px solid var(--slate-100);
+  padding: 0.75rem 0 0.15rem;
+  margin-top: 0.9rem;
+}
+.brm-actions .btn { flex: 1 1 0; min-height: 48px; justify-content: center; }
+.brm-expired-note { margin: 0; width: 100%; text-align: center; font-size: 0.86rem; font-weight: 700; color: var(--slate-500); }
+@media (max-width: 560px) {
+  .brm-card { padding: 1.25rem 1rem 1rem; border-radius: 20px; }
+  .brm-head { padding-right: 2rem; }
+  .brm-icon { width: 44px; height: 44px; border-radius: 13px; }
+  .brm-head-text h3 { font-size: 1.08rem; }
+  .brm-actions { flex-direction: column; }
+  .brm-actions .btn { width: 100%; }
+}
+@media (max-width: 400px) {
+  .brm-card { padding: 1.1rem 0.9rem 0.9rem; border-radius: 18px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brm-timer.is-urgent { animation: none; }
+}
 .add-cook-icon {
   width: 56px;
   height: 56px;

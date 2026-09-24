@@ -5,17 +5,25 @@
 /* ---- Toasts ---- */
 .toast-container {
   position: fixed;
-  top: 1.25rem;
-  right: 1.25rem;
-  z-index: 120;
+  /* Centered below the sticky navbar (64px bar + 2px border) so alerts —
+     e.g. "new booking request" — are impossible to miss on any screen.
+     Mobile navbar is 62px — see the 1150px override. */
+  top: calc(64px + 2px + 0.9rem);
+  left: 50%;
+  transform: translateX(-50%);
+  /* Above modal overlays (1000) so alerts stay visible while a dialog is
+     open; clicks still pass through gaps. */
+  z-index: 1200;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 0.6rem;
-  max-width: 380px;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 2rem));
   /* Let clicks pass through empty areas so toasts never block navbar buttons */
   pointer-events: none;
 }
-.toast-item { pointer-events: auto; }
+.toast-item { pointer-events: auto; width: 100%; }
 .toast-item {
   display: flex;
   align-items: flex-start;
@@ -28,8 +36,9 @@
   box-shadow: var(--shadow-lg);
   animation: riseIn 0.28s ease;
 }
-.toast-content { display: flex; align-items: flex-start; gap: 0.55rem; flex: 1; }
-.toast-message { font-size: 0.9rem; font-weight: 600; color: var(--slate-800); line-height: 1.4; }
+.toast-content { display: flex; align-items: flex-start; gap: 0.55rem; flex: 1; min-width: 0; }
+.toast-message { font-size: 0.9rem; font-weight: 600; color: var(--slate-800); line-height: 1.4; min-width: 0; overflow-wrap: anywhere; }
+.toast-content > svg, .toast-icon { flex-shrink: 0; }
 .toast-close-btn {
   border: none;
   background: transparent;
@@ -72,6 +81,8 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
   background: var(--accent-rose-light);
   border: 1px solid #fecdd3;
   border-radius: 12px;
@@ -80,10 +91,13 @@
   font-weight: 600;
   color: #9f1239;
 }
+.error-alert-banner > svg, .success-alert-banner > svg { flex-shrink: 0; }
 .success-alert-banner {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
   background: var(--accent-emerald-light);
   border: 1px solid #a7f3d0;
   border-radius: 12px;
@@ -155,4 +169,130 @@
   margin: 0.75rem 0;
   color: var(--slate-500);
   font-size: 0.9rem;
+}
+
+/* ---- Solid danger button (dialog destructive actions) ---- */
+.btn-danger {
+  background: linear-gradient(180deg, #f43f5e, #e11d48);
+  border-color: #be123c;
+  color: #fff;
+  box-shadow: 0 8px 18px -8px rgba(225, 29, 72, 0.6);
+}
+.btn-danger:hover { filter: brightness(1.07); color: #fff; }
+
+/* ==========================================================================
+   ConfirmDialog — modern replacement for window.confirm()/window.prompt().
+   Laptop/tablet: centered card. Phones: near-full-width card, stacked
+   full-width 48px actions. Rendered by <ConfirmDialog />.
+   ========================================================================== */
+.cf-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  background: rgba(20, 10, 4, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  animation: cfOverlayFade 0.2s ease both;
+}
+.cf-card {
+  position: relative;
+  width: 100%;
+  max-width: 430px;
+  max-height: calc(100vh - 2.5rem);
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 22px;
+  box-shadow: var(--shadow-lg);
+  padding: 1.75rem 1.5rem 1.5rem;
+  text-align: center;
+  animation: cfCardPop 0.26s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+@keyframes cfOverlayFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cfCardPop {
+  from { opacity: 0; transform: translateY(14px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.cf-close {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border-radius: 50%;
+  border: none;
+  background: var(--slate-100);
+  color: var(--slate-600);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.cf-close:hover:not(:disabled) { background: var(--slate-200); color: var(--slate-900); }
+.cf-close:disabled { opacity: 0.5; cursor: not-allowed; }
+.cf-icon {
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 0.9rem;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cf-danger .cf-icon { background: linear-gradient(180deg, #ffe4e6, #fecdd3); color: #be123c; box-shadow: 0 8px 18px -8px rgba(225, 29, 72, 0.5); }
+.cf-brand .cf-icon { background: var(--primary-gradient); color: #fff; box-shadow: var(--shadow-brand); }
+.cf-emerald .cf-icon { background: linear-gradient(180deg, #d1fae5, #a7f3d0); color: #047857; box-shadow: 0 8px 18px -8px rgba(5, 150, 105, 0.5); }
+.cf-title { margin: 0 0 0.4rem; font-size: 1.18rem; font-weight: 800; letter-spacing: -0.01em; }
+.cf-desc { margin: 0 0 1.25rem; color: var(--slate-600); font-size: 0.9rem; line-height: 1.55; overflow-wrap: break-word; }
+.cf-field { display: block; text-align: left; margin: -0.25rem 0 1.25rem; }
+.cf-field > span { display: block; font-size: 0.78rem; font-weight: 700; color: var(--slate-600); margin-bottom: 0.35rem; }
+.cf-field textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: var(--slate-800);
+  border: 1px solid var(--slate-200);
+  border-radius: 12px;
+  padding: 0.6rem 0.75rem;
+  resize: vertical;
+  min-height: 76px;
+}
+.cf-field textarea:focus { outline: 3px solid var(--primary-glow); border-color: var(--primary); }
+.cf-actions { display: flex; gap: 0.6rem; }
+.cf-actions .cf-btn { flex: 1 1 0; min-height: 46px; justify-content: center; font-size: 0.9rem; }
+
+/* Tablet: slightly roomier card */
+@media (min-width: 768px) {
+  .cf-card { max-width: 460px; padding: 2rem 1.75rem 1.75rem; }
+  .cf-title { font-size: 1.25rem; }
+}
+/* Phones: near-full-width, stacked thumb-friendly actions */
+@media (max-width: 560px) {
+  .cf-overlay {
+    padding: 1rem;
+    padding-left: max(1rem, env(safe-area-inset-left));
+    padding-right: max(1rem, env(safe-area-inset-right));
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+  .cf-card { max-width: 100%; border-radius: 20px; padding: 1.5rem 1.15rem 1.15rem; }
+  .cf-icon { width: 52px; height: 52px; border-radius: 16px; margin-bottom: 0.75rem; }
+  .cf-title { font-size: 1.08rem; }
+  .cf-desc { font-size: 0.86rem; margin-bottom: 1.1rem; }
+  .cf-actions { flex-direction: column; }
+  .cf-actions .cf-btn { width: 100%; min-height: 48px; font-size: 0.92rem; }
+}
+/* Very small phones: reclaim gutter + chrome */
+@media (max-width: 400px) {
+  .cf-overlay { padding: 0.75rem; }
+  .cf-card { padding: 1.3rem 1rem 1rem; border-radius: 18px; }
+  .cf-close { width: 36px; height: 36px; min-width: 36px; top: 0.55rem; right: 0.55rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cf-overlay, .cf-card { animation: none; }
 }

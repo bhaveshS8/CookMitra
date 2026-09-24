@@ -27,6 +27,8 @@ const reviewSchema = new mongoose.Schema(
     comment: {
       type: String,
       default: "",
+      trim: true,
+      maxlength: [2000, "Review must be at most 2000 characters"],
     },
   },
   { timestamps: true }

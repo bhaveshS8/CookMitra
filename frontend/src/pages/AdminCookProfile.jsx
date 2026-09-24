@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useFetch } from "../hooks/useFetch";
 import AdminDocViewer from "../components/AdminDocViewer";
 import AdminDocUpload from "../components/AdminDocUpload";
-import { formatCurrency, formatDate, SERVICE_DETAILS } from "../utils/constants";
+import { formatCurrency, formatDate, SERVICE_DETAILS, formatTimeRange12 } from "../utils/constants";
 import {
   ArrowLeft,
   ChefHat,
@@ -41,7 +41,7 @@ const BookingCard = ({ booking }) => (
         </h3>
         <span style={{ fontSize: "0.85rem", color: "var(--slate-500)" }}>
           {serviceLabel(booking.serviceType)} • {formatDate(booking.date)} •{" "}
-          {booking.startTime} – {booking.endTime} ({booking.durationHours || "—"} hrs)
+          {formatTimeRange12(booking.startTime, booking.endTime)} ({booking.durationHours || "—"} hrs)
         </span>
       </div>
       <span className="badge badge-festive">{booking.status?.toUpperCase()}</span>
@@ -143,8 +143,12 @@ const AdminCookProfile = () => {
 
   const { profile, bookings = [], reviews = [], summary } = data;
   const cook = profile.user || {};
-  const current = bookings.filter((b) => CURRENT_STATUSES.includes(b.status));
-  const past = bookings.filter((b) => !CURRENT_STATUSES.includes(b.status));
+  // Newer bookings first in both tabs (creation time, newest → oldest).
+  const byNewest = (a, b) =>
+    new Date(b?.createdAt).getTime() - new Date(a?.createdAt).getTime() ||
+    String(b?._id || "").localeCompare(String(a?._id || ""));
+  const current = bookings.filter((b) => CURRENT_STATUSES.includes(b.status)).sort(byNewest);
+  const past = bookings.filter((b) => !CURRENT_STATUSES.includes(b.status)).sort(byNewest);
   const serviceRows = Object.entries(summary?.earningsByService || {});
   const avgRating = profile.rating?.average
     ? Number(profile.rating.average).toFixed(1)
@@ -324,6 +328,7 @@ const AdminCookProfile = () => {
       <h2 style={{ fontSize: "1.4rem", marginBottom: "1rem" }}>Earnings by Service</h2>
       {serviceRows.length > 0 ? (
         <div className="dossier-table-card">
+          <div className="admin-table-wrapper">
           <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.95rem" }}>
             <thead style={{ background: "var(--slate-50)", borderBottom: "1px solid var(--slate-200)" }}>
               <tr>
@@ -346,6 +351,7 @@ const AdminCookProfile = () => {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ) : (
         <p style={{ color: "var(--slate-500)", marginBottom: "2rem" }}>

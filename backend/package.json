@@ -12,7 +12,7 @@
     "dev": "nodemon server.js",
     "seed": "node seeds/seed.js",
     "seed:coupons": "node seeds/seed.js --coupons-only",
-    "test": "node slot-engine.test.js && node admin-accept.test.js && node login.test.js && node forgot-password.test.js && node coupon.test.js && node master-suite.test.js && node reschedule.test.js && node launch-pricing.test.js && node start-service.test.js && node visit-stats.test.js && node review-rating.test.js && node rate-limit-store.test.js"
+    "test": "node slot-engine.test.js && node admin-accept.test.js && node login.test.js && node forgot-password.test.js && node coupon.test.js && node master-suite.test.js && node reschedule.test.js && node launch-pricing.test.js && node start-service.test.js && node visit-stats.test.js && node review-rating.test.js && node rate-limit-store.test.js && node security-audit.test.js && node payment-adversarial.test.js && node pay-whatsapp.test.js && node finance-audit.test.js && node p0-hardening.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -28,6 +28,7 @@
     "mongoose": "^8.7.0",
     "morgan": "^1.10.0",
     "multer": "^2.3.0",
+    "nodemailer": "^10.0.10",
     "razorpay": "^2.9.8"
   },
   "devDependencies": {

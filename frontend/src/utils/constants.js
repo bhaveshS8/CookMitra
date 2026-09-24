@@ -76,6 +76,51 @@ export const localTomorrowStr = () => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
+// 12-hour clock label for an "HH:MM" (or "HH:MM:SS") time string.
+// "14:30" -> "2:30 PM", "00:15" -> "12:15 AM"; anything unparsable passes
+// through untouched. Times are stored as 24h strings everywhere, so every
+// user-facing screen formats through this.
+export const formatTime12 = (time) => {
+  const m = String(time || "").match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return String(time || "");
+  let h = Number(m[1]);
+  const ap = h >= 12 ? "PM" : "AM";
+  h = h % 12 || 12;
+  return `${h}:${m[2]} ${ap}`;
+};
+
+// "10:00","13:00" -> "10:00 AM – 1:00 PM" (separator customisable).
+export const formatTimeRange12 = (start, end, sep = "–") =>
+  start && end ? `${formatTime12(start)} ${sep} ${formatTime12(end)}` : "";
+
+// Parse a booking's ISO date string back into a local YYYY-MM-DD string.
+// Slicing the ISO string directly fails if the backend is not in UTC,
+// because a local midnight Date saves as e.g. 18:30Z the previous day.
+export const getLocalDateStr = (isoString) => {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+// "Today" / "Tomorrow" badge label for imminent bookings.
+// `today` (YYYY-MM-DD) defaults to the current local day; screens pass
+// their live value from useLocalDay() so badges flip over correctly at
+// midnight without waiting for a refetch.
+export const dayTagLabel = (booking, today = localTodayStr()) => {
+  const day = getLocalDateStr(booking?.date);
+  if (!day || !today) return null;
+  if (day === today) return "Today";
+  const next = new Date(`${today}T00:00:00`);
+  next.setDate(next.getDate() + 1);
+  const p = (n) => String(n).padStart(2, "0");
+  if (day === `${next.getFullYear()}-${p(next.getMonth() + 1)}-${p(next.getDate())}`) {
+    return "Tomorrow";
+  }
+  return null;
+};
+
 // Google Maps navigation URL for a booking: precise GPS pin when
 // available, otherwise falls back to the text address search.
 export const mapsNavigateUrl = (booking) => {
@@ -128,7 +173,7 @@ export const bookingCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone,
     `Cook: ${cookName || "Assigned cook"}`,
     `Cook's number: ${cookPhone || "will be shared shortly"}`,
     `Date: ${booking?.date ? new Date(booking.date).toLocaleDateString() : ""}`,
-    `Service hours: ${booking?.startTime || ""} - ${booking?.endTime || ""}${booking?.durationHours ? ` (${booking.durationHours} hrs)` : ""}`,
+    `Service hours: ${formatTimeRange12(booking?.startTime, booking?.endTime, "-")}${booking?.durationHours ? ` (${booking.durationHours} hrs)` : ""}`,
     `Venue: ${booking?.address || ""}`,
   ];
   if (venueMapsLink) lines.push(`Your venue pin: ${venueMapsLink}`);
@@ -191,6 +236,51 @@ export const effectiveServiceWindow = (obj) => {
   return { startTime: start, endTime: end };
 };
 
+// IST wall time → UTC instant (F-08): Asia/Kolkata has no DST so +05:30 is
+// exact. The backend stores booking days as IST-midnight instants; resolving
+// the slot from IST parts keeps the cutoff/countdown identical in every
+// browser timezone (server-local setHours drifted by hours abroad).
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+const istDayParts = (input) => {
+  const d = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(d);
+    const get = (t) => parts.find((p) => p.type === t)?.value;
+    return { y: Number(get("year")), mo: Number(get("month")), d: Number(get("day")) };
+  } catch {
+    return null;
+  }
+};
+const istSlotInstant = (dateInput, hm) => {
+  const m = String(hm || "").match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const mi = Number(m[2]);
+  if (h > 23 || mi > 59) return null;
+  let y;
+  let mo;
+  let d;
+  if (typeof dateInput === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateInput.trim())) {
+    const dm = dateInput.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    y = Number(dm[1]);
+    mo = Number(dm[2]);
+    d = Number(dm[3]);
+  } else {
+    const p = istDayParts(dateInput);
+    if (!p || !Number.isInteger(p.y)) return null;
+    y = p.y;
+    mo = p.mo;
+    d = p.d;
+  }
+  return new Date(Date.UTC(y, mo - 1, d, h, mi) - IST_OFFSET_MS);
+};
+
 // Session end datetime. Prefers the live service clock (serviceEndsAt, set
 // when the cook verifies the OTP), then the server-resolved `sessionEnd`
 // (returned by the booking endpoints, computed by the backend from its own
@@ -210,12 +300,7 @@ export const sessionEndDate = (obj) => {
   if (!date) return null;
   const endTime = obj?.endTime;
   if (!endTime) return null;
-  const m = String(endTime).match(/^(\d{1,2}):(\d{2})/);
-  if (!m) return null;
-  const d = new Date(date);
-  if (Number.isNaN(d.getTime())) return null;
-  d.setHours(Number(m[1]), Number(m[2]), 0, 0);
-  return d;
+  return istSlotInstant(date, endTime);
 };
 
 // Session start datetime: prefers the actual service clock (serviceStartedAt)
@@ -230,12 +315,18 @@ export const sessionStartDate = (obj) => {
   if (!date) return null;
   const startTime = obj?.startTime;
   if (!startTime) return null;
-  const m = String(startTime).match(/^(\d{1,2}):(\d{2})/);
-  if (!m) return null;
-  const d = new Date(date);
-  if (Number.isNaN(d.getTime())) return null;
-  d.setHours(Number(m[1]), Number(m[2]), 0, 0);
-  return d;
+  return istSlotInstant(date, startTime);
+};
+
+// Cancel lock: customers and cooks may call off a
+// booking only until 30 minutes before the service start time. Unknown
+// start ⇒ unlocked (the backend enforces the same rule — this only hides
+// the button so users aren't offered a doomed action).
+export const CANCEL_LOCK_MINUTES = 30;
+export const isCancelLocked = (obj, now = Date.now()) => {
+  const start = sessionStartDate(obj);
+  if (!start) return false;
+  return now >= start.getTime() - CANCEL_LOCK_MINUTES * 60 * 1000;
 };
 
 // True when the session is under way: the cook verified the OTP
@@ -380,7 +471,7 @@ export const bookingWhatsAppUrl = ({ cookPhone, customerName, customerPhone, boo
     "New Cook Mitra Booking Request",
     `Customer: ${customerName || "Customer"}${customerPhone ? ` (${customerPhone})` : ""}`,
     `Service: ${(booking?.serviceType || "").replace(/_/g, " ")}`,
-    `Date: ${booking?.date ? new Date(booking.date).toLocaleDateString() : ""} | Time: ${booking?.startTime || ""} - ${booking?.endTime || ""}`,
+    `Date: ${booking?.date ? new Date(booking.date).toLocaleDateString() : ""} | Time: ${formatTimeRange12(booking?.startTime, booking?.endTime, "-")}`,
     `Venue: ${booking?.address || ""}`,
   ];
   if (mapsLink) lines.push(`Venue pin: ${mapsLink}`);
@@ -424,7 +515,7 @@ export const bookingCookJobWhatsAppUrl = ({ cookPhone, customerName, customerPho
     `Customer: ${customerName || "Customer"}`,
     `Customer number: ${customerPhone || "not shared"}`,
     `Service: ${(booking?.serviceType || "").replace(/_/g, " ")}`,
-    `Date: ${booking?.date ? new Date(booking.date).toLocaleDateString() : ""} | Time: ${booking?.startTime || ""} - ${booking?.endTime || ""}`,
+    `Date: ${booking?.date ? new Date(booking.date).toLocaleDateString() : ""} | Time: ${formatTimeRange12(booking?.startTime, booking?.endTime, "-")}`,
     `Venue: ${addressParts || booking?.address || ""}`,
   ];
   if (mapsLink) lines.push(`Location pin: ${mapsLink}`);
@@ -434,35 +525,6 @@ export const bookingCookJobWhatsAppUrl = ({ cookPhone, customerName, customerPho
   if (booking?.notes) lines.push(`Notes: ${booking.notes}`);
   if (booking?._id) lines.push(`Booking ID: ${booking._id}`);
   lines.push("The customer has PAID. Please reach the venue on time.");
-
-  return `https://wa.me/91${mobile}?text=${encodeURIComponent(lines.join("\n"))}`;
-};
-
-// Customer → cook time-change notice after a reschedule: old vs new slot
-// plus venue + booking id so the cook can spot it instantly. Returns null
-// when the cook has no valid number.
-export const bookingRescheduleWhatsAppUrl = ({ cookPhone, customerName, customerPhone, booking, oldSlot }) => {
-  const mobile = normalizeIndianMobile(cookPhone);
-  if (!mobile) return null;
-
-  const newSlot = [
-    booking?.date ? new Date(booking.date).toLocaleDateString() : "",
-    booking?.startTime && booking?.endTime ? `${booking.startTime} - ${booking.endTime}` : "",
-  ]
-    .filter(Boolean)
-    .join(" | ");
-
-  const lines = [
-    "*Cook Mitra: Booking Time Changed* ⏰",
-    `Customer: ${customerName || "Customer"}${customerPhone ? ` (${customerPhone})` : ""}`,
-    `Service: ${(booking?.serviceType || "").replace(/_/g, " ")}`,
-  ];
-  if (oldSlot) lines.push(`Was: ${oldSlot}`);
-  if (newSlot) lines.push(`Now: ${newSlot}`);
-  lines.push(`Venue: ${booking?.address || ""}`);
-  if (booking?.durationHours) lines.push(`Duration: ${booking.durationHours} hrs (unchanged — fee stays the same)`);
-  if (booking?._id) lines.push(`Booking ID: ${booking._id}`);
-  lines.push("Please confirm you can make the new time.");
 
   return `https://wa.me/91${mobile}?text=${encodeURIComponent(lines.join("\n"))}`;
 };

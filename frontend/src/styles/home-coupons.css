@@ -195,6 +195,10 @@
   .home-coupons .coupon-grid { grid-template-columns: 1fr; max-width: 380px; }
   .home-coupons .coupon-off { font-size: 1.65rem; }
   .home-coupons .coupon-code { font-size: 0.98rem; }
+  /* Single-column cards are ~250px wide: the absolute "Best Offer" pill
+     would sit on top of long discount headlines, so it joins the normal
+     flow above the headline instead (wraps, never overlaps). */
+  .home-coupons .coupon-best { position: static; margin-bottom: 0.6rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

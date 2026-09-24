@@ -26,6 +26,11 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5000
+      # All server-side day/slot math assumes IST (Asia/Kolkata) — pinning TZ
+      # here keeps "today" correct in Docker/UTC hosts, where day boundaries
+      # would otherwise drift 5h30m for Indian users (same-day guards, slot
+      # windows, stats).
+      TZ: ${TZ:-Asia/Kolkata}
       # Database: Atlas by default. Set MONGODB_URI in the .env file next to
       # this compose file to your SRV string
       # (mongodb+srv://<user>:<password>@<cluster>.mongodb.net/<db>?retryWrites=true&w=majority).

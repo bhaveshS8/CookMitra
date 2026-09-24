@@ -18,6 +18,16 @@ const {
   toggleAvailability,
 } = require("../controllers/cookController");
 
+// Multer's own "File too large" message doesn't say what the limit is —
+// translate it (and keep any other message verbatim) so the cook profile
+// form can show "max 2MB" instead of a cryptic error.
+const uploadErrorMessage = (err) => {
+  if (err?.code === "LIMIT_FILE_SIZE") {
+    return "File too large — each file must be 2MB or less (JPG/PNG/WEBP/PDF)";
+  }
+  return err?.message || "File upload failed";
+};
+
 router.get("/", optionalAuth, getCooks);
 router.get("/me", auth, authorize("cook"), getMyProfile);
 // Cook ID verification file uploads (Aadhaar / PAN / photo).
@@ -33,7 +43,7 @@ router.post(
       { name: "photo", maxCount: 1 },
     ])(req, res, (err) => {
       if (err) {
-        return res.status(400).json({ message: err.message || "File upload failed" });
+        return res.status(400).json({ message: uploadErrorMessage(err) });
       }
       next();
     });
@@ -54,7 +64,7 @@ router.post(
       { name: "photo", maxCount: 1 },
     ])(req, res, (err) => {
       if (err) {
-        return res.status(400).json({ message: err.message || "File upload failed" });
+        return res.status(400).json({ message: uploadErrorMessage(err) });
       }
       next();
     });

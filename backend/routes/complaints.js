@@ -10,12 +10,13 @@ const {
   updateComplaintStatus,
 } = require("../controllers/complaintController");
 
-// Cook files a complaint about a customer (booking optional — when given,
-// the customer is derived from the cook's own booking).
+// Either side files a complaint about the other (booking required for
+// customers — the cook is derived from their own booking; cooks may also
+// file standalone against a customer they have served).
 router.post(
   "/",
   auth,
-  authorize("cook"),
+  authorize("cook", "customer"),
   [
     body("message")
       .trim()
@@ -23,15 +24,15 @@ router.post(
       .withMessage("Please describe the issue (10–2000 characters)"),
     body("category")
       .optional()
-      .isIn(["behaviour", "payment", "address", "no_show", "safety", "other"])
+      .isIn(["behaviour", "payment", "address", "no_show", "safety", "quality", "hygiene", "other"])
       .withMessage("Invalid category"),
   ],
   validate,
   createComplaint
 );
 
-// Logged-in cook's own complaints.
-router.get("/my", auth, authorize("cook"), getMyComplaints);
+// Logged-in user's own complaints (cook or customer).
+router.get("/my", auth, authorize("cook", "customer"), getMyComplaints);
 
 // Full triage queue (admin only).
 router.get("/", auth, authorize("admin"), getAllComplaints);

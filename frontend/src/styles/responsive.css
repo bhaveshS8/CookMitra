@@ -14,16 +14,12 @@
   .cook-profile-grid { grid-template-columns: 1fr; }
   .cook-profile-right-col { position: static; }
   .lead-grid { grid-template-columns: 1fr; gap: 1.6rem; }
+  /* Login/register responsive lives in styles/auth.css. */
 }
-
 @media (max-width: 900px) {
   .hero-v2-inner { grid-template-columns: 1fr; gap: 2rem; }
   .hero-v2-stats { gap: 1.4rem; }
   .hero-v2-stat-sep { display: none; }
-  .login-split { grid-template-columns: 1fr; }
-  .login-showcase { display: none; }
-  .login-mobile-brand { display: flex; }
-  .login-card { box-shadow: var(--shadow-sm); border: 1px solid var(--border-subtle); }
   .hero-v2-float-live { left: -6px; }
   .hero-v2-float-rating { right: -4px; }
 }
@@ -33,8 +29,11 @@
    hamburger drawer takes over instead of overflowing the page. */
 @media (max-width: 1150px) {
   .navbar-inner { height: 62px; padding: 0 1rem; }
-  .navbar-nav { display: none; }
-  .navbar-mobile-actions { display: flex; align-items: center; }
+  /* Auth pages track the shorter mobile navbar — see styles/auth.css. */
+  /* Toast + notification popups sit below the shorter (62px) mobile navbar. */
+  .toast-container { top: calc(62px + 2px + 0.75rem); }
+  .notif-popup-stack { top: calc(62px + 2px + 0.75rem); }
+  .navbar-nav { display: none; }  .navbar-mobile-actions { display: flex; align-items: center; }
   .mobile-toggle-btn { display: inline-flex; }
   .mobile-bell { display: inline-flex; }
   .mobile-avatar { display: inline-flex; }
@@ -62,7 +61,8 @@
     padding-left: calc(1rem + env(safe-area-inset-left));
     padding-right: calc(1rem + env(safe-area-inset-right));
   }
-  .page-header-banner { padding: 1.8rem 1.2rem; }
+  /* Login/register form panels get the same treatment in styles/auth.css. */
+.page-header-banner { padding: 1.8rem 1.2rem; }
   .ondemand-hero { padding: 1.6rem 1.1rem; }
   .ondemand-hero .section-title { font-size: 1.5rem; }
   .ondemand-form-card { padding: 1.3rem 1.1rem; }
@@ -74,7 +74,7 @@
   .cook-avatar-img { width: 52px; height: 52px; min-width: 52px; min-height: 52px; font-size: 1.15rem; }
   .match-rate { font-size: 0.95rem; }
   .slot-list { gap: 0.45rem; }
-  .slot-list .slot-chip { font-size: 0.78rem; padding: 0.42rem 0.7rem; }
+  .slot-list .slot-chip { font-size: 0.78rem; padding: 0.42rem 0.7rem; min-height: 44px; }
   .cooks-filter-bar { padding: 0.9rem 1rem; }
   .booking-item-card { padding: 1rem; }
   .booking-card-modern { padding: 1rem; }
@@ -95,17 +95,16 @@
   .footer-top-grid { grid-template-columns: 1fr; gap: 1.8rem; }
   .footer-bottom-bar { flex-direction: column; text-align: center; }
   .form-row { grid-template-columns: 1fr; }
-  .service-pick-grid { grid-template-columns: 1fr 1fr; }
-  .profile-card-block { padding: 1.2rem; }
+  /* Login/register phone rules live in styles/auth.css (≤640px block). */
+  .service-pick-grid { grid-template-columns: 1fr 1fr; }  .profile-card-block { padding: 1.2rem; }
   .hero-v2-title { font-size: clamp(1.7rem, 7.5vw, 2.4rem); }
-
   /* Tighter stat cards on phones */
   .dashboard-stats-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.7rem; }
   .stat-icon-wrapper { width: 42px; height: 42px; }
 
   /* Booking flow + payments */
   .bf-grid-side .bf-amount-box { padding: 1.1rem; }
-  .toast-container { left: 1rem; right: 1rem; max-width: none; }
+  .toast-container { left: 1rem; right: 1rem; max-width: none; transform: none; width: auto; }
   
   /* Booking metadata grid on mobile */
   .booking-metadata-grid { grid-template-columns: 1fr; gap: 0.5rem; }
@@ -159,8 +158,7 @@
 /* Small mobile devices */
 @media (max-width: 400px) {
   .dashboard-stats-grid { grid-template-columns: 1fr 1fr; }
-  .service-pick-grid { grid-template-columns: 1fr; }
-  .hero-v2-actions { flex-direction: column; width: 100%; }
+  .service-pick-grid { grid-template-columns: 1fr; }  .hero-v2-actions { flex-direction: column; width: 100%; }
   .hero-v2-actions .btn { width: 100%; }
   .bf-steps { flex-direction: column; align-items: stretch; }
   .bf-step { justify-content: center; }
@@ -169,11 +167,18 @@
   .ondemand-page .match-rate { align-self: flex-start; }
 }
 
-/* Table responsiveness - horizontal scroll for admin tables */
+/* Table responsiveness — horizontal scroll for bare tables only.
+   Tables that manage their own scroll shell (.admin-table-card) or card
+   layout (.admin-table, .coupon-table) are excluded. */
 @media (max-width: 768px) {
-  table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
-  
-  /* Admin dashboard tables */
+  table:not(.admin-table):not(.coupon-table) {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Admin dashboard tables that still use a dedicated scroll wrapper */
   .admin-table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   
   /* Mobile menu improvements */
@@ -206,8 +211,7 @@
 
 /* Fix for very small screens — never drop tap targets below ~40px */
 @media (max-width: 360px) {
-  .navbar-brand { font-size: 1rem; }
-  /* 48px logo crowds tiny screens next to the hamburger — scale it down. */
+  .navbar-brand { font-size: 1rem; }  /* 48px logo crowds tiny screens next to the hamburger — scale it down. */
   .brand-logo-img { width: 38px; height: 38px; }
   .brand-icon-box { width: 32px; height: 32px; }
   .brand-icon-box svg { width: 16px; height: 16px; }
@@ -248,7 +252,7 @@
   .track-map-frame { height: 300px; }
 
   /* Dossier table scrolls inside its card (global table rule excluded) */
-  .dossier-table-card table { display: table; white-space: normal; }
+  .dossier-table-card table { display: table !important; white-space: normal; }
   .dossier-table-card th,
   .dossier-table-card td { white-space: nowrap; }
 
@@ -306,6 +310,14 @@
   /* ---- Cook dashboard hero ---- */
   .cook-modern-hero-actions { grid-template-columns: 1fr; }
   .cook-modern-hero-copy h1 { font-size: 1.3rem; }
+
+  /* ---- Cook dashboard stat shortcuts: compact 2-column on phones
+        (mirrors .dashboard-stats-grid) so 4 cards fit without long scroll
+        or text squeeze. */
+  .cook-stats-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.7rem; }
+  .cook-stat-card { padding: 0.85rem 0.9rem; gap: 0.7rem; }
+  .cook-stat-icon { width: 42px; height: 42px; }
+  .cook-stat-num { font-size: 1.3rem; }
   .cook-next-job { align-items: flex-start; }
   .cook-actions-primary { flex-direction: column; align-items: stretch; }
   .cook-actions-primary .btn { width: 100%; }
@@ -316,6 +328,19 @@
   .slot-list .slot-chip { flex: 1 1 100%; justify-content: center; text-align: center; }
   .match-card-top { flex-wrap: wrap; }
   .match-id h3 { white-space: normal; }
+  /* ---- Step-3 cook cards: proper stacking on phones. The top row keeps
+     avatar + name together while the price pill drops to its own line
+     instead of squeezing the name; slot/fee stack left-aligned; card
+     padding shrinks so 360px viewports keep full-bleed content. */
+  .ondemand-page .match-card { padding: 1rem 0.9rem; gap: 0.65rem; }
+  .ondemand-page .match-card-top { align-items: flex-start; }
+  .ondemand-page .match-avatar { width: 46px; height: 46px; min-width: 46px; min-height: 46px; }
+  .ondemand-page .match-id { flex: 1 1 150px; min-width: 0; }
+  .ondemand-page .match-meta { overflow-wrap: anywhere; font-size: 0.8rem; }
+  .ondemand-page .match-rate { margin-left: auto; align-self: flex-start; }
+  .ondemand-page .od-bookbox { padding: 0.7rem; }
+  .ondemand-page .od-bookslot { flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+  .ondemand-page .match-count-title { line-height: 1.4; overflow-wrap: anywhere; }
   .maps-link-group { flex-direction: column; }
   .maps-link-group .btn { width: 100%; min-height: 44px; }
 
@@ -354,9 +379,13 @@
 
 /* Very small phones */
 @media (max-width: 400px) {
-  .cook-modern-avatar-wrap { width: 64px; height: 64px; min-width: 64px; min-height: 64px; }
+  /* Home-page role picker only — register page role tiles are handled in
+     styles/auth.css so the two layouts can diverge safely. */
+  .home-registration-form .role-segmented-control { grid-template-columns: 1fr; }  .cook-modern-avatar-wrap { width: 64px; height: 64px; min-width: 64px; min-height: 64px; }
   .match-avatar { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
   .match-rate { font-size: 0.9rem; }
   .cook-setup-head h1 { font-size: 1.45rem; }
   .ondemand-hero .section-title { font-size: 1.4rem; }
 }
+
+/* Auth-page edge cases (short screens, ultra-wide) live in styles/auth.css. */

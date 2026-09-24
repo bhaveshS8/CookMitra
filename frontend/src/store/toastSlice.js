@@ -17,12 +17,23 @@ export const showToast =
     return id;
   };
 
+// Cap the stack: cook/user flows can fire bursts (new-request alarm +
+// queue notices + poll toasts) that would otherwise cover the navbar and
+// primary actions on phones. Consecutive duplicates collapse into one.
+const MAX_TOASTS = 4;
 const toastSlice = createSlice({
   name: "toast",
   initialState: { toasts: [] },
   reducers: {
     pushToast(state, action) {
+      const last = state.toasts[state.toasts.length - 1];
+      if (last && last.message === action.payload.message && last.type === action.payload.type) {
+        return;
+      }
       state.toasts.push(action.payload);
+      while (state.toasts.length > MAX_TOASTS) {
+        state.toasts.shift();
+      }
     },
     removeToast(state, action) {
       state.toasts = state.toasts.filter((t) => t.id !== action.payload);

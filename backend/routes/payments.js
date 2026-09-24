@@ -38,6 +38,7 @@ router.post(
     body("razorpay_order_id").notEmpty().withMessage("Order id is required"),
     body("razorpay_payment_id").notEmpty().withMessage("Payment id is required"),
     body("razorpay_signature").notEmpty().withMessage("Signature is required"),
+    body("bookingId").isMongoId().withMessage("Valid booking id is required"),
   ],
   validate,
   verifyPayment

@@ -1,16 +1,19 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import API from "../api/axios";
 import { useFetch } from "../hooks/useFetch";
 import { normalizeRole } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
-import { formatCurrency, formatDate } from "../utils/constants";
+import { formatCurrency, formatDate, formatTimeRange12, playAlarmSound } from "../utils/constants";
 import AddCookModal from "../components/AddCookModal";
+import BookingRequestModal from "../components/BookingRequestModal";
 import AdminDocViewer from "../components/AdminDocViewer";
 import AdminDocUpload from "../components/AdminDocUpload";
 import CouponManagement from "../components/CouponManagement";
 import VisitStats from "../components/VisitStats";
 import AnalyticsPanel from "../components/AnalyticsPanel";
+import AdminPayoutsPanel from "../components/AdminPayoutsPanel";
+import ConfirmDialog from "../components/ConfirmDialog";
 import {
   ShieldAlert,
   Users,
@@ -38,12 +41,19 @@ import {
   MapPin,
   Wallet,
   Clock,
+  Clock3,
+  Star,
+  UtensilsCrossed,
+  Hourglass,
+  ArrowRight,
+  Banknote,
   XCircle,
   BarChart3,
+  Upload,
 } from "lucide-react";
 import { resolveFileUrl } from "../components/CookDocUploads";
 
-const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("cooks");
+const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("bookings");
 
   return (
     <div className="dashboard-container">
@@ -67,16 +77,16 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("cook
       {/* Tabs */}
       <div className="tabs-navigation-bar">
         <button
-          className={`tab-btn ${activeTab === "cooks" ? "active" : ""}`}
-          onClick={() => setActiveTab("cooks")}
-        >
-          <ChefHat size={17} /> Cook Approvals
-        </button>
-        <button
           className={`tab-btn ${activeTab === "bookings" ? "active" : ""}`}
           onClick={() => setActiveTab("bookings")}
         >
           <Calendar size={17} /> Platform Bookings
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "cooks" ? "active" : ""}`}
+          onClick={() => setActiveTab("cooks")}
+        >
+          <ChefHat size={17} /> Cook Approvals
         </button>
         <button
           className={`tab-btn ${activeTab === "users" ? "active" : ""}`}
@@ -109,6 +119,12 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("cook
           <Eye size={17} /> Site Visits
         </button>
         <button
+          className={`tab-btn ${activeTab === "payouts" ? "active" : ""}`}
+          onClick={() => setActiveTab("payouts")}
+        >
+          <Wallet size={17} /> Payouts
+        </button>
+        <button
           className={`tab-btn ${activeTab === "analytics" ? "active" : ""}`}
           onClick={() => setActiveTab("analytics")}
         >
@@ -122,6 +138,7 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("cook
       {activeTab === "admins" && <AdminManagement />}
       {activeTab === "leads" && <LeadManagement />}
       {activeTab === "coupons" && <CouponManagement />}
+      {activeTab === "payouts" && <AdminPayoutsPanel />}
       {activeTab === "visits" && <VisitStats />}
       {activeTab === "analytics" && <AnalyticsPanel />}
     </div>
@@ -131,7 +148,6 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("cook
 const CookManagement = () => {
   const { data: cooks, loading, refetch } = useFetch("/cooks");
   const showToast = useShowToast();
-  const [filterStatus, setFilterStatus] = useState("all");
   const [showAddCook, setShowAddCook] = useState(false);
 
   const handleApproval = async (cookId, status) => {
@@ -144,31 +160,56 @@ const CookManagement = () => {
     }
   };
 
-  const filteredCooks = cooks
-    ? cooks.filter((c) => (filterStatus === "all" ? true : c.approvalStatus === filterStatus))
-    : [];
+  // Approval directory (P2-18): All / Pending / Approved / Rejected views so
+  // approved and rejected records are never hidden from the directory.
+  // Filtering is a display convenience only — every action re-checks
+  // admin authorization server-side.
+  const [cookFilter, setCookFilter] = useState("pending");
+  const COOK_FILTERS = [
+    { key: "all", label: "All" },
+    { key: "pending", label: "Pending" },
+    { key: "approved", label: "Approved" },
+    { key: "rejected", label: "Rejected" },
+  ];
+  const filteredCooks = (cooks || []).filter((c) =>
+    cookFilter === "all" ? true : (c.approvalStatus || "pending") === cookFilter
+  );
+  const cookCounts = (cooks || []).reduce(
+    (acc, c) => {
+      const k = c.approvalStatus || "pending";
+      acc.all += 1;
+      if (acc[k] !== undefined) acc[k] += 1;
+      return acc;
+    },
+    { all: 0, pending: 0, approved: 0, rejected: 0 }
+  );
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem", flexWrap: "wrap", gap: "0.75rem" }}>
-        <h2 style={{ fontSize: "1.4rem" }}>Cook Profile Verifications</h2>
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+      <div className="admin-section-head admin-section-head--toolbar">
+        <h2>Cook Profile Verifications</h2>
+        <div className="admin-section-actions">
+          <div className="admin-bookings-filters" role="tablist" aria-label="Cook approval filter">
+            {COOK_FILTERS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                role="tab"
+                aria-selected={cookFilter === f.key}
+                className={`admin-filter-chip ${cookFilter === f.key ? "is-active" : ""}`}
+                onClick={() => setCookFilter(f.key)}
+              >
+                {f.label}
+                <span className="admin-filter-count">{cookCounts[f.key] ?? 0}</span>
+              </button>
+            ))}
+          </div>
           <button
             className="btn btn-primary btn-sm"
             onClick={() => setShowAddCook(true)}
           >
             <Plus size={16} /> Add Cook
           </button>
-          {["all", "pending", "approved", "rejected"].map((st) => (
-            <button
-              key={st}
-              onClick={() => setFilterStatus(st)}
-              className={`btn btn-sm ${filterStatus === st ? "btn-primary" : "btn-secondary"}`}
-              style={{ textTransform: "capitalize" }}
-            >
-              {st}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -188,126 +229,181 @@ const CookManagement = () => {
         </div>
       ) : filteredCooks.length > 0 ? (
         <div className="bookings-list-modern">
-          {filteredCooks.map((cook) => (
-            <div key={cook._id} className="admin-cook-card">
-              <div className="acc-head">
-                <div className="acc-ava">
+          {filteredCooks.map((cook) => {
+            const status = cook.approvalStatus || "pending";
+            return (
+            <article key={cook._id} className={`admin-cook-card acc-status-${status}`}>
+              {/* ── Header: avatar + identity + status ── */}
+              <header className="acc-head">
+                <div className="acc-ava acc-ava-wrap">
                   {cook.photoUrl ? (
                     <img src={resolveFileUrl(cook.photoUrl)} alt={cook.user?.name || "Cook"} />
                   ) : (
-                    (cook.user?.name || "C")[0].toUpperCase()
+                    <span className="acc-ava-initial">{(cook.user?.name || "C")[0].toUpperCase()}</span>
                   )}
                   <span
-                    className={`acc-ava-dot acc-dot-${cook.approvalStatus || "pending"}`}
-                    title={cook.approvalStatus}
+                    className={`acc-ava-dot acc-dot-${status}`}
+                    aria-hidden="true"
                   />
                 </div>
                 <div className="acc-id">
                   <h3>{cook.user?.name || "Cook Applicant"}</h3>
-                  <p>
-                    <Mail size={12} /> {cook.user?.email}
+                  <p className="acc-id-email">
+                    <Mail size={12} />
+                    {cook.user?.email}
                   </p>
                 </div>
                 <span
-                  className={`badge acc-badge ${
-                    cook.approvalStatus === "approved"
-                      ? "badge-emerald"
-                      : cook.approvalStatus === "rejected"
-                      ? "badge-rose"
-                      : "badge-amber"
-                  }`}
+                  className={`acc-badge acc-badge-${status}`}
+                  aria-label={`Approval status: ${status}`}
                 >
-                  {cook.approvalStatus === "approved" ? (
-                    <CheckCircle2 size={13} />
-                  ) : cook.approvalStatus === "rejected" ? (
-                    <XCircle size={13} />
+                  {status === "approved" ? (
+                    <CheckCircle2 size={14} />
+                  ) : status === "rejected" ? (
+                    <XCircle size={14} />
                   ) : (
-                    <Clock size={13} />
+                    <Clock size={14} />
                   )}
-                  {cook.approvalStatus?.toUpperCase() || "PENDING"}
+                  {status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "Pending"}
                 </span>
-              </div>
+              </header>
 
-              <div className="acc-chips">
-                <span className="acc-chip">
-                  <Briefcase size={13} /> {cook.experienceYears} yrs experience
-                </span>
-                <span className="acc-chip acc-chip-rate">
-                  <Wallet size={13} /> {formatCurrency(cook.rate)}/hr
-                </span>
+              {/* ── Fact tiles: experience + rate + service area ── */}
+              <div className="acc-stats">
+                <div className="acc-stat">
+                  <span className="acc-stat-ico"><Briefcase size={14} /></span>
+                  <span className="acc-stat-body">
+                    <span className="acc-stat-label">Experience</span>
+                    <span className="acc-stat-value">{cook.experienceYears} yrs</span>
+                  </span>
+                </div>
+                <div className="acc-stat acc-stat-rate">
+                  <span className="acc-stat-ico"><Wallet size={14} /></span>
+                  <span className="acc-stat-body">
+                    <span className="acc-stat-label">Rate</span>
+                    <span className="acc-stat-value">{formatCurrency(cook.rate)}/hr</span>
+                  </span>
+                </div>
                 {cook.serviceArea && (
-                  <span className="acc-chip">
-                    <MapPin size={13} /> {cook.serviceArea}
-                  </span>
-                )}
-                {(cook.specialties || []).slice(0, 3).map((s) => (
-                  <span key={s} className="acc-chip acc-chip-spec">
-                    <ChefHat size={13} /> {s}
-                  </span>
-                ))}
-                {(cook.specialties?.length || 0) > 3 && (
-                  <span className="acc-chip acc-chip-spec">
-                    +{cook.specialties.length - 3} more
-                  </span>
+                  <div className="acc-stat acc-stat-area">
+                    <span className="acc-stat-ico"><MapPin size={14} /></span>
+                    <span className="acc-stat-body">
+                      <span className="acc-stat-label">Service area</span>
+                      <span className="acc-stat-value">{cook.serviceArea}</span>
+                    </span>
+                  </div>
                 )}
               </div>
 
-              {(cook.skills || cook.bio) && <p className="acc-bio">{cook.skills || cook.bio}</p>}
+              {/* ── Specialties ── */}
+              {(cook.specialties || []).length > 0 && (
+                <div className="acc-section">
+                  <span className="acc-section-label">Specialties</span>
+                  <div className="acc-specialties">
+                    {(cook.specialties || []).slice(0, 4).map((s) => (
+                      <span key={s} className="acc-spec-chip">
+                        <ChefHat size={12} /> {s}
+                      </span>
+                    ))}
+                    {(cook.specialties?.length || 0) > 4 && (
+                      <span className="acc-spec-chip acc-spec-more">
+                        +{cook.specialties.length - 4} more
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
 
-              {/* ID verification uploads — click a thumb to preview */}
-              <AdminDocViewer
-                docs={[
-                  { label: "Aadhaar Card", url: cook.aadharCardUrl },
-                  { label: "PAN Card", url: cook.panCardUrl },
-                  { label: "Profile Photo", url: cook.photoUrl },
-                  ...(cook.documents || []).map((d) => ({
-                    label: d.label || "Document",
-                    url: d.url,
-                  })),
-                ]}
-              />
+              {/* ── Bio / skills ── */}
+              {(cook.skills || cook.bio) && (
+                <div className="acc-section">
+                  <span className="acc-section-label">About</span>
+                  <p className="acc-bio-text">{cook.skills || cook.bio}</p>
+                </div>
+              )}
 
-              {/* Admin can attach files the cook sent over email/WhatsApp */}
-              <div
-                style={{
-                  marginTop: "0.75rem",
-                  borderTop: "1px dashed var(--slate-200)",
-                  paddingTop: "0.75rem",
-                }}
-              >
-                <AdminDocUpload
-                  cookId={cook._id}
-                  current={cook}
-                  onUploaded={refetch}
+              {/* ── Verification documents ── */}
+              <div className="acc-section acc-docs-section">
+                <span className="acc-section-label">
+                  <ShieldCheck size={13} />
+                  Verification documents
+                </span>
+                <AdminDocViewer
+                  docs={[
+                    { label: "Aadhaar Card", url: cook.aadharCardUrl },
+                    { label: "PAN Card", url: cook.panCardUrl },
+                    { label: "Profile Photo", url: cook.photoUrl },
+                    ...(cook.documents || []).map((d) => ({
+                      label: d.label || "Document",
+                      url: d.url,
+                    })),
+                  ]}
                 />
               </div>
 
-              {cook.approvalStatus === "pending" && (
-                <div className="booking-actions-row">
-                  <button
-                    className="btn btn-success btn-sm"
-                    onClick={() => handleApproval(cook._id, "approved")}
-                  >
-                    <Check size={16} /> Approve Cook
-                  </button>
-                  <button
-                    className="btn btn-danger-outline btn-sm"
-                    onClick={() => handleApproval(cook._id, "rejected")}
-                  >
-                    <X size={16} /> Reject Application
-                  </button>
+              {/* ── Admin upload on behalf of cook (collapsed by default) ── */}
+              <details className="acc-upload-zone">
+                <summary className="acc-upload-head">
+                  <Upload size={13} />
+                  <span>Attach additional document</span>
+                </summary>
+                <div className="acc-upload-body">
+                  <AdminDocUpload
+                    cookId={cook._id}
+                    current={cook}
+                    onUploaded={refetch}
+                  />
                 </div>
-              )}
-              <div className="booking-actions-row">
-                <Link to={`/admin/cooks/${cook._id}`} className="btn btn-outline btn-sm">
-                  View Full Profile & Earnings
+              </details>
+
+              {/* ── Actions: one clear footer bar ── */}
+              <footer className="acc-actions">
+                <div className="acc-actions-main">
+                  {status === "pending" && (
+                    <>
+                      <button
+                        className="acc-btn acc-btn-approve"
+                        onClick={() => handleApproval(cook._id, "approved")}
+                      >
+                        <Check size={16} /> Approve cook
+                      </button>
+                      <button
+                        className="acc-btn acc-btn-reject"
+                        onClick={() => handleApproval(cook._id, "rejected")}
+                      >
+                        <X size={16} /> Reject
+                      </button>
+                    </>
+                  )}
+                  {status !== "pending" && (
+                    <span className="acc-decision-note">
+                      {status === "approved" ? (
+                        <><CheckCircle2 size={14} /> Application approved</>
+                      ) : (
+                        <><XCircle size={14} /> Application rejected</>
+                      )}
+                    </span>
+                  )}
+                </div>
+                <Link to={`/admin/cooks/${cook._id}`} className="acc-btn-link">
+                  Full dossier
+                  <ArrowRight size={14} />
                 </Link>
-              </div>
-            </div>
-          ))}
+              </footer>
+            </article>
+            );
+          })}
         </div>
       ) : (
-        <p style={{ color: "var(--slate-500)" }}>No cooks found matching this status.</p>
+        <div className="admin-bookings-empty">
+          <span className="admin-bookings-empty-ico"><ChefHat size={22} /></span>
+          <h3>{(cooks || []).length > 0 ? "Nothing matches this filter" : "No cooks yet"}</h3>
+          <p>
+            {(cooks || []).length > 0
+              ? "Try a different status filter to see more applications."
+              : "Cook applications will appear here as soon as they sign up."}
+          </p>
+        </div>
       )}
     </div>
   );
@@ -317,37 +413,123 @@ const BookingManagement = () => {
   const { data: bookings, loading, refetch } = useFetch("/bookings");
   const showToast = useShowToast();
   const [bookingFilter, setBookingFilter] = useState("all");
+  // F-06: per-booking busy state — double-clicking Accept/Complete/Cancel
+  // previously double-fired the PATCH (the cook dashboard already has this).
+  const [actingId, setActingId] = useState(null);
+  // { bookingId, action } awaiting dialog confirmation.
+  const [pendingAction, setPendingAction] = useState(null);
 
-  const handleAction = async (bookingId, action) => {
-    // Same guardrails as the cook dashboard: confirm before changing the slot.
-    if (
-      action === "accept" &&
-      !window.confirm(
-        "Accept this request on behalf of the cook? The slot will be BOOKED and the customer will have 5 minutes to pay."
-      )
-    )
+  // ── Incoming-request popup ──
+  // A customer request interrupts the admin the same way it interrupts the
+  // cook: the newest unseen request auto-opens in BookingRequestModal (older
+  // ones queue behind it), and the list polls every 15s — paused on hidden
+  // tabs — so a request created while this tab is open pops without a manual
+  // refresh.
+  const [requestModalBooking, setRequestModalBooking] = useState(null);
+  const seenRequestIds = useRef(new Set());
+  const requestsInit = useRef(false);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!document.hidden) refetch();
+    }, 15000);
+    const onVisible = () => {
+      if (!document.hidden) refetch();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refetch]);
+
+  const byNewest = (a, b) =>
+    new Date(b?.createdAt).getTime() - new Date(a?.createdAt).getTime() ||
+    String(b._id || "").localeCompare(String(a._id || ""));
+
+  useEffect(() => {
+    if (!bookings) return;
+    const requested = (bookings || []).filter((b) => b?.status === "requested").sort(byNewest);
+    if (!requestsInit.current) {
+      requestsInit.current = true;
+      if (!requested.length) return;
+      // Seed everything except the newest as seen, then pop the newest so an
+      // already-waiting request greets the admin on open too.
+      requested.slice(1).forEach((b) => seenRequestIds.current.add(String(b._id)));
+      const newest = requested[0];
+      seenRequestIds.current.add(String(newest._id));
+      if (!requestModalBooking) {
+        setRequestModalBooking(newest);
+        playAlarmSound();
+      }
       return;
-    if (
-      action === "reject" &&
-      !window.confirm(
-        "Decline this request on behalf of the cook? The customer will be notified and the slot stays open."
-      )
-    )
-      return;
-    if (
-      action === "complete" &&
-      !window.confirm(
-        "Mark this service as completed on behalf of the cook? The customer will be asked to rate the cook."
-      )
-    )
-      return;
-    if (
-      action === "cancel" &&
-      !window.confirm(
-        "Cancel this booking as admin? Paid bookings are refunded and the slot is released."
-      )
-    )
-      return;
+    }
+    const fresh = requested.filter((b) => !seenRequestIds.current.has(String(b._id)));
+    if (!fresh.length) return;
+    fresh.forEach((b) => seenRequestIds.current.add(String(b._id)));
+    if (!requestModalBooking) {
+      setRequestModalBooking([...fresh].sort(byNewest)[0]);
+      playAlarmSound();
+    } else {
+      // Dialog busy — ring so the queued request isn't missed.
+      showToast(
+        `${fresh.length} new booking request${fresh.length === 1 ? "" : "s"} waiting — finish this one first.`,
+        "warning",
+        8000
+      );
+      playAlarmSound();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookings]);
+
+  // After a dialog closes (accept / decline / dismiss), pop the next
+  // still-pending request so stacked arrivals are each answered in turn.
+  const popNextPendingRequest = (excludeId) => {
+    const next = (bookings || [])
+      .filter((b) => b?.status === "requested" && String(b._id) !== String(excludeId || ""))
+      .sort(byNewest)[0];
+    if (next) {
+      seenRequestIds.current.add(String(next._id));
+      setTimeout(() => {
+        setRequestModalBooking(next);
+        playAlarmSound();
+      }, 350);
+    }
+  };
+
+  const ACTION_COPY = {
+    accept: {
+      title: "Accept this request?",
+      message: "Accept on behalf of the cook? The slot will be BOOKED and the customer will have 5 minutes to pay.",
+      confirmLabel: "Accept request",
+      tone: "emerald",
+    },
+    reject: {
+      title: "Decline this request?",
+      message: "Decline on behalf of the cook? The customer will be notified and the slot stays open.",
+      confirmLabel: "Decline request",
+      tone: "danger",
+    },
+    complete: {
+      title: "Mark service completed?",
+      message: "Mark this service as completed on behalf of the cook? The customer will be asked to rate the cook.",
+      confirmLabel: "Mark completed",
+      tone: "emerald",
+    },
+    cancel: {
+      title: "Cancel this booking?",
+      message: "Cancel this booking as admin? Paid bookings are refunded and the slot is released.",
+      confirmLabel: "Cancel booking",
+      tone: "danger",
+    },
+  };
+
+  const handleAction = async () => {
+    const pending = pendingAction;
+    if (actingId || !pending) return;
+    const { bookingId, action } = pending;
+    setPendingAction(null);
+    setActingId(`${bookingId}:${action}`);
     try {
       await API.patch(`/bookings/${bookingId}/${action}`);
       showToast(
@@ -363,18 +545,23 @@ const BookingManagement = () => {
       refetch();
     } catch (err) {
       showToast(err.response?.data?.message || "Action failed", "error");
+    } finally {
+      setActingId(null);
     }
   };
 
-  const isPast = (b) => ["completed", "cancelled", "rejected", "expired"].includes(b.status);
+  const isPast = (b) => ["completed", "cancelled", "rejected", "expired", "unattended"].includes(b.status);
   const isUpcoming = (b) => ["accepted", "confirmed", "in_progress"].includes(b.status);
 
   const newCount = (bookings || []).filter((b) => b.status === "requested").length;
   const upcomingCount = (bookings || []).filter(isUpcoming).length;
   const pastCount = (bookings || []).filter(isPast).length;
 
-  const statusRank = (s) =>
-    ({ requested: 0, accepted: 1, confirmed: 1, in_progress: 2 }[s] ?? 3);
+  // Every tab shows newer bookings first (creation time, newest → oldest).
+  const createdMs = (b) => {
+    const t = new Date(b?.createdAt).getTime();
+    return Number.isFinite(t) ? t : 0;
+  };
 
   const visibleBookings = [...(bookings || [])]
     .filter((b) => {
@@ -383,10 +570,11 @@ const BookingManagement = () => {
       if (bookingFilter === "past") return isPast(b);
       return true;
     })
-    .sort((a, b) => {
-      if (bookingFilter === "past") return new Date(b.date) - new Date(a.date);
-      return statusRank(a.status) - statusRank(b.status) || new Date(a.date) - new Date(b.date);
-    });
+    .sort(
+      (a, b) =>
+        createdMs(b) - createdMs(a) ||
+        String(b._id || "").localeCompare(String(a._id || ""))
+    );
 
   const paymentLabel = (booking) => {
     const paid = booking.payment?.status === "paid";
@@ -396,23 +584,49 @@ const BookingManagement = () => {
     return { paid, amount };
   };
 
+  const prettyService = (s) =>
+    String(s || "General service")
+      .replace(/_/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const STATUS_META = {
+    requested: { label: "New request", pill: "badge-amber" },
+    accepted: { label: "Accepted", pill: "badge-blue" },
+    confirmed: { label: "Confirmed", pill: "badge-blue" },
+    in_progress: { label: "In progress", pill: "badge-purple" },
+    completed: { label: "Completed", pill: "badge-emerald" },
+    cancelled: { label: "Cancelled", pill: "badge-slate" },
+    rejected: { label: "Declined", pill: "badge-rose" },
+    expired: { label: "Expired", pill: "badge-slate" },
+    unattended: { label: "Unattended", pill: "badge-rose" },
+  };
+  const statusMeta = (s) => STATUS_META[s] || { label: String(s || "Booking").replace(/_/g, " "), pill: "badge-slate" };
+
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem", flexWrap: "wrap", gap: "0.75rem" }}>
-        <h2 style={{ fontSize: "1.4rem", margin: 0 }}>All Platform Bookings</h2>
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+    <div className="admin-bookings">
+      <div className="admin-bookings-head">
+        <div className="admin-bookings-title">
+          <h2>All Platform Bookings</h2>
+          <p>{(bookings || []).length} total • {newCount} awaiting cook decision</p>
+        </div>
+        <div className="admin-bookings-filters" role="tablist" aria-label="Filter bookings">
           {[
-            { id: "all", label: `All (${(bookings || []).length})` },
-            { id: "new", label: `New (${newCount})` },
-            { id: "upcoming", label: `Upcoming (${upcomingCount})` },
-            { id: "past", label: `Past Services (${pastCount})` },
+            { id: "all", label: "All", count: (bookings || []).length },
+            { id: "new", label: "New", count: newCount },
+            { id: "upcoming", label: "Upcoming", count: upcomingCount },
+            { id: "past", label: "Past", count: pastCount },
           ].map((f) => (
             <button
               key={f.id}
+              role="tab"
+              aria-selected={bookingFilter === f.id}
               onClick={() => setBookingFilter(f.id)}
-              className={`btn btn-sm ${bookingFilter === f.id ? "btn-primary" : "btn-secondary"}`}
+              className={`admin-filter-chip ${bookingFilter === f.id ? "is-active" : ""}`}
             >
               {f.label}
+              <span className="admin-filter-count">{f.count}</span>
             </button>
           ))}
         </div>
@@ -426,112 +640,199 @@ const BookingManagement = () => {
         <div className="bookings-list-modern">
           {visibleBookings.map((booking) => {
             const { paid, amount } = paymentLabel(booking);
+            const meta = statusMeta(booking.status);
+            const customerName = booking.customer?.name || "Customer";
+            const cookName = booking.cook?.name || "Awaiting cook";
+            const rating = booking.review?.rating;
+            const ref = String(booking._id || "").slice(-6).toUpperCase();
             return (
-            <div key={booking._id} className="booking-item-card">
-              <div className="booking-item-top">
-                <div>
-                  <h3 style={{ margin: 0 }}>Customer: {booking.customer?.name}</h3>
-                  <span style={{ fontSize: "0.85rem", color: "var(--slate-500)" }}>
-                    Cook: {booking.cook?.name || "Assigned Cook"} • Service: {booking.serviceType?.replace(/_/g, " ")}
+            <article key={booking._id} className={`admin-booking-card st-${booking.status}`}>
+              <div className="abc-top">
+                <div className="abc-parties">
+                  <span className="abc-ava abc-ava-customer" aria-hidden="true">
+                    {(customerName || "C").charAt(0).toUpperCase()}
+                  </span>
+                  <div className="abc-route">
+                    <p className="abc-customer">{customerName}</p>
+                    <p className="abc-cook">
+                      <ChefHat size={12} />
+                      <span>{cookName}</span>
+                      <span className="abc-dot" aria-hidden="true" />
+                      <UtensilsCrossed size={12} />
+                      <span>{prettyService(booking.serviceType)}</span>
+                    </p>
+                  </div>
+                  <ArrowRight size={15} className="abc-route-arrow" aria-hidden="true" />
+                  <span className="abc-ava abc-ava-cook" aria-hidden="true">
+                    {(cookName || "C").charAt(0).toUpperCase()}
                   </span>
                 </div>
-                <span className="badge badge-festive">{booking.status?.toUpperCase()}</span>
-              </div>
-
-              <div className="booking-metadata-grid">
-                <div className="meta-field">
-                  <label>Date</label>
-                  <span>{formatDate(booking.date)}</span>
-                </div>
-                <div className="meta-field">
-                  <label>Time</label>
-                  <span>{booking.startTime} - {booking.endTime}</span>
-                </div>
-                <div className="meta-field">
-                  <label>Amount</label>
-                  <span style={{ color: "var(--primary)", fontWeight: 700 }}>
-                    {formatCurrency(amount)}
-                  </span>
-                </div>
-                <div className="meta-field">
-                  <label>Payment</label>
-                  <span
-                    className={`badge ${paid ? "badge-emerald" : "badge-amber"}`}
-                    style={{ alignSelf: "flex-start" }}
-                  >
-                    {paid
-                      ? `PAID${booking.payment?.testMode ? " • TEST" : ""}`
-                      : `UNPAID • ${String(booking.payment?.status || "pending").toUpperCase()}`}
-                  </span>
-                </div>
-                <div className="meta-field">
-                  <label>Customer Rating</label>
-                  <span>
-                    {booking.review ? (
-                      <>★ {booking.review.rating}/5{booking.review.comment ? ` — ${booking.review.comment}` : ""}</>
-                    ) : booking.status === "completed" ? (
-                      "Not rated yet"
+                <div className="abc-badges">
+                  <span className={`badge ${meta.pill}`}>{meta.label}</span>
+                  <span className={`badge ${paid ? "badge-emerald" : "badge-amber"}`}>
+                    {paid ? (
+                      <><Check size={12} /> Paid{booking.payment?.testMode ? " • Test" : ""}</>
                     ) : (
-                      "—"
+                      <><Hourglass size={12} /> {String(booking.payment?.status || "Pending").toUpperCase()}</>
                     )}
                   </span>
+                  {booking.status === "cancelled" && (
+                    <span className="badge badge-slate" title="Who cancelled this booking">
+                      Cancelled by{" "}
+                      {booking.cancelledBy === "cook"
+                        ? `cook (${cookName})`
+                        : booking.cancelledBy === "customer"
+                          ? `customer (${customerName})`
+                          : booking.cancelledBy === "admin"
+                            ? "admin (support)"
+                            : "unknown"}
+                    </span>
+                  )}
                 </div>
               </div>
 
-              {(booking.status === "requested") && (
-                <div className="booking-actions-row">
-                  <button
-                    className="btn btn-success btn-sm"
-                    onClick={() => handleAction(booking._id, "accept")}
-                  >
-                    <Check size={16} /> Admin Accept
-                  </button>
-                  <button
-                    className="btn btn-danger-outline btn-sm"
-                    onClick={() => handleAction(booking._id, "reject")}
-                  >
-                    <X size={16} /> Admin Reject
-                  </button>
-                  <Link to={`/bookings/${booking._id}`} className="btn btn-outline btn-sm">
-                    View Details
-                  </Link>
+              <div className="abc-meta">
+                <div className="abc-meta-item">
+                  <span className="abc-meta-ico"><Calendar size={14} /></span>
+                  <div>
+                    <label>Schedule</label>
+                    <span>{formatDate(booking.date)} • {formatTimeRange12(booking.startTime, booking.endTime, "-") || "Time TBD"}</span>
+                  </div>
                 </div>
+                <div className="abc-meta-item">
+                  <span className="abc-meta-ico"><Banknote size={14} /></span>
+                  <div>
+                    <label>Amount</label>
+                    <span className="abc-amount">{formatCurrency(amount)}</span>
+                  </div>
+                </div>
+                <div className="abc-meta-item">
+                  <span className="abc-meta-ico"><MapPin size={14} /></span>
+                  <div>
+                    <label>Venue</label>
+                    <span title={booking.address || "Address on details page"}>{booking.address || "See details"}</span>
+                  </div>
+                </div>
+                <div className="abc-meta-item">
+                  <span className="abc-meta-ico"><Star size={14} /></span>
+                  <div>
+                    <label>Rating</label>
+                    <span>
+                      {rating ? (
+                        <>★ {rating}/5{booking.review?.comment ? ` — ${booking.review.comment}` : ""}</>
+                      ) : booking.status === "completed" ? (
+                        "Not rated yet"
+                      ) : (
+                        "—"
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {(booking.selectedItems?.length > 0 || booking.guests || booking.durationHours) && (
+                <div className="abc-chips">
+                  {booking.guests ? (
+                    <span className="abc-chip"><Users size={12} /> {booking.guests} guests</span>
+                  ) : null}
+                  {booking.durationHours ? (
+                    <span className="abc-chip"><Clock3 size={12} /> {booking.durationHours}h session</span>
+                  ) : null}
+                  {(booking.selectedItems || []).slice(0, 3).map((item, i) => (
+                    <span key={i} className="abc-chip abc-chip-dish">{item}</span>
+                  ))}
+                  {(booking.selectedItems || []).length > 3 && (
+                    <span className="abc-chip abc-chip-more">+{(booking.selectedItems || []).length - 3} more</span>
+                  )}
+                </div>
+              )}
+              {ref && <span className="abc-ref">#{ref}</span>}
+
+              <div className="abc-actions">
+              {(booking.status === "requested") && (
+                <>
+                  <button
+                    className="btn btn-success btn-sm abc-btn"
+                    onClick={() => setPendingAction({ bookingId: booking._id, action: "accept" })}
+                    disabled={actingId === `${booking._id}:accept`}
+                  >
+                    <Check size={15} /> {actingId === `${booking._id}:accept` ? "Working…" : "Accept"}
+                  </button>
+                  <button
+                    className="btn btn-danger-outline btn-sm abc-btn"
+                    onClick={() => setPendingAction({ bookingId: booking._id, action: "reject" })}
+                    disabled={actingId === `${booking._id}:reject`}
+                  >
+                    <X size={15} /> {actingId === `${booking._id}:reject` ? "Working…" : "Decline"}
+                  </button>
+                  <Link to={`/bookings/${booking._id}`} className="btn btn-outline btn-sm abc-btn abc-btn-details">
+                    Details <ArrowRight size={14} />
+                  </Link>
+                </>
               )}
               {isUpcoming(booking) && (
-                <div className="booking-actions-row">
+                <>
                   <button
-                    className="btn btn-primary btn-sm"
-                    onClick={() => handleAction(booking._id, "complete")}
+                    className="btn btn-primary btn-sm abc-btn"
+                    onClick={() => setPendingAction({ bookingId: booking._id, action: "complete" })}
+                    disabled={actingId === `${booking._id}:complete`}
                   >
-                    <Check size={16} /> Mark Completed
+                    <Check size={15} /> {actingId === `${booking._id}:complete` ? "Working…" : "Complete"}
                   </button>
                   <button
-                    className="btn btn-danger-outline btn-sm"
-                    onClick={() => handleAction(booking._id, "cancel")}
+                    className="btn btn-danger-outline btn-sm abc-btn"
+                    onClick={() => setPendingAction({ bookingId: booking._id, action: "cancel" })}
+                    disabled={actingId === `${booking._id}:cancel`}
                   >
-                    <X size={16} /> Admin Cancel
+                    <X size={15} /> {actingId === `${booking._id}:cancel` ? "Working…" : "Cancel"}
                   </button>
-                  <Link to={`/bookings/${booking._id}`} className="btn btn-outline btn-sm">
-                    View Details
+                  <Link to={`/bookings/${booking._id}`} className="btn btn-outline btn-sm abc-btn abc-btn-details">
+                    Details <ArrowRight size={14} />
                   </Link>
-                </div>
+                </>
               )}
               {isPast(booking) && (
-                <div className="booking-actions-row">
-                  <Link to={`/bookings/${booking._id}`} className="btn btn-outline btn-sm">
-                    View Details
-                  </Link>
-                </div>
+                <Link to={`/bookings/${booking._id}`} className="btn btn-outline btn-sm abc-btn abc-btn-details">
+                  View details <ArrowRight size={14} />
+                </Link>
               )}
-            </div>
+              </div>
+            </article>
             );
           })}
         </div>
       ) : (
-        <p style={{ color: "var(--slate-500)" }}>
-          {bookings && bookings.length > 0 ? "No bookings match this filter." : "No bookings in database."}
-        </p>
+        <div className="admin-bookings-empty">
+          <span className="admin-bookings-empty-ico"><Calendar size={22} /></span>
+          <h3>{bookings && bookings.length > 0 ? "Nothing matches this filter" : "No bookings yet"}</h3>
+          <p>{bookings && bookings.length > 0 ? "Try a different filter to see more platform activity." : "New customer requests will appear here as soon as they are created."}</p>
+        </div>
       )}
+
+      {/* Popup: each incoming customer request auto-opens for the admin with
+          Accept / Decline (on behalf of the cook). Stacked requests queue up
+          and are popped in turn as each dialog closes. */}
+      <BookingRequestModal
+        open={Boolean(requestModalBooking)}
+        booking={requestModalBooking}
+        onBehalf
+        onAction={() => refetch()}
+        onClose={() => {
+          const closing = requestModalBooking;
+          setRequestModalBooking(null);
+          popNextPendingRequest(closing?._id);
+        }}
+      />
+      <ConfirmDialog
+        open={!!pendingAction}
+        title={ACTION_COPY[pendingAction?.action]?.title || "Are you sure?"}
+        message={ACTION_COPY[pendingAction?.action]?.message}
+        confirmLabel={ACTION_COPY[pendingAction?.action]?.confirmLabel || "Confirm"}
+        tone={ACTION_COPY[pendingAction?.action]?.tone || "brand"}
+        busy={!!actingId}
+        onCancel={() => setPendingAction(null)}
+        onConfirm={handleAction}
+      />
     </div>
   );
 };
@@ -539,25 +840,19 @@ const BookingManagement = () => {
 const UserManagement = () => {
   const { data: users, loading, refetch } = useFetch("/auth/users");
   const showToast = useShowToast();
+  // { kind: "status", user, status } | { kind: "delete", user } | null
+  const [pendingUserAction, setPendingUserAction] = useState(null);
 
   // The API stores spec-UPPERCASE roles (ADMIN/COOK/CUSTOMER) — normalize the
   // whole list so the admin-protection check and role badge below work.
   const list = (users || []).map((u) => ({ ...u, role: normalizeRole(u.role) }));
 
-  const handleStatus = async (user, status) => {
+  const handleStatus = async () => {
+    const pending = pendingUserAction;
+    if (!pending || pending.kind !== "status") return;
+    const { user, status } = pending;
     const blocking = status === "suspended";
-    if (
-      blocking &&
-      !window.confirm(
-        `Block ${user.name}'s account? They will be logged out and unable to sign in until unblocked.`
-      )
-    )
-      return;
-    if (
-      !blocking &&
-      !window.confirm(`Unblock ${user.name}'s account? They will be able to sign in again.`)
-    )
-      return;
+    setPendingUserAction(null);
     try {
       await API.patch(`/auth/users/${user._id}/status`, { status });
       showToast(
@@ -572,15 +867,11 @@ const UserManagement = () => {
     }
   };
 
-  const handleDelete = async (user) => {
-    if (
-      !window.confirm(
-        `Permanently delete ${user.name}'s account? This also removes their ${
-          user.role === "cook" ? "cook profile, availability slots, " : ""
-        }bookings, reviews and notifications. This cannot be undone.`
-      )
-    )
-      return;
+  const handleDelete = async () => {
+    const pending = pendingUserAction;
+    if (!pending || pending.kind !== "delete") return;
+    const { user } = pending;
+    setPendingUserAction(null);
     try {
       await API.delete(`/auth/users/${user._id}`);
       showToast(`${user.name}'s account has been permanently deleted.`, "success");
@@ -601,58 +892,64 @@ const UserManagement = () => {
 
   return (
     <div>
-      <h2 style={{ fontSize: "1.4rem", marginBottom: "1.5rem" }}>Registered Accounts</h2>
+      <div className="admin-section-head">
+        <div>
+          <h2>Registered Accounts</h2>
+          <p className="admin-section-sub">Search, block or remove marketplace accounts.</p>
+        </div>
+      </div>
       {loading ? (
         <div className="loading-spinner-wrapper">
           <div className="spinner"></div>
           <p>Loading users...</p>
         </div>
       ) : list.length > 0 ? (
-        <div style={{ background: "white", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-subtle)", overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.95rem" }}>
-            <thead style={{ background: "var(--slate-50)", borderBottom: "1px solid var(--slate-200)" }}>
+        <div className="admin-table-card">
+          <div className="admin-table-wrapper">
+          <table className="admin-table">
+            <thead>
               <tr>
-                <th style={{ padding: "1rem" }}>User Name</th>
-                <th style={{ padding: "1rem" }}>Email</th>
-                <th style={{ padding: "1rem" }}>Role</th>
-                <th style={{ padding: "1rem" }}>Status</th>
-                <th style={{ padding: "1rem" }}>Actions</th>
+                <th>User Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {list.map((u) => (
-                <tr key={u._id} style={{ borderBottom: "1px solid var(--slate-100)" }}>
-                  <td style={{ padding: "1rem", fontWeight: 700 }}>{u.name}</td>
-                  <td style={{ padding: "1rem", color: "var(--slate-600)" }}>{u.email}</td>
-                  <td style={{ padding: "1rem" }}>
+                <tr key={u._id}>
+                  <td data-label="User Name" className="admin-td-strong">{u.name}</td>
+                  <td data-label="Email" className="admin-td-muted admin-td-wrap">{u.email}</td>
+                  <td data-label="Role">
                     <span className="badge badge-festive" style={{ textTransform: "capitalize" }}>
                       {u.role}
                     </span>
                   </td>
-                  <td style={{ padding: "1rem" }}>{statusBadge(u.status)}</td>
-                  <td style={{ padding: "1rem" }}>
+                  <td data-label="Status">{statusBadge(u.status)}</td>
+                  <td data-label="Actions">
                     {u.role === "admin" ? (
-                      <span style={{ color: "var(--slate-400)", fontSize: "0.85rem" }}>Protected</span>
+                      <span className="admin-td-protected">Protected</span>
                     ) : (
-                      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                      <div className="admin-actions">
                         {u.status === "suspended" ? (
                           <button
                             className="btn btn-outline btn-sm"
-                            onClick={() => handleStatus(u, "active")}
+                            onClick={() => setPendingUserAction({ kind: "status", user: u, status: "active" })}
                           >
                             <ShieldCheck size={15} /> Unblock
                           </button>
                         ) : (
                           <button
                             className="btn btn-outline btn-sm"
-                            onClick={() => handleStatus(u, "suspended")}
+                            onClick={() => setPendingUserAction({ kind: "status", user: u, status: "suspended" })}
                           >
                             <Ban size={15} /> Block
                           </button>
                         )}
                         <button
                           className="btn btn-danger-outline btn-sm"
-                          onClick={() => handleDelete(u)}
+                          onClick={() => setPendingUserAction({ kind: "delete", user: u })}
                         >
                           <Trash2 size={15} /> Delete
                         </button>
@@ -663,10 +960,42 @@ const UserManagement = () => {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ) : (
-        <p style={{ color: "var(--slate-500)" }}>No users found.</p>
+        <div className="admin-bookings-empty">
+          <p>No users found.</p>
+        </div>
       )}
+      <ConfirmDialog
+        open={!!pendingUserAction}
+        title={
+          pendingUserAction?.kind === "delete"
+            ? `Delete ${pendingUserAction.user.name}'s account?`
+            : pendingUserAction?.status === "suspended"
+              ? `Block ${pendingUserAction.user.name}'s account?`
+              : `Unblock ${pendingUserAction?.user.name}'s account?`
+        }
+        message={
+          pendingUserAction?.kind === "delete"
+            ? `This permanently removes their ${
+                pendingUserAction.user.role === "cook" ? "cook profile, availability slots, " : ""
+              }bookings, reviews and notifications. This cannot be undone.`
+            : pendingUserAction?.status === "suspended"
+              ? "They will be logged out and unable to sign in until unblocked."
+              : "They will be able to sign in again."
+        }
+        confirmLabel={
+          pendingUserAction?.kind === "delete"
+            ? "Delete account"
+            : pendingUserAction?.status === "suspended"
+              ? "Block account"
+              : "Unblock account"
+        }
+        tone={pendingUserAction?.kind === "delete" || pendingUserAction?.status === "suspended" ? "danger" : "emerald"}
+        onCancel={() => setPendingUserAction(null)}
+        onConfirm={() => (pendingUserAction?.kind === "delete" ? handleDelete() : handleStatus())}
+      />
     </div>
   );
 };
@@ -725,8 +1054,8 @@ const AdminManagement = () => {
       setError("Passwords do not match");
       return;
     }
-    if (form.password.length < 6) {
-      setError("Password must be at least 6 characters long");
+    if (form.password.length < 8) {
+      setError("Password must be at least 8 characters long");
       return;
     }
     setSaving(true);
@@ -875,11 +1204,11 @@ const AdminManagement = () => {
                   type={showPassword ? "text" : "password"}
                   name="password"
                   className="form-control"
-                  placeholder="At least 6 characters"
+                  placeholder="At least 8 characters"
                   value={form.password}
                   onChange={handleChange}
                   required
-                  minLength={6}
+                  minLength={8}
                 />
                 <button
                   type="button"
@@ -985,6 +1314,7 @@ const AdminManagement = () => {
 const LeadManagement = () => {
   const { data: leads, loading, refetch } = useFetch("/leads");
   const showToast = useShowToast();
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   const handleStatus = async (id, status) => {
     try {
@@ -996,8 +1326,10 @@ const LeadManagement = () => {
     }
   };
 
-  const handleDelete = async (lead) => {
-    if (!window.confirm(`Delete enquiry from ${lead.name}? This cannot be undone.`)) return;
+  const handleDelete = async () => {
+    const lead = pendingDelete;
+    if (!lead) return;
+    setPendingDelete(null);
     try {
       await API.delete(`/leads/${lead._id}`);
       showToast("Enquiry deleted", "success");
@@ -1017,6 +1349,7 @@ const LeadManagement = () => {
         </div>
       ) : leads && leads.length > 0 ? (
         <div style={{ background: "white", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-subtle)", overflow: "hidden" }}>
+          <div className="admin-table-wrapper">
           <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.95rem" }}>
             <thead style={{ background: "var(--slate-50)", borderBottom: "1px solid var(--slate-200)" }}>
               <tr>
@@ -1076,7 +1409,7 @@ const LeadManagement = () => {
                     <button
                       className="btn btn-danger-outline btn-sm"
                       style={{ marginLeft: "0.5rem" }}
-                      onClick={() => handleDelete(lead)}
+                      onClick={() => setPendingDelete(lead)}
                     >
                       Delete
                     </button>
@@ -1085,10 +1418,20 @@ const LeadManagement = () => {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ) : (
         <p style={{ color: "var(--slate-500)" }}>No enquiries yet.</p>
       )}
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title={`Delete enquiry from ${pendingDelete?.name}?`}
+        message="This cannot be undone."
+        confirmLabel="Delete enquiry"
+        tone="danger"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 };

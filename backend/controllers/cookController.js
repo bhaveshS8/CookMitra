@@ -8,6 +8,7 @@ const {
   computeStartOptions,
   localDayString,
   parseDay,
+  dayBounds,
   resolveCookAvailability,
   timeToMinutes,
   intervalsOverlap,
@@ -31,6 +32,13 @@ const COOK_EDITABLE_FIELDS = [
   "aadharCardUrl",
   "panCardUrl",
   "photoUrl",
+  // Working hours + blocked dates the cook publishes (schedule-aware slot
+  // engine reads these). updatedAt is set server-side below, never trusted
+  // from the body.
+  "schedule",
+  // Where the cook's 75% is paid — UPI id / bank details. Only the last 4
+  // digits of an account are ever stored.
+  "payoutDetails",
 ];
 
 const pickCookEditable = (obj) => {
@@ -39,6 +47,34 @@ const pickCookEditable = (obj) => {
     if (obj[key] !== undefined) out[key] = obj[key];
   }
   return out;
+};
+
+// Document URLs in the private pipeline are always relative /uploads paths
+// whose filename embeds the OWNER cook's user id. A cook must not be able to
+// claim another cook's file (or an arbitrary path) by writing a foreign URL
+// into their own profile — every /uploads/ doc URL saved must belong to them.
+// Returns an error message string, or null when all URLs check out.
+const DOC_URL_FIELDS = ["aadharCardUrl", "panCardUrl", "photoUrl"];
+const assertDocUrlsOwned = (body, ownerUserId) => {
+  const { ownerIdOf } = require("../utils/storage");
+  for (const key of DOC_URL_FIELDS) {
+    const v = body[key];
+    if (v === undefined || v === null || v === "") continue;
+    if (typeof v !== "string" || v.length > 500) {
+      return `${key} must be text under 500 characters`;
+    }
+    if (v.startsWith("/uploads/")) {
+      const owner = ownerIdOf(v);
+      if (!owner || owner.toLowerCase() !== String(ownerUserId).toLowerCase()) {
+        return "Document does not belong to this cook — upload it first";
+      }
+    } else if (!/^https:\/\/[^/]+\/.+/.test(v)) {
+      // Absolute URLs (Google avatars, CDN) must be plain https links —
+      // never data:/javascript:/relative escapes that reach odd parsers.
+      return `${key} must be an uploaded document or an https link`;
+    }
+  }
+  return null;
 };
 exports.getCooks = async (req, res, next) => {
   try {
@@ -83,13 +119,14 @@ exports.getCooks = async (req, res, next) => {
       ];
     }
 
-    // Contact PII: guests see discovery fields only; signed-in users see the
-    // phone (needed for booking coordination); admins see email too.
+    // Contact PII: guests see discovery fields only; signed-in users see
+    // the same (cook phones are shared post-accept via booking payloads —
+    // nothing in discovery UI consumes them); admins see email too.
     const userFields = !req.user
       ? "name status"
       : isAdmin
         ? "name email phone status"
-        : "name phone status";
+        : "name status";
     // Server-side paging FIRST (bounded in Mongo): without ?page=&limit= the
     // legacy full-array path applies (HARD_CAP 500). With params we skip/limit
     // at the DB so 1000-user browsing never loads the whole collection.
@@ -239,8 +276,9 @@ exports.getCooks = async (req, res, next) => {
 exports.getCook = async (req, res, next) => {
   try {
     const isAdmin = Boolean(req.user) && String(req.user.role).toUpperCase() === "ADMIN";
-    // Guests see discovery fields only (no contact PII); see getCooks.
-    const userFields = !req.user ? "name status" : isAdmin ? "name email phone" : "name phone";
+    // Guests and signed-in non-admins see discovery fields only (no contact
+    // PII); see getCooks. Phones arrive post-accept via booking payloads.
+    const userFields = !req.user ? "name status" : isAdmin ? "name email phone" : "name";
     // Accept either a CookProfile id (/cooks/:id pages) or a User id
     // (e.g. dashboard "View Cook Profile" links over populated cooks).
     let cook = null;
@@ -299,7 +337,7 @@ exports.getCookAdminOverview = async (req, res, next) => {
     const Booking = require("../models/Booking");
     const bookings = await Booking.find({ cook: profile.user._id })
       .populate("customer", "name email phone")
-      .sort({ date: -1 });
+      .sort({ createdAt: -1 });
 
     // Customer ratings for each service (one per booking max) + full list.
     let reviews = [];
@@ -322,13 +360,25 @@ exports.getCookAdminOverview = async (req, res, next) => {
     }
     const bookingsWithReviews = bookings.map((b) => {
       const obj = b.toObject ? b.toObject() : b;
+      // Never expose service-start OTP secrets through the admin overview —
+      // admins manage the profile, they never need the customer OTP. StartedAt
+      // /EndsAt evidence fields are kept (operational, not secret).
+      delete obj.serviceOtp;
+      delete obj.serviceOtpGeneratedAt;
+      delete obj.serviceOtpAttempts;
+      delete obj.serviceOtpLockedUntil;
       return { ...obj, review: reviewByBookingId[b._id.toString()] || null };
     });
 
-    // Earnings count ONLY payments with status "paid" AND a received
-    // razorpay payment id. Pending amounts (no payment id yet) never count.
+    // Earnings count ONLY real captured payments (status "paid" with a
+    // received gateway payment id). Pending amounts never count — and neither
+    // does test-mode/dev money, which carries a synthetic pay_test_* id and
+    // must not inflate the admin earnings picture (payout queue already
+    // excludes testMode the same way).
     const earnedOf = (b) =>
-      b?.payment?.status === "paid" && b?.payment?.razorpayPaymentId
+      b?.payment?.status === "paid" &&
+      b?.payment?.razorpayPaymentId &&
+      !b?.payment?.testMode
         ? Number(b?.payment?.paidAmount || 0)
         : 0;
     const CURRENT_STATUSES = ["requested", "accepted", "confirmed", "in_progress"];
@@ -371,6 +421,10 @@ exports.createCookProfile = async (req, res, next) => {
     }
 
     const body = pickCookEditable(req.body);
+    const docErr = assertDocUrlsOwned(body, req.user.id);
+    if (docErr) {
+      return res.status(400).json({ message: docErr });
+    }
     // Keep legacy `bio` and renamed `skills` in sync — old clients send only
     // bio, the new form sends skills.
     if (body.skills != null && body.bio == null) body.bio = body.skills;
@@ -408,8 +462,31 @@ exports.updateCookProfile = async (req, res, next) => {
     // Whitelist-only: admin-managed fields (approvalStatus, rating, user) can
     // never be written through the generic profile editor.
     const body = pickCookEditable(req.body);
+    const docErr = assertDocUrlsOwned(body, req.user.id);
+    if (docErr) {
+      return res.status(400).json({ message: docErr });
+    }
     if (body.skills != null && body.bio == null) body.bio = body.skills;
     if (body.bio != null && body.skills == null) body.skills = body.bio;
+    // Server-stamped audit times — a client cannot forge these. Guard the
+    // type first: assigning a property on a non-object schedule (string,
+    // number) would throw a TypeError and 500 instead of a clean 400.
+    if (body.schedule !== undefined) {
+      if (typeof body.schedule !== "object" || body.schedule === null || Array.isArray(body.schedule)) {
+        return res.status(400).json({ message: "Schedule must be an object" });
+      }
+      body.schedule.updatedAt = new Date();
+    }
+    if (body.payoutDetails !== undefined) {
+      // Payout destinations are money-critical: format-validated, normalized
+      // and history-trailed server-side (the cook form only hints at formats).
+      const { validatePayoutDetails } = require("../utils/finance");
+      const { ok, reasons, normalized } = validatePayoutDetails(body.payoutDetails);
+      if (!ok) {
+        return res.status(400).json({ message: reasons[0], reasons });
+      }
+      body.payoutDetails = normalized;
+    }
     const profile = await CookProfile.findOneAndUpdate(
       { user: req.user.id },
       body,
@@ -417,6 +494,37 @@ exports.updateCookProfile = async (req, res, next) => {
     );
     if (!profile) {
       return res.status(404).json({ message: "Cook profile not found" });
+    }
+    // Advisory change trail (best-effort): a destination swapped right before
+    // settlement stays auditable. Settlements additionally freeze their own
+    // copy on the booking, so history here is defense in depth.
+    if (body.payoutDetails !== undefined) {
+      try {
+        const d = profile.payoutDetails || {};
+        await CookProfile.updateOne(
+          { user: req.user.id },
+          {
+            $push: {
+              payoutDetailsHistory: {
+                $each: [
+                  {
+                    method: d.method || "",
+                    upiId: d.upiId || "",
+                    holderName: d.holderName || "",
+                    bankName: d.bankName || "",
+                    accountLast4: d.accountLast4 || "",
+                    ifsc: d.ifsc || "",
+                    changedAt: new Date(),
+                  },
+                ],
+                $slice: -20,
+              },
+            },
+          }
+        );
+      } catch {
+        // non-fatal: the save above already succeeded
+      }
     }
     res.json(profile);
   } catch (error) {
@@ -500,16 +608,12 @@ exports.getAvailableSlots = async (req, res, next) => {
 
     const filter = { cook: cookId, status: "available" };
     if (date) {
-      // Match the same LOCAL-midnight day range the booking slot engine uses
-      // (parseDay + dayBounds), instead of new Date("YYYY-MM-DD") which is UTC
-      // midnight and lands on the wrong local day on non-UTC servers.
-      const start = parseDay(date);
-      if (!start || Number.isNaN(start.getTime())) {
+      // IST business-day range (F-08) — matches how slots are stored.
+      const bounds = dayBounds(date);
+      if (!bounds) {
         return res.status(400).json({ message: "Invalid date" });
       }
-      const end = new Date(start);
-      end.setHours(23, 59, 59, 999);
-      filter.date = { $gte: start, $lte: end };
+      filter.date = { $gte: bounds.start, $lte: bounds.end };
     }
 
     const slots = await Availability.find(filter).sort({ date: 1, startTime: 1 });
@@ -597,15 +701,51 @@ exports.adminUploadCookDocs = async (req, res, next) => {
       return res.status(404).json({ message: "Cook profile not found" });
     }
 
+    // F-02 fix: multer names every file after the UPLOADER (req.user.id —
+    // here the admin). Re-own each file to the cook BEFORE attaching, so the
+    // filename owner segment, the static gate, and the signed-URL gate all see
+    // the cook. On any failure the just-uploaded files are removed and the
+    // request fails instead of attaching wrong-owner documents.
+    const uploaded = [
+      ...(req.files?.aadhar || []),
+      ...(req.files?.pan || []),
+      ...(req.files?.photo || []),
+    ];
+    const reownToCook = (file) => {
+      const fs = require("fs");
+      const path = require("path");
+      const { uploadDir } = require("../utils/storage");
+      const parts = String(file.filename).split("_");
+      parts[1] = String(profile.user);
+      const owned = parts.join("_");
+      if (owned !== file.filename) {
+        fs.renameSync(path.join(uploadDir, file.filename), path.join(uploadDir, owned));
+      }
+      return owned;
+    };
     const urls = {};
-    if (req.files?.aadhar?.[0]) {
-      urls.aadharCardUrl = `/uploads/cook-docs/${req.files.aadhar[0].filename}`;
-    }
-    if (req.files?.pan?.[0]) {
-      urls.panCardUrl = `/uploads/cook-docs/${req.files.pan[0].filename}`;
-    }
-    if (req.files?.photo?.[0]) {
-      urls.photoUrl = `/uploads/cook-docs/${req.files.photo[0].filename}`;
+    try {
+      if (req.files?.aadhar?.[0]) {
+        urls.aadharCardUrl = `/uploads/cook-docs/${reownToCook(req.files.aadhar[0])}`;
+      }
+      if (req.files?.pan?.[0]) {
+        urls.panCardUrl = `/uploads/cook-docs/${reownToCook(req.files.pan[0])}`;
+      }
+      if (req.files?.photo?.[0]) {
+        urls.photoUrl = `/uploads/cook-docs/${reownToCook(req.files.photo[0])}`;
+      }
+    } catch (err) {
+      const fs = require("fs");
+      const path = require("path");
+      const { uploadDir } = require("../utils/storage");
+      for (const f of uploaded) {
+        try {
+          fs.unlinkSync(path.join(uploadDir, f.filename));
+        } catch {
+          // best-effort cleanup
+        }
+      }
+      return res.status(500).json({ message: "Could not store the uploaded documents. Please try again." });
     }
     if (!Object.keys(urls).length) {
       return res.status(400).json({ message: "No files uploaded" });

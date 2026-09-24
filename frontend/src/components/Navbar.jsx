@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { logout } from "../store/authSlice";
+import { logoutUser } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
 import API from "../api/axios";
 import {
@@ -98,13 +98,16 @@ const Navbar = () => {
       }
     };
     fetchUnread();
-    // Calmed for scale: 30s -> 60s + hidden-tab pause. The badge is
-    // best-effort; the Notifications page is the source of truth.
+    // Deduplicated polling (Phase 16): the global NotificationPopup already
+    // polls every 30s and dispatches "notifications-updated" on arrivals, and
+    // the Notifications page nudges on reads — so the badge needs no fast
+    // poll of its own. Refresh on event + visibility/focus + a slow 5-minute
+    // safety net (hidden-tab aware). Cuts steady-state inbox polling in half.
     const startPoll = () => {
       stopPoll();
       pollRef.current = setInterval(() => {
         if (!document.hidden) fetchUnread();
-      }, 60000);
+      }, 300000);
     };
     const stopPoll = () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -117,17 +120,27 @@ const Navbar = () => {
         startPoll();
       }
     };
+    const onFocus = () => {
+      if (!document.hidden) fetchUnread();
+    };
     startPoll();
     document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onFocus);
+    // Refresh the badge immediately when a new-notification popup fires
+    // (or a popup tap / Notifications page marks one as read) instead of
+    // waiting for the safety poll.
+    window.addEventListener("notifications-updated", fetchUnread);
     return () => {
       cancelled = true;
       stopPoll();
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("notifications-updated", fetchUnread);
     };
   }, [user]);
 
   const handleLogout = () => {
-    dispatch(logout());
+    dispatch(logoutUser());
     showToast("Logged out successfully", "info");
     setMobileMenuOpen(false);
     navigate("/login");
@@ -326,7 +339,7 @@ const Navbar = () => {
       {/* Mobile Dropdown Drawer */}
       {mobileMenuOpen && (
         <div className="mobile-menu open">
-          <LocationPicker onNavigate={closeMobile} />
+          <LocationPicker />
           {!hideCustomerPages && (
             <>
               <NavLink

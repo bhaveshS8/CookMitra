@@ -5,33 +5,38 @@ import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
 import ReviewForm, { ReviewStars } from "../components/ReviewForm";
 import ComplaintForm from "../components/ComplaintForm";
+import CookAvatar from "../components/CookAvatar";
+import ConfirmDialog from "../components/ConfirmDialog";
 import {
+  formatCurrency,
   formatDate,
   mapsNavigateUrl,
   bookingWhatsAppUrl,
   bookingCookJobWhatsAppUrl,
-  bookingRescheduleWhatsAppUrl,
   hoursCompleteWhatsAppUrl,
   sessionEndDate,
   effectiveServiceWindow,
-  hasServiceHoursStarted,
   formatRemaining,
   isReviewable,
+  isCancelLocked,
   timeAgo,
-  localTodayStr,
+  formatTime12,
+  formatTimeRange12,
+  dayTagLabel,
   SERVICE_DETAILS,
 } from "../utils/constants";
+import { useLocalDay } from "../hooks/useLocalDay";
 import {
   ArrowLeft,
   Calendar,
+  CheckCircle2,
+  AlertCircle,
   Clock,
   MapPin,
   Navigation,
   Phone,
   MessageCircle,
   XCircle,
-  CheckCircle2,
-  AlertCircle,
   Sparkles,
   BellRing,
   Receipt,
@@ -45,25 +50,20 @@ import {
 const BookingDetails = () => {
   const { bookingId } = useParams();
   const user = useSelector((s) => s.auth.user);
+  // Live local day: keeps the Today/Tomorrow badge correct across midnight
+  // even if this page stays open past 12 AM.
+  const today = useLocalDay();
   const showToast = useShowToast();
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [now, setNow] = useState(Date.now());
   // Cook enters the customer's OTP to start the service clock.
   const [otpInput, setOtpInput] = useState("");
   const [startingService, setStartingService] = useState(false);
   const [otpError, setOtpError] = useState("");
-  // Reschedule (customer moves an upcoming booking to a new date/time —
-  // duration and fee stay fixed).
-  const [reschedOpen, setReschedOpen] = useState(false);
-  const [rsDate, setRsDate] = useState("");
-  const [rsStart, setRsStart] = useState("");
-  const [freeStarts, setFreeStarts] = useState([]);
-  const [startsLoading, setStartsLoading] = useState(false);
-  const [reschedSaving, setReschedSaving] = useState(false);
-  const [rsError, setRsError] = useState("");
 
   const fetchDetails = useCallback(async () => {
     setLoading(true);
@@ -110,7 +110,8 @@ const BookingDetails = () => {
   };
 
   const handleCancel = async () => {
-    if (!window.confirm("Are you sure you want to cancel this booking session?")) return;
+    if (cancelling) return;
+    setConfirmCancel(false);
     setCancelling(true);
     try {
       const res = await API.patch(`/bookings/${bookingId}/cancel`);
@@ -123,108 +124,15 @@ const BookingDetails = () => {
     }
   };
 
-  /* ── Reschedule helpers ── */
-  const dayInputStr = (d) => {
-    const dt = new Date(d);
-    if (Number.isNaN(dt.getTime())) return "";
-    const p = (n) => String(n).padStart(2, "0");
-    return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
-  };
-  const addHours = (t, h) => {
-    const m = String(t || "").match(/^(\d{1,2}):(\d{2})/);
-    if (!m) return "";
-    const total = Number(m[1]) * 60 + Number(m[2]) + Math.round(Number(h) * 60);
-    if (!Number.isFinite(total)) return "";
-    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-  };
-  const fmtSlot12 = (t) => {
-    const m = String(t || "").match(/^(\d{1,2}):(\d{2})/);
-    if (!m) return t;
-    let h = Number(m[1]);
-    const ap = h >= 12 ? "PM" : "AM";
-    h = h % 12 || 12;
-    return `${h}:${m[2]} ${ap}`;
-  };
-
-  // Once the service is under way — schedule reached OR cook verified the
-  // OTP — Cancel and Reschedule disappear; it can no longer be moved or
-  // called off here.
-  const serviceStarted = hasServiceHoursStarted(booking);
-  const canReschedule =
-    user?.role === "customer" &&
-    ["requested", "accepted", "confirmed"].includes(booking?.status) &&
-    !serviceStarted;
-
-  // Latest "Rescheduled …" timeline note, if the time was ever moved.
-  const reschedNote =
-    [...(booking?.statusHistory || [])]
-      .reverse()
-      .find((h) => String(h.note || "").startsWith("Rescheduled"))?.note || "";
-  const reschedOldSlot = (() => {
-    const m = String(reschedNote).match(/from (.*) to (.*) by /);
-    return m ? m[1] : "";
-  })();
-
-  const loadFreeStarts = async (dateStr) => {
-    const cuid = booking?.cook?._id || booking?.cook;
-    if (!cuid || !dateStr || !booking?.durationHours) {
-      setFreeStarts([]);
-      return;
-    }
-    setStartsLoading(true);
-    try {
-      const res = await API.get(
-        `/availability/${cuid}?date=${dateStr}&durationHours=${booking.durationHours}`
-      );
-      const list = Array.isArray(res.data) ? res.data : res.data?.slots || [];
-      setFreeStarts(list);
-    } catch {
-      setFreeStarts([]);
-    } finally {
-      setStartsLoading(false);
-    }
-  };
-
-  const openReschedule = () => {
-    setRsError("");
-    setRsStart("");
-    const d = dayInputStr(booking.date) || localTodayStr();
-    setRsDate(d);
-    setReschedOpen(true);
-    loadFreeStarts(d);
-  };
-
-  const handleReschedule = async () => {
-    if (!rsDate || !rsStart) {
-      setRsError("Pick a new date and start time");
-      return;
-    }
-    setReschedSaving(true);
-    setRsError("");
-    try {
-      const res = await API.patch(`/bookings/${bookingId}/reschedule`, {
-        date: rsDate,
-        startTime: rsStart,
-      });
-      setBooking((prev) => ({ ...prev, ...res.data }));
-      setReschedOpen(false);
-      showToast(`Moved to ${rsDate} ${fmtSlot12(rsStart)} — your cook has been notified`, "success");
-    } catch (err) {
-      const msg = err.response?.data?.message || "Could not reschedule — try another time";
-      setRsError(msg);
-      showToast(msg, "error");
-    } finally {
-      setReschedSaving(false);
-    }
-  };
-
-  const reschedWa = bookingRescheduleWhatsAppUrl({
-    cookPhone: booking?.cook?.phone,
-    customerName: user?.name,
-    customerPhone: user?.phone,
-    booking,
-    oldSlot: reschedOldSlot,
-  });
+  // Once the cook verifies the OTP the service clock starts — Cancel
+  // disappears; it can no longer be called off here.
+  // (Gated on the actual clock, mirroring the backend — merely reaching the
+  // scheduled hour is not a start.)
+  // An upcoming booking may be cancelled only until 30 minutes before the
+  // scheduled service start (backend enforces the same cutoff — this only
+  // hides doomed actions).
+  const serviceStarted = Boolean(booking?.serviceStartedAt);
+  const cancelLocked = isCancelLocked(booking, now);
 
   const getStatusBadge = (status) => {
     if (booking?.hoursCompleted && ["accepted", "confirmed", "in_progress"].includes(status)) {
@@ -305,10 +213,19 @@ const BookingDetails = () => {
   const serviceWindow = effectiveServiceWindow(booking);
   const remainingLabel = end ? formatRemaining(end, now) : null;
   const isActive = ["requested", "accepted", "confirmed", "in_progress"].includes(booking.status);
+  // Cancel mirrors the backend 30-minute cutoff (admins exempt there): hide
+  // the button once moves are locked so users aren't offered a doomed action.
+  // The backend also refuses self-serve cancel once the session is live
+  // (in_progress) for non-admins — hide there too so the button never offers
+  // an action the API would reject.
+  const canCancel =
+    isActive &&
+    !serviceStarted &&
+    user?.role !== "admin" &&
+    booking.status !== "in_progress" &&
+    !cancelLocked;
   // OTP service-start state.
   const sessionLive = ["accepted", "confirmed", "in_progress"].includes(booking.status);
-  const showOtpCard =
-    user?.role === "customer" && sessionLive && booking.serviceOtp && !booking.serviceStartedAt;
   const showOtpForm =
     user?.role === "cook" && sessionLive && !booking.serviceStartedAt;
   const startedAtLabel = booking.serviceStartedAt
@@ -370,6 +287,39 @@ const BookingDetails = () => {
           ? "Expired"
           : "";
 
+  // Refund status for a cancelled paid booking — refunds are approved or
+  // rejected by an admin (nothing moves automatically). Unpaid bookings
+  // show nothing: no money moved.
+  const refundLine = (() => {
+    // Refund copy is money-information for the customer (and support). On the
+    // cook's page a cancelled booking shows ONLY the slot-freed line — there
+    // is nothing for the cook to act on here, so never build the string.
+    if (user?.role === "cook") return "";
+    if (booking?.status !== "cancelled") return "";
+    const pay = booking?.payment || {};
+    if (pay.status !== "paid") return "";
+    const amt = pay.refundAmount || pay.paidAmount || booking?.amount;
+    const amtLabel = amt ? ` of ${formatCurrency(amt)}` : "";
+    if (pay.refundStatus === "processed") {
+      return `Refund${amtLabel} initiated — it reaches your account in 5–7 business days.`;
+    }
+    if (pay.refundStatus === "manual") {
+      return pay.testMode
+        ? "Test payment — no real money moved."
+        : "Your refund will be settled manually within 5–7 business days.";
+    }
+    if (pay.refundStatus === "failed") {
+      return "The approved refund hit a gateway error — our team is following up.";
+    }
+    if (pay.refundStatus === "rejected") {
+      return "The refund request was declined — please contact support if you need help.";
+    }
+    if (pay.refundStatus === "pending") {
+      return "Refund requested — our team will review it shortly.";
+    }
+    return "Our team will review your refund shortly.";
+  })();
+
   return (
     <div className="bd-wrap">
       <div className="bd-back">
@@ -406,13 +356,24 @@ const BookingDetails = () => {
         </p>
         <div className="bd-hero-cookline">
           <span className="bd-hero-cook-avatar" aria-hidden="true">
-            {booking.cook?.name?.[0]?.toUpperCase() || "C"}
+            <CookAvatar photoUrl={booking.cook?.photoUrl} name={booking.cook?.name} alt="" />
           </span>
           <span>Hosted by <strong>{booking.cook?.name || "your assigned cook"}</strong></span>
         </div>
         <div className="bd-hero-facts">
           <span className="bd-fact-chip"><Calendar size={13} /> {formatDate(booking.date)}</span>
-          <span className="bd-fact-chip"><Clock size={13} /> {serviceWindow.startTime} – {serviceWindow.endTime}{booking.serviceStartedAt ? " (actual)" : ""}</span>
+          {user?.role === "cook" && (() => {
+            const tag = dayTagLabel(booking, today);
+            return tag ? (
+              <span
+                className={`bd-fact-chip cook-day-tag ${tag === "Today" ? "is-today" : "is-tomorrow"}`}
+                aria-label={`This booking is for ${tag.toLowerCase()}`}
+              >
+                {tag}
+              </span>
+            ) : null;
+          })()}
+          <span className="bd-fact-chip"><Clock size={13} /> {formatTimeRange12(serviceWindow.startTime, serviceWindow.endTime)}{booking.serviceStartedAt ? " (actual)" : ""}</span>
           {booking.durationHours && (
             <span className="bd-fact-chip">{booking.durationHours} hr{Number(booking.durationHours) === 1 ? "" : "s"}</span>
           )}
@@ -454,13 +415,19 @@ const BookingDetails = () => {
           <span>
             This booking {endedLabel.toLowerCase()}
             {booking.status === "rejected" ? " — try another cook or time." : " — the slot is free again."}
+            {booking.status === "cancelled" && refundLine && (
+              <>
+                <br />
+                {refundLine}
+              </>
+            )}
           </span>
         </div>
       )}
 
-      {/* NOTE: no arrival banner here by design — "cook has reached your
-          location" is delivered only as an in-app notification (type
-          "cook_arrived"), not on the booking details page. */}
+      {/* NOTE: no standalone arrival banner here by design — arrival is only
+          recorded via the OTP-verified service start (manual arrival taps
+          are disabled), which already shows its own started banner below. */}
       {booking.hoursCompleted && !booking.review && (
         <div className="bd-banner warn">
           <BellRing size={18} />
@@ -470,123 +437,6 @@ const BookingDetails = () => {
               <MessageCircle size={15} /> Hours Done on WhatsApp
             </a>
           )}
-        </div>
-      )}
-      {reschedNote && (
-        <div className="bd-banner info">
-          <Clock size={18} />
-          <span>{reschedNote}. Session length unchanged.</span>
-          {user?.role === "customer" && reschedWa && (
-            <a href={reschedWa} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">
-              <MessageCircle size={15} /> Send update to cook
-            </a>
-          )}
-        </div>
-      )}
-
-      {/* Reschedule panel (customer moves upcoming bookings; duration fixed) */}
-      {reschedOpen && canReschedule && (
-        <div className="bd-card bd-reschedule-card">
-          <h3 className="bd-card-head">
-            <Calendar size={18} /> Move to a new time
-          </h3>
-          <p className="bd-rs-hint">
-            Session stays {booking.durationHours} hr{Number(booking.durationHours) === 1 ? "" : "s"} — only the date and start
-            time change. Your cook is notified instantly.
-          </p>
-          <div className="bd-rs-grid">
-            <div className="meta-field">
-              <label>New date</label>
-              <input
-                type="date"
-                className="form-control"
-                value={rsDate}
-                min={localTodayStr()}
-                onChange={(e) => {
-                  setRsDate(e.target.value);
-                  setRsStart("");
-                  setRsError("");
-                  loadFreeStarts(e.target.value);
-                }}
-              />
-            </div>
-            <div className="meta-field">
-              <label>New start time</label>
-              {startsLoading ? (
-                <span className="bd-mini-note">Checking free times…</span>
-              ) : freeStarts.length === 0 ? (
-                <span className="bd-mini-note">
-                  No {booking.durationHours}-hr starts that day — try another date.
-                </span>
-              ) : (
-                <div className="slot-list" role="radiogroup" aria-label="Free start times">
-                  {freeStarts.map((s) => (
-                    <button
-                      key={s.startTime}
-                      type="button"
-                      role="radio"
-                      aria-checked={rsStart === s.startTime}
-                      className={`slot-chip ${rsStart === s.startTime ? "selected" : ""}`}
-                      onClick={() => {
-                        setRsStart(s.startTime);
-                        setRsError("");
-                      }}
-                    >
-                      <Clock size={15} /> {fmtSlot12(s.startTime)}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-          {rsStart && (
-            <p className="bd-rs-pick">
-              New slot: <strong>{rsDate} · {fmtSlot12(rsStart)} – {fmtSlot12(addHours(rsStart, booking.durationHours))}</strong>
-            </p>
-          )}
-          {rsError && (
-            <div className="error-alert-banner" style={{ marginBottom: "0.75rem" }}>
-              <AlertCircle size={16} /> {rsError}
-            </div>
-          )}
-          <div className="bd-rs-actions">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              disabled={!rsStart || reschedSaving}
-              onClick={handleReschedule}
-            >
-              <CheckCircle2 size={16} /> {reschedSaving ? "Moving…" : "Confirm new time"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              onClick={() => setReschedOpen(false)}
-              disabled={reschedSaving}
-            >
-              Keep current time
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Service-start OTP: customer shows it, cook enters it. The hours
-          below only start counting once the code is verified. */}
-      {showOtpCard && (
-        <div className="bd-card bd-otp bd-otp-card">
-          <h3 className="bd-card-head center">
-            <Clock size={18} /> Your service-start code
-          </h3>
-          <div
-            className="bd-otp-code"
-            aria-label={`Your service start code is ${booking.serviceOtp}`}
-          >
-            {booking.serviceOtp}
-          </div>
-          <p className="bd-otp-sub">
-            Share this 4-digit code with {booking.cook?.name || "your cook"} when they arrive —
-            your cooking hours start counting only after they enter it.
-          </p>
         </div>
       )}
 
@@ -602,7 +452,7 @@ const BookingDetails = () => {
             </div>
             <div className="bd-clock-meta">
               <span>Started {startedAtLabel}</span>
-              {serviceWindow.endTime && <span>Ends {serviceWindow.endTime}</span>}
+              {serviceWindow.endTime && <span>Ends {formatTime12(serviceWindow.endTime)}</span>}
             </div>
             <p className="bd-clock-sub">
               {overdue
@@ -622,12 +472,12 @@ const BookingDetails = () => {
         const started = !!booking.serviceStartedAt;
         const startLabel = started
           ? startedAtLabel
-          : `${formatDate(booking.date)} • ${booking.startTime || ""}`;
+          : `${formatDate(booking.date)} • ${formatTime12(booking.startTime)}`;
         const endLabel = started && booking.serviceEndsAt
           ? new Date(booking.serviceEndsAt).toLocaleString("en-IN", {
               day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
             })
-          : `${formatDate(booking.date)} • ${booking.endTime || ""}`;
+          : `${formatDate(booking.date)} • ${formatTime12(booking.endTime)}`;
         return (
           <div className="bd-card bd-timings-card">
             <h3 className="bd-card-head">
@@ -700,42 +550,49 @@ const BookingDetails = () => {
       )}
 
       {/* Booking summary: cook + order in one card
-          (session facts live in the hero chips above) */}
+          (session facts live in the hero chips above).
+          Cook viewers never see the cook block (their own number, Call and
+          WhatsApp buttons) — they get the Customer card + Venue below
+          instead. The order (dishes/notes) still shows: it's the job sheet. */}
       <div className="bd-card">
         <h3 className="bd-card-head">
           <Receipt size={18} /> Booking Summary
         </h3>
 
-        {/* Cook */}
-        <div className="bd-cook">
-          <div className="bd-cook-avatar" aria-hidden="true">
-            {booking.cook?.name?.[0]?.toUpperCase() || "C"}
-          </div>
-          <div>
-            <div className="bd-cook-name">{booking.cook?.name || "Assigned Cook"}</div>
-            <div className="bd-cook-sub">
-              {booking.cookServiceArea || "Verified cook"}
+        {user?.role !== "cook" && (
+          <>
+            {/* Cook */}
+            <div className="bd-cook">
+              <div className="bd-cook-avatar" aria-hidden="true">
+                <CookAvatar photoUrl={booking.cook?.photoUrl} name={booking.cook?.name} alt="" />
+              </div>
+              <div>
+                <div className="bd-cook-name">{booking.cook?.name || "Assigned Cook"}</div>
+                <div className="bd-cook-sub">
+                  {booking.cookServiceArea || "Verified cook"}
+                </div>
+                {booking.cook?.phone && (
+                  <div className="bd-cook-phone">
+                    <Phone size={13} /> {booking.cook.phone}
+                  </div>
+                )}
+              </div>
             </div>
-            {booking.cook?.phone && (
-              <div className="bd-cook-phone">
-                <Phone size={13} /> {booking.cook.phone}
+            {(booking.cook?.phone || jobSheetWa || waToCook) && (
+              <div className="bd-row-actions">
+                {booking.cook?.phone && (
+                  <a href={`tel:${booking.cook.phone}`} className="btn btn-outline btn-sm">
+                    <Phone size={15} /> Call
+                  </a>
+                )}
+                {(jobSheetWa || waToCook) && (
+                  <a href={jobSheetWa || waToCook} target="_blank" rel="noreferrer" className="btn btn-success btn-sm">
+                    <MessageCircle size={15} /> {jobSheetWa ? "Send details to cook" : "WhatsApp Cook"}
+                  </a>
+                )}
               </div>
             )}
-          </div>
-        </div>
-        {(booking.cook?.phone || user?.role !== "cook" || jobSheetWa || waToCook) && (
-          <div className="bd-row-actions">
-            {booking.cook?.phone && (
-              <a href={`tel:${booking.cook.phone}`} className="btn btn-outline btn-sm">
-                <Phone size={15} /> Call
-              </a>
-            )}
-            {(jobSheetWa || waToCook) && (
-              <a href={jobSheetWa || waToCook} target="_blank" rel="noreferrer" className="btn btn-success btn-sm">
-                <MessageCircle size={15} /> {jobSheetWa ? "Send details to cook" : "WhatsApp Cook"}
-              </a>
-            )}
-          </div>
+          </>
         )}
 
         {/* Order (only when there is something in it) */}
@@ -761,6 +618,42 @@ const BookingDetails = () => {
         )}
       </div>
 
+      {/* Customer contact — cook only. The backend shares the customer's
+          phone once the booking is accepted (it stays hidden while
+          "requested"); the tel: link opens the device dialer. Reuses the
+          bd-cook card styles so no new CSS is needed. */}
+      {user?.role === "cook" && (
+        <div className="bd-card">
+          <h3 className="bd-card-head">
+            <User size={18} /> Customer
+          </h3>
+          <div className="bd-cook">
+            <div className="bd-cook-avatar" aria-hidden="true">
+              {booking.customer?.name?.[0]?.toUpperCase() || "C"}
+            </div>
+            <div>
+              <div className="bd-cook-name">{booking.customer?.name || "Customer"}</div>
+              {booking.customer?.phone ? (
+                <div className="bd-cook-phone">
+                  <Phone size={13} /> {booking.customer.phone}
+                </div>
+              ) : (
+                <div className="bd-cook-sub">
+                  Number is shared once you accept this booking.
+                </div>
+              )}
+            </div>
+          </div>
+          {booking.customer?.phone && (
+            <div className="bd-row-actions">
+              <a href={`tel:${booking.customer.phone}`} className="btn btn-primary btn-sm">
+                <Phone size={15} /> Call Customer
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Venue card — hidden for customers ("user"): they already know their
           own address. Cooks (and admins) still see it to navigate to the
           customer's location. */}
@@ -772,16 +665,15 @@ const BookingDetails = () => {
           <p className="bd-venue-addr">{booking.address}</p>
           {mapsNavigateUrl(booking) && (
             <div className="bd-row-actions">
-              <a href={mapsNavigateUrl(booking)} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">
-                <Navigation size={15} /> {user?.role === "cook" ? "Go to Customer Location" : "Open in Google Maps"}
+              <a href={mapsNavigateUrl(booking)} target="_blank" rel="noreferrer" className="btn btn-primary">
+                <Navigation size={17} /> {user?.role === "cook" ? "Go to Customer Location" : "Open in Google Maps"}
               </a>
             </div>
           )}
         </div>
       )}
 
-      {/* Timeline (admin only — hidden on customer/cook logins; customers
-          still see the reschedule banner above when the time was moved) */}
+      {/* Timeline (admin only — hidden on customer/cook logins) */}
       {booking.statusHistory?.length > 0 && user?.role === "admin" && (
         <div className="bd-card bd-venue-card">
           <h3 className="bd-card-head">
@@ -801,21 +693,14 @@ const BookingDetails = () => {
         </div>
       )}
 
-      {/* Actions — one of each: move, cancel. Rendered only when at least
-          one applies, so completed/cancelled/expired bookings never show an
-          empty bar. Contextual shares live in their banners. */}
-      {(canReschedule || (isActive && !serviceStarted && user?.role !== "admin")) && (
+      {/* Actions — cancel only. Rendered only when it applies, so
+          completed/cancelled/expired bookings never show an empty bar.
+          Inside 30 minutes of the start it locks — a note says so instead
+          of offering a doomed button. */}
+      {(canCancel || (isActive && !serviceStarted && user?.role !== "admin" && cancelLocked)) && (
         <div className="bd-actionbar">
-          {canReschedule && (
-            <button
-              className="btn btn-outline btn-sm"
-              onClick={() => (reschedOpen ? setReschedOpen(false) : openReschedule())}
-            >
-              <Calendar size={16} /> {reschedOpen ? "Close reschedule" : "Reschedule"}
-            </button>
-          )}
-          {isActive && !serviceStarted && user?.role !== "admin" && (
-            <button className="btn btn-danger-outline btn-sm" onClick={handleCancel} disabled={cancelling}>
+          {canCancel && (
+            <button className="btn btn-danger-outline btn-sm" onClick={() => setConfirmCancel(true)} disabled={cancelling}>
               <XCircle size={16} />{" "}
               {cancelling
                 ? "Cancelling..."
@@ -823,6 +708,12 @@ const BookingDetails = () => {
                   ? "Cancel Request"
                   : "Cancel Booking"}
             </button>
+          )}
+          {!canCancel && cancelLocked && (
+            <p className="bd-mini-note" style={{ margin: 0 }}>
+              Cancellation closes 30 minutes before the start time — please contact
+              support for help with this booking.
+            </p>
           )}
         </div>
       )}
@@ -845,10 +736,30 @@ const BookingDetails = () => {
           <h3 className="bd-card-head">
             <ShieldAlert size={18} /> Report an issue
           </h3>
-          <p className="bd-rs-hint">
+          <p className="bd-note-hint">
             Faced a problem with {booking.customer?.name || "this customer"}? Tell our team — we review every complaint.
           </p>
-          <ComplaintForm bookingId={booking._id} customerName={booking.customer?.name} />
+          <ComplaintForm
+            bookingId={booking._id}
+            filedBy="cook"
+            counterpartyName={booking.customer?.name}
+          />
+        </div>
+      )}
+      {/* Customer: report an issue about this cook / session to the admin. */}
+      {user?.role === "customer" && booking.cook && (
+        <div className="bd-card bd-review-card">
+          <h3 className="bd-card-head">
+            <ShieldAlert size={18} /> Report an issue
+          </h3>
+          <p className="bd-note-hint">
+            Faced a problem with {booking.cook?.name || "your cook"} or this session? Tell our team — we review every complaint.
+          </p>
+          <ComplaintForm
+            bookingId={booking._id}
+            filedBy="customer"
+            counterpartyName={booking.cook?.name}
+          />
         </div>
       )}
       {booking.status === "completed" && booking.review && user?.role !== "customer" && (
@@ -876,6 +787,15 @@ const BookingDetails = () => {
           )}
         </div>
       )}
+      <ConfirmDialog
+        open={confirmCancel}
+        title={booking.status === "requested" ? "Cancel this request?" : "Cancel this booking?"}
+        message="The other party will be notified and the slot will be released. This cannot be undone."
+        confirmLabel="Yes, cancel it"
+        tone="danger"
+        onCancel={() => setConfirmCancel(false)}
+        onConfirm={handleCancel}
+      />
     </div>
   );
 };

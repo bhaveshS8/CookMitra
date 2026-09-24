@@ -1,11 +1,21 @@
-// Standalone regression test for customer reschedule (no deps, no DB).
+// Standalone regression test for the REMOVED self-serve reschedule
+// (no deps, no DB).
 // Run:  node backend/reschedule.test.js  — exits non-zero on any failure.
 //
-// Drives the REAL rescheduleBooking controller with in-memory fakes:
-// Booking.findById serves one live doc, Availability.find is empty (so the
-// engine falls back to the default 08:00–20:00 day), Booking.find serves
-// rival bookings for the overlap check, Notification.create logs payloads.
+// Self-serve reschedule is gone: the only way to move a booking now is to
+// cancel it and create a new one. The API endpoint survives as a permanent
+// 410 tombstone so old/cached clients get an explicit reason instead of a
+// confusing 404. This suite drives the REAL rescheduleBooking controller with
+// in-memory fakes and asserts:
+//   1. every caller (customer, cook, admin, stranger) gets 410
+//   2. the request never touches the DB — no read, no save, no history note
+//   3. no notification is emitted
+//   4. the route is a bare tombstone (no validators left behind)
+//   5. the 30-minute cancel cutoff the details page mirrors still behaves:
+//      open outside the window, locked inside it, fail-open when unknown
 
+const fs = require("fs");
+const path = require("path");
 const Booking = require("./models/Booking");
 const Availability = require("./models/Availability");
 const Notification = require("./models/Notification");
@@ -24,15 +34,17 @@ const dayStr = (offsetDays) => {
   return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
 };
 const TOMORROW = dayStr(1);
-const YESTERDAY = dayStr(-1);
 
 // ── In-memory fakes ─────────────────────────────────────────────────────────
 let bookingDoc = null;
-let rivals = [];
+let saveCalls = 0;
+let dbTouches = 0; // any read or write the tombstone should never make
 const notificationLog = [];
 
-const resetBooking = (overrides = {}) => {
-  const at = (h, m) => new Date();
+const resetBooking = () => {
+  saveCalls = 0;
+  dbTouches = 0;
+  notificationLog.length = 0;
   bookingDoc = {
     _id: "booking1",
     cook: "cook1",
@@ -44,25 +56,37 @@ const resetBooking = (overrides = {}) => {
     durationHours: 3,
     status: "confirmed",
     statusHistory: [],
-    ...overrides,
     save: async function () {
+      saveCalls++;
       return this;
     },
   };
 };
+const snapshot = () => JSON.stringify(bookingDoc);
 
-Booking.findById = async (id) => (String(id) === "booking1" ? bookingDoc : null);
-// No published windows -> default full service day via getDayWindows.
-Availability.find = () => ({ sort: async () => [] });
-// Rival bookings for the overlap check.
-Booking.find = () => ({ select: async () => rivals });
+Booking.findById = async (id) => {
+  dbTouches++;
+  return String(id) === "booking1" ? bookingDoc : null;
+};
+Booking.find = () => {
+  dbTouches++;
+  return { select: async () => [] };
+};
+Booking.updateOne = async () => {
+  dbTouches++;
+  return {};
+};
+Availability.find = () => {
+  dbTouches++;
+  return { sort: async () => [] };
+};
 Notification.create = async (payload) => {
   notificationLog.push(payload);
   return payload;
 };
 
-const call = (userId, body) => {
-  const req = { params: { id: "booking1" }, user: { id: userId }, body };
+const call = (user, body = {}) => {
+  const req = { params: { id: "booking1" }, user, body };
   let status = 200;
   let payload = null;
   const res = {
@@ -83,55 +107,67 @@ const call = (userId, body) => {
 };
 
 (async () => {
-  // 1) Happy path: confirmed 3h booking moves 10:00 -> 14:00 tomorrow.
-  resetBooking();
-  rivals = [];
-  notificationLog.length = 0;
-  let r = await call("cust1", { date: TOMORROW, startTime: "14:00" });
-  check("move succeeds", r.status === 200, "s=" + r.status);
-  check("date/start/end updated", bookingDoc.startTime === "14:00" && bookingDoc.endTime === "17:00", bookingDoc.startTime + "-" + bookingDoc.endTime);
+  // 1) The tombstone answers 410 for every role — including the admin, since
+  //    the feature is gone for everyone, not only self-serve users.
+  for (const [label, user] of [
+    ["customer", { id: "cust1", role: "CUSTOMER" }],
+    ["cook", { id: "cook1", role: "COOK" }],
+    ["admin", { id: "admin1", role: "ADMIN" }],
+    ["stranger", { id: "stranger", role: "CUSTOMER" }],
+  ]) {
+    resetBooking();
+    const before = snapshot();
+    const r = await call(user, { date: TOMORROW, startTime: "14:00" });
+    check(`${label} gets 410`, r.status === 410, "s=" + r.status);
+    check(
+      `${label} leaves the booking untouched`,
+      snapshot() === before && saveCalls === 0 && bookingDoc.statusHistory.length === 0,
+      `saves=${saveCalls} history=${bookingDoc.statusHistory.length}`
+    );
+    check(
+      `${label} touches no DB and sends no notification`,
+      dbTouches === 0 && notificationLog.length === 0,
+      `dbTouches=${dbTouches} notifications=${notificationLog.length}`
+    );
+    if (label === "customer") {
+      const msg = String(r.payload?.message || "");
+      check("message points at cancel + rebook", /cancel/i.test(msg) && /new/i.test(msg), msg);
+    }
+  }
+
+  // 2) The route itself is a bare tombstone: no leftover validators.
+  const routeSrc = fs.readFileSync(path.join(__dirname, "routes", "bookings.js"), "utf8");
+  const reschedIdx = routeSrc.indexOf('"/:id/reschedule"');
+  check("route keeps the /reschedule tombstone path", reschedIdx !== -1);
+  if (reschedIdx !== -1) {
+    const routeBlock = routeSrc.slice(reschedIdx, routeSrc.indexOf(");", reschedIdx));
+    check(
+      "route has no validators (pure 410 tombstone)",
+      !/body\(|validate/.test(routeBlock),
+      routeBlock.replace(/\s+/g, " ").trim()
+    );
+  }
+
+  // 3) Reschedule-only plumbing is gone from the controller surface.
+  check("no reschedule lock alias exported", controller.cancelRescheduleLocked === undefined);
+  check("no renewed-window helper exported", controller.renewedWindow === undefined);
+  check("cancel cutoff helper still exported", typeof controller.cancelLocked === "function");
+
+  // 4) The 30-minute cancel cutoff (what the UI mirrors) still behaves.
+  const tomorrowDoc = { date: new Date(TOMORROW + "T00:00:00"), startTime: "10:00" };
+  check("far-future start is not locked", controller.cancelLocked(tomorrowDoc) === false);
+  // A start 10 minutes from now is inside the window and must be locked. If
+  // the +10min time crossed midnight the start is already past, which is
+  // locked too — either way the answer is true.
+  const soon = new Date(Date.now() + 10 * 60 * 1000);
+  const soonHM = p2(soon.getHours()) + ":" + p2(soon.getMinutes());
+  const todayMidnight = new Date();
+  todayMidnight.setHours(0, 0, 0, 0);
   check(
-    "history records the move",
-    bookingDoc.statusHistory.some((h) => String(h.note || "").startsWith("Rescheduled")),
-    JSON.stringify(bookingDoc.statusHistory.map((h) => h.note))
+    "start in 10 minutes is locked",
+    controller.cancelLocked({ date: todayMidnight, startTime: soonHM }) === true
   );
-  const types = notificationLog.map((n) => n.type);
-  check("cook notified", notificationLog.some((n) => String(n.user) === "cook1" && n.type === "booking_rescheduled"), types.join(","));
-  check("customer confirmed", notificationLog.some((n) => String(n.user) === "cust1" && n.type === "booking_rescheduled"), types.join(","));
-
-  // 2) Overlap with another active booking -> 409.
-  resetBooking();
-  rivals = [{ _id: "rival1", startTime: "15:00", endTime: "18:00", status: "accepted" }];
-  notificationLog.length = 0;
-  r = await call("cust1", { date: TOMORROW, startTime: "14:00" });
-  check("clash refused with 409", r.status === 409, "s=" + r.status + " " + JSON.stringify(r.payload));
-
-  // 3) Stranger (not the customer) -> 403.
-  resetBooking();
-  rivals = [];
-  r = await call("stranger", { date: TOMORROW, startTime: "14:00" });
-  check("non-customer refused with 403", r.status === 403, "s=" + r.status);
-
-  // 4) Completed booking cannot move -> 400.
-  resetBooking({ status: "completed" });
-  r = await call("cust1", { date: TOMORROW, startTime: "14:00" });
-  check("completed refused with 400", r.status === 400, "s=" + r.status);
-
-  // 5) Outside the 08:00–20:00 service day -> 400.
-  resetBooking();
-  r = await call("cust1", { date: TOMORROW, startTime: "06:00" });
-  check("off-hours refused with 400", r.status === 400, "s=" + r.status);
-
-  // 6) Past date -> 400.
-  resetBooking();
-  r = await call("cust1", { date: YESTERDAY, startTime: "10:00" });
-  check("past date refused with 400", r.status === 400, "s=" + r.status);
-
-  // 7) Missing booking -> 404.
-  resetBooking();
-  bookingDoc = null;
-  r = await call("cust1", { date: TOMORROW, startTime: "10:00" });
-  check("unknown booking 404", r.status === 404, "s=" + r.status);
+  check("unknown start fails open", controller.cancelLocked({}) === false);
 
   console.log(failures === 0 ? "ALL TESTS PASSED" : failures + " FAILURES");
   process.exit(failures === 0 ? 0 : 1);

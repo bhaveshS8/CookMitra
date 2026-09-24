@@ -2,7 +2,7 @@
 // Run: node backend/cook-flow.e2e.js  (server on localhost:5000, seeded via node seeds/seed.js).
 // Covers: own profile, public profile, create-profile guard,
 // availability (my slots / set / delete / public), cook bookings dashboard, booking read,
-// accept, manual arrive, reject, complete, customer review +
+// accept, reject, complete, customer review +
 // cook review lists, cook notifications, and role denial (cook cannot author reviews).
 const BASE = process.env.BASE_URL || "http://localhost:5000/api";
 // Safety: this script CREATES real users/bookings in the target database.
@@ -37,9 +37,11 @@ const cut = (s) => (s ? String(s).slice(0, 90) : "");
     step("cook own profile -> 200", me.status === 200 && me.data?.user?.email === "priya@example.com", `${me.status} ${me.data?.approvalStatus || ""}`);
     const profileId = me.data._id;
 
-    // 3. Public profile read (GET /cooks/:id accepts CookProfile id or User id)
+    // 3. Public profile read (GET /cooks/:id accepts CookProfile id or User id).
+    // Contact privacy: guests see discovery fields only (name/status) — the
+    // cook's email/phone are never public (shared post-accept via bookings).
     const pub = await api("GET", `/cooks/${profileId}`);
-    step("public cook profile read -> 200", pub.status === 200 && pub.data?.user?.email === "priya@example.com", `${pub.status}`);
+    step("public cook profile read -> 200 without contact PII", pub.status === 200 && pub.data?.user?.name === "Priya Patil" && pub.data?.user?.email == null && pub.data?.user?.phone == null, `${pub.status}`);
 
     // 4. Create-profile guard: profile already exists -> 400
     const createGuard = await api("POST", "/cooks", { token: cook.token, body: { rate: 500, serviceTypes: ["cook_for_me"] } });
@@ -135,11 +137,12 @@ const cut = (s) => (s ? String(s).slice(0, 90) : "");
     const tracking = await api("GET", `/bookings/${bookingId1}/live`, { token: cook.token });
     step("live tracking endpoint removed -> 404", tracking.status === 404, `${tracking.status}`);
 
-    // 17. Cook marks arrived (manual arrival; status stays accepted)
+    // Manual arrival is disabled (loophole closure): the endpoint must refuse
+    // with 410 and leave the booking untouched.
     const arrived = await api("PATCH", `/bookings/${bookingId1}/arrived`, { token: cook.token });
-    step("cook marks arrived -> 200", arrived.status === 200, `${arrived.status}`);
+    step("manual arrival disabled -> 410", arrived.status === 410, `${arrived.status}`);
     const detail2 = await api("GET", `/bookings/${bookingId1}`, { token: cook.token });
-    step("booking details now show cookArrived", detail2.status === 200 && detail2.data?.cookArrived === true, `${detail2.status} ${detail2.data?.cookArrived}`);
+    step("booking details show cookArrived still false", detail2.status === 200 && detail2.data?.cookArrived === false, `${detail2.status} ${detail2.data?.cookArrived}`);
 
     // 18. 2nd booking (12:00) for the cook to REJECT
     const slot2 = (avail.data || []).find((o) => o.startTime === "12:00");
@@ -148,7 +151,19 @@ const cut = (s) => (s ? String(s).slice(0, 90) : "");
     const rejected = await api("PATCH", `/bookings/${booking2.data._id}/reject`, { token: cook.token });
     step("cook rejects booking -> 200 rejected", rejected.status === 200 && rejected.data?.status === "rejected", `${rejected.status} ${rejected.data?.status || cut(rejected.data)}`);
 
-    // 19. Cook completes the accepted+arrived booking (-> completed, review link issued)
+    // 18b. Customer pays (explicit no-money test checkout on the scratch
+    // server), then the cook starts the service with the customer's OTP —
+    // the real paid -> OTP -> complete journey (unpaid work can never start
+    // or complete).
+    const paid1 = await api("PATCH", `/bookings/${bookingId1}/pay`, { token: cust.token, body: { method: "upi", testMode: true } });
+    step("customer pays (test mode) -> 200 confirmed", paid1.status === 200 && paid1.data?.status === "confirmed", `${paid1.status} ${paid1.data?.status || cut(paid1.data)}`);
+    const custDetail = await api("GET", `/bookings/${bookingId1}`, { token: cust.token });
+    const otp = custDetail.data?.serviceOtp;
+    step("customer can read the service OTP", typeof otp === "string" && otp.length === 4, String(otp || "(none)"));
+    const started = await api("PATCH", `/bookings/${bookingId1}/start-service`, { token: cook.token, body: { otp } });
+    step("cook starts service with OTP -> 200 in_progress", started.status === 200 && started.data?.status === "in_progress", `${started.status} ${started.data?.status || cut(started.data)}`);
+
+    // 19. Cook completes the paid+started booking (-> completed, review link issued)
     const completed = await api("PATCH", `/bookings/${bookingId1}/complete`, { token: cook.token });
     step("cook completes booking -> 200 completed", completed.status === 200 && completed.data?.status === "completed", `${completed.status} ${completed.data?.status || cut(completed.data)}`);
     step("complete issued reviewWhatsAppUrl + reviewUrl", completed.data?.reviewWhatsappUrl && completed.data?.reviewUrl, `${!!completed.data?.reviewWhatsappUrl} ${!!completed.data?.reviewUrl}`);

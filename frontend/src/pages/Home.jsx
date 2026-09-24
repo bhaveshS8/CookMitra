@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { useDispatch, useSelector } from "react-redux";
-import { registerUser } from "../store/authSlice";
-import { useShowToast } from "../store/hooks";
-import { formatDate, isReviewable } from "../utils/constants";
+import { Link } from "react-router-dom";
+import { useSelector } from "react-redux";
+import { formatDate, isReviewable, formatTimeRange12 } from "../utils/constants";
 import API from "../api/axios";
 import heroImg from "../assets/hero.png";
 import DishCarousel from "../components/DishCarousel";
 import HomeCoupons from "../components/HomeCoupons";
 import ReviewForm from "../components/ReviewForm";
+import CookAvatar from "../components/CookAvatar";
+import Register from "./Register";
 import {
   ArrowRight,
   CalendarClock,
@@ -22,13 +22,7 @@ import {
   Compass,
   UserCheck,
   Award,
-  Mail,
-  Lock,
-  User,
-  Phone,
   ShieldCheck,
-  Eye,
-  EyeOff,
   X,
 } from "lucide-react";
 
@@ -106,7 +100,12 @@ const PendingRatingCard = ({ booking, onRated, onDismiss }) => {
       </button>
       <div className="hrc-card-head">
         <span className="hrc-avatar" aria-hidden="true">
-          {booking.cook?.name?.[0]?.toUpperCase() || <ChefHat size={18} />}
+          <CookAvatar
+            photoUrl={booking.cook?.photoUrl}
+            name={booking.cook?.name}
+            alt=""
+            fallback={booking.cook?.name?.[0]?.toUpperCase() || <ChefHat size={18} />}
+          />
         </span>
         <div className="hrc-who">
           <div className="hrc-name">How was {booking.cook?.name || "your cook"}?</div>
@@ -116,7 +115,7 @@ const PendingRatingCard = ({ booking, onRated, onDismiss }) => {
             )}
             {booking.date && <span className="rf-chipmeta">{formatDate(booking.date)}</span>}
             {booking.startTime && booking.endTime && (
-              <span className="rf-chipmeta">{booking.startTime}–{booking.endTime}</span>
+              <span className="rf-chipmeta">{formatTimeRange12(booking.startTime, booking.endTime)}</span>
             )}
           </div>
         </div>
@@ -290,58 +289,6 @@ const HeroStats = () => {
 
 const Home = () => {
   const user = useSelector((s) => s.auth.user);
-  const dispatch = useDispatch();
-  const showToast = useShowToast();
-  const navigate = useNavigate();
-
-  // Registration form state
-  const [regForm, setRegForm] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    password: "",
-    confirmPassword: "",
-    role: "customer",
-  });
-  const [showPassword, setShowPassword] = useState(false);
-  const [regError, setRegError] = useState("");
-  const [regLoading, setRegLoading] = useState(false);
-
-  const handleRegChange = (e) => {
-    setRegForm({ ...regForm, [e.target.name]: e.target.value });
-  };
-
-  const setRole = (role) => {
-    setRegForm((prev) => ({ ...prev, role }));
-  };
-
-  const handleRegSubmit = async (e) => {
-    e.preventDefault();
-    if (regForm.password !== regForm.confirmPassword) {
-      setRegError("Passwords do not match");
-      return;
-    }
-    if (regForm.password.length < 6) {
-      setRegError("Password must be at least 6 characters long");
-      return;
-    }
-
-    setRegLoading(true);
-    setRegError("");
-
-    try {
-      const { confirmPassword, ...data } = regForm;
-      await dispatch(registerUser(data)).unwrap();
-      showToast("Registration successful! Please login to continue.", "success");
-      navigate("/login");
-    } catch (err) {
-      const msg = err.response?.data?.message || "Registration failed. Please try again.";
-      setRegError(msg);
-      showToast(msg, "error");
-    } finally {
-      setRegLoading(false);
-    }
-  };
 
   // Scroll-reveal for page sections (adds .visible as they enter view).
   useEffect(() => {
@@ -577,7 +524,7 @@ const Home = () => {
       <HomeCoupons />
 
       {/* User Registration — guests only; logged-in customers,
-          cooks and admins already have accounts */}
+           cooks and admins already have accounts */}
       {!user && (
         <section className="lead-section">
           <div className="lead-grid">
@@ -597,141 +544,7 @@ const Home = () => {
               </ul>
             </div>
             <div className="lead-form-card home-registration-form">
-              <div className="auth-header" style={{ marginBottom: "1rem" }}>
-                <h3 style={{ fontSize: "1.2rem", marginBottom: "0.25rem" }}>Create an Account</h3>
-                <p style={{ fontSize: "0.85rem", color: "var(--slate-500)", margin: 0 }}>Join India's festive culinary community</p>
-              </div>
-
-              {/* Role Selector */}
-              <div className="role-segmented-control" style={{ marginBottom: "1rem" }}>
-                <button
-                  type="button"
-                  className={`role-segment-btn ${regForm.role === "customer" ? "active" : ""}`}
-                  onClick={() => setRole("customer")}
-                >
-                  <CalendarCheck size={16} />
-                  <span>Book a Cook</span>
-                  <span className="role-hint">For households</span>
-                </button>
-                <button
-                  type="button"
-                  className={`role-segment-btn ${regForm.role === "cook" ? "active" : ""}`}
-                  onClick={() => setRole("cook")}
-                >
-                  <ChefHat size={16} />
-                  <span>Join as Cook</span>
-                  <span className="role-hint">Offer services</span>
-                </button>
-              </div>
-
-              {regError && (
-                <div className="error-alert-banner" style={{ padding: "0.5rem 0.75rem", fontSize: "0.82rem", marginBottom: "0.75rem" }}>
-                  {regError}
-                </div>
-              )}
-
-              <form onSubmit={handleRegSubmit}>
-                <div className="booking-form-group">
-                  <label>Full Name</label>
-                  <div className="input-with-icon">
-                    <User size={16} className="input-icon-prefix" />
-                    <input
-                      type="text"
-                      name="name"
-                      className="form-control"
-                      placeholder="e.g. Priya Sharma"
-                      value={regForm.name}
-                      onChange={handleRegChange}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="booking-form-group">
-                  <label>Email Address</label>
-                  <div className="input-with-icon">
-                    <Mail size={16} className="input-icon-prefix" />
-                    <input
-                      type="email"
-                      name="email"
-                      className="form-control"
-                      placeholder="name@example.com"
-                      value={regForm.email}
-                      onChange={handleRegChange}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="booking-form-group">
-                  <label>Phone Number</label>
-                  <div className="input-with-icon">
-                    <Phone size={16} className="input-icon-prefix" />
-                    <input
-                      type="tel"
-                      name="phone"
-                      className="form-control"
-                      placeholder="e.g. 9876543210"
-                      value={regForm.phone}
-                      onChange={handleRegChange}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="booking-form-group">
-                  <label>Password</label>
-                  <div className="input-with-icon password-input-wrapper">
-                    <Lock size={16} className="input-icon-prefix" />
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      name="password"
-                      className="form-control"
-                      placeholder="At least 6 characters"
-                      value={regForm.password}
-                      onChange={handleRegChange}
-                      required
-                      minLength={6}
-                    />
-                    <button
-                      type="button"
-                      className="password-toggle-btn"
-                      onClick={() => setShowPassword(!showPassword)}
-                      aria-label="Toggle password view"
-                    >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="booking-form-group">
-                  <label>Confirm Password</label>
-                  <div className="input-with-icon">
-                    <Lock size={16} className="input-icon-prefix" />
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      name="confirmPassword"
-                      className="form-control"
-                      placeholder="Confirm your password"
-                      value={regForm.confirmPassword}
-                      onChange={handleRegChange}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="btn btn-primary btn-block btn-lg"
-                  disabled={regLoading}
-                >
-                  {regLoading ? "Creating Account..." : "Create Account"}
-                </button>
-              </form>
-
-              <div className="auth-footer-prompt" style={{ marginTop: "0.75rem", fontSize: "0.85rem" }}>
-                Already have an account? <Link to="/login">Sign in</Link>
-              </div>
+              <Register />
             </div>
           </div>
         </section>

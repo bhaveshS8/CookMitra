@@ -21,9 +21,16 @@ import API from "../api/axios";
 import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
 import { AnalyticsEvents, track } from "../utils/analytics";
-import { SERVICE_DETAILS, formatCurrency, formatDate } from "../utils/constants";
+import { SERVICE_DETAILS, formatCurrency, formatDate, formatTimeRange12 } from "../utils/constants";
 
 const WINDOW_MS = 5 * 60 * 1000; // 5-minute payment window
+// Explicit test payments (no real money) are offered only when the gateway
+// is unconfigured AND the build opts in (REACT_APP_ALLOW_TEST_PAYMENTS=true)
+// or is running on the CRA dev server. Production builds (NODE_ENV=
+// "production") never auto-enable: they show an honest error instead.
+const TEST_PAY_ENABLED =
+  process.env.REACT_APP_ALLOW_TEST_PAYMENTS === "true" ||
+  process.env.NODE_ENV === "development";
 // Calmed for scale (see BookingWaiting): 8s halves sustained poll rps.
 const POLL_MS = 8000;
 const REDIRECT_S = 6;
@@ -80,6 +87,10 @@ const BookingPayment = () => {
   const [redirectIn, setRedirectIn] = useState(REDIRECT_S);
   const [cookWaUrl, setCookWaUrl] = useState(null);
   const [selfWaUrl, setSelfWaUrl] = useState(null);
+  // True when the order endpoint answered 503 (gateway unconfigured). The UI
+  // then offers an EXPLICIT test-payment button (dev builds only) instead of
+  // silently entering test mode — a 503 is never payment success (P1-7).
+  const [gatewayDown, setGatewayDown] = useState(false);
   const handledRef = useRef(false);
   const aliveRef = useRef(true);
   const pollRef = useRef(null);
@@ -178,7 +189,22 @@ const BookingPayment = () => {
   // confirm with the verified signature. Nothing is ever marked paid without
   // gateway verification, and nothing auto-opens WhatsApp — the success
   // screen offers optional share buttons instead.
+  // Synchronous double-tap guard (F-03): React state lags a render, so two
+  // rapid taps both pass a `phase === "processing"` check and mint two
+  // gateway orders. The ref flips in the same tick — the loser returns
+  // before any network call. The backend in-flight mint guard is the
+  // second layer; this is UX protection, not security.
+  const payingRef = useRef(false);
   const payNow = async () => {
+    if (payingRef.current || phase === "processing") return;
+    payingRef.current = true;
+    try {
+      await payNowInner();
+    } finally {
+      payingRef.current = false;
+    }
+  };
+  const payNowInner = async () => {
     if (phase === "processing") return;
     setPhase("processing");
     completedRef.current = false;
@@ -207,9 +233,26 @@ const BookingPayment = () => {
         order = res.data;
       } catch (err) {
         if (err.response?.status === 503) {
-          // Gateway keys missing — testing mode: one click completes a test
-          // payment (no real money). Vanishes once real keys are added.
-          await confirmTestPayment();
+          // Gateway unconfigured (no Razorpay keys). NEVER silently enter
+          // test mode (P1-7): a 503 is infrastructure failure, not payment
+          // success. Offer an explicit, clearly-labelled test payment ONLY
+          // when the build opts in via REACT_APP_ALLOW_TEST_PAYMENTS=true
+          // (dev/staging); production builds show an honest error instead.
+          handledRef.current = false;
+          setPhase("pay");
+          if (TEST_PAY_ENABLED) {
+            setGatewayDown(true);
+            showToast(
+              "Payment gateway is not configured — you may record an explicit TEST payment (no real money).",
+              "error"
+            );
+          } else {
+            setGatewayDown(false);
+            showToast(
+              "Online payment is temporarily unavailable. Please try again later — no money was charged.",
+              "error"
+            );
+          }
           return;
         }
         setPhase("pay");
@@ -219,7 +262,26 @@ const BookingPayment = () => {
         );
         return;
       }
-      // 2) Razorpay Checkout.
+      // 2) Fully-discounted session: server confirms at no cost — no gateway.
+      if (order?.free || order?.amountPaise === 0 || Number(order?.amountPaise || 0) <= 0) {
+        const res = await API.patch(`/bookings/${bookingId}/pay`, { method, payment: null });
+        completedRef.current = true;
+        setBooking((prev) => ({ ...(prev || {}), ...(res.data || {}) }));
+        setCookWaUrl(res.data?.cookWhatsappUrl || null);
+        setSelfWaUrl(res.data?.customerWhatsappUrl || null);
+        setPhase("success");
+        track(AnalyticsEvents.PAYMENT_SUCCESS, {
+          booking_id: String(bookingId || ""),
+          amount: 0,
+          method: "discount",
+        });
+        showToast("Discount covered the full fee — booking confirmed!", "success");
+        setTimeout(() => {
+          if (aliveRef.current) navigate(`/bookings/${bookingId}`, { replace: true });
+        }, 6000);
+        return;
+      }
+      // 3) Razorpay Checkout.
       const loaded = await loadRazorpay();
       if (!loaded || !window.Razorpay) {
         setPhase("pay");
@@ -234,7 +296,7 @@ const BookingPayment = () => {
         currency: order.currency || "INR",
         order_id: order.orderId,
         name: "CookMitra",
-        description: `Cook booking ${formatDate(booking?.date)} ${booking?.startTime}–${booking?.endTime}`,
+        description: `Cook booking ${formatDate(booking?.date)} ${formatTimeRange12(booking?.startTime, booking?.endTime, "-")}`,
         prefill: { contact: user?.phone || "", email: user?.email || "" },
         theme: { color: "#e8590c" },
         ...(HIDE_METHODS[method]
@@ -271,6 +333,19 @@ const BookingPayment = () => {
               // Server freed the slot — the window closed mid-payment.
               setPhase("expired");
               showToast(err.response?.data?.message || "Payment window expired — slot released.", "error");
+            } else if (err.response?.status === 409) {
+              // Slot taken by another booking, or a duplicate confirm raced.
+              // If the server kept this booking paid, treat as success.
+              if (err.response?.data?.alreadyPaid || err.response?.data?.status === "confirmed") {
+                completedRef.current = true;
+                setBooking((prev) => ({ ...(prev || {}), ...(err.response?.data || {}) }));
+                setPhase("success");
+                showToast("Payment already recorded — booking confirmed!", "success");
+              } else {
+                handledRef.current = false;
+                setPhase("pay");
+                showToast(err.response?.data?.message || "This slot was just taken — please pick another time.", "error");
+              }
             } else {
               handledRef.current = false;
               setPhase("pay");
@@ -312,6 +387,8 @@ const BookingPayment = () => {
   // gateway is unconfigured, and only accepted by servers explicitly opted
   // in via ALLOW_TEST_PAYMENTS=true.
   const confirmTestPayment = async () => {
+    if (payingRef.current) return;
+    payingRef.current = true;
     try {
       const res = await API.patch(`/bookings/${bookingId}/pay`, { method, testMode: true });
       completedRef.current = true;
@@ -332,6 +409,8 @@ const BookingPayment = () => {
         setPhase("pay");
         showToast(err.response?.data?.message || "Test payment failed — please try again.", "error");
       }
+    } finally {
+      payingRef.current = false;
     }
   };
 
@@ -497,7 +576,7 @@ const BookingPayment = () => {
             <div className="bf-summary">
               <span className="bf-chip"><UtensilsCrossed size={14} /> {service.label || "Home cooking"}</span>
               <span className="bf-chip">📅 {formatDate(booking?.date)}</span>
-              <span className="bf-chip">⏰ {booking?.startTime} – {booking?.endTime}</span>
+              <span className="bf-chip">⏰ {formatTimeRange12(booking?.startTime, booking?.endTime)}</span>
               {booking?.guests ? <span className="bf-chip"><Users size={14} /> {booking.guests} guests</span> : null}
             </div>
 
@@ -547,9 +626,27 @@ const BookingPayment = () => {
               <span className="bf-amount">{formatCurrency(amount)}</span>
               {items.length ? <span className="bf-amount-note">{items.join(" • ")}</span> : null}
             </div>
-            <button className="btn btn-primary bf-pay-btn" onClick={payNow}>
-              Pay {formatCurrency(amount)} & Confirm
+            <button
+              className="btn btn-primary bf-pay-btn"
+              onClick={payNow}
+              disabled={phase === "processing"}
+              aria-busy={phase === "processing"}
+            >
+              {phase === "processing" ? "Starting payment…" : `Pay ${formatCurrency(amount)} & Confirm`}
             </button>
+            {gatewayDown && TEST_PAY_ENABLED ? (
+              <div className="bf-testmode" role="alert" style={{ marginTop: "0.75rem", padding: "0.75rem", border: "2px dashed #e8590c", borderRadius: "8px" }}>
+                <strong>TEST MODE — no real money will move.</strong>
+                <p style={{ margin: "0.25rem 0 0.5rem" }}>
+                  The payment gateway is not configured on this build. Recording a test
+                  payment confirms the booking for testing only; it will be flagged for
+                  admin review and excluded from real payouts/refunds.
+                </p>
+                <button className="btn btn-outline bf-btn" onClick={confirmTestPayment}>
+                  Record explicit TEST payment (no charge)
+                </button>
+              </div>
+            ) : null}
             <p className="bf-consent">
               By paying you agree to our <Link to="/terms">Terms</Link> and{" "}
               <Link to="/refunds">Refund Policy</Link>. Payments are processed

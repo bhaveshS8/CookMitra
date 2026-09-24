@@ -3,7 +3,7 @@
 // their filled info intact.
 //
 // Shapes:
-//   { kind: "on-demand", form, selectedSlot, coords, savedAt }
+//   { kind: "on-demand", form, selectedSlot, coords, couponCode, savedAt }
 //   { kind: "cook-profile", cookId, form, coords, savedAt }
 
 const DRAFT_KEY = "cm-booking-draft-v1";

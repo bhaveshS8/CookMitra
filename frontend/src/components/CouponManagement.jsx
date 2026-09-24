@@ -6,6 +6,7 @@ import { useFetch } from "../hooks/useFetch";
 import { useShowToast } from "../store/hooks";
 import { formatDate } from "../utils/constants";
 import CouponModal from "./CouponModal";
+import ConfirmDialog from "./ConfirmDialog";
 import { Plus, Pencil, Trash2, Power, PowerOff } from "lucide-react";
 
 const CouponManagement = () => {
@@ -13,6 +14,7 @@ const CouponManagement = () => {
   const showToast = useShowToast();
   const [showModal, setShowModal] = useState(false);
   const [editingCoupon, setEditingCoupon] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   const openCreate = () => {
     setEditingCoupon(null);
@@ -38,8 +40,10 @@ const CouponManagement = () => {
     }
   };
 
-  const handleDelete = async (coupon) => {
-    if (!window.confirm(`Delete coupon ${coupon.code}? This cannot be undone (coupons that were already used are kept instead).`)) return;
+  const handleDelete = async () => {
+    const coupon = pendingDelete;
+    if (!coupon) return;
+    setPendingDelete(null);
     try {
       await API.delete(`/coupons/${coupon._id}`);
       showToast(`Coupon ${coupon.code} deleted`, "success");
@@ -71,10 +75,10 @@ const CouponManagement = () => {
 
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem", flexWrap: "wrap", gap: "0.75rem" }}>
+      <div className="admin-section-head">
         <div>
-          <h2 style={{ fontSize: "1.4rem", margin: 0 }}>Promo Coupons</h2>
-          <p style={{ color: "var(--slate-500)", margin: "0.25rem 0 0", fontSize: "0.9rem" }}>
+          <h2>Promo Coupons</h2>
+          <p className="admin-section-sub">
             Create, edit or retire discount codes. Active offers appear on the home page automatically.
           </p>
         </div>
@@ -89,26 +93,26 @@ const CouponManagement = () => {
           <p>Loading coupons...</p>
         </div>
       ) : coupons && coupons.length > 0 ? (
-        <div style={{ background: "white", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-subtle)", overflow: "auto" }}>
-          <table className="coupon-table" style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.95rem", minWidth: 760 }}>
-            <thead style={{ background: "var(--slate-50)", borderBottom: "1px solid var(--slate-200)" }}>
+        <div className="admin-table-card">
+          <table className="admin-table coupon-table">
+            <thead>
               <tr>
-                <th style={{ padding: "1rem" }}>Coupon</th>
-                <th style={{ padding: "1rem" }}>Discount</th>
-                <th style={{ padding: "1rem" }}>Limits</th>
-                <th style={{ padding: "1rem" }}>Window</th>
-                <th style={{ padding: "1rem" }}>Status</th>
-                <th style={{ padding: "1rem" }}>Actions</th>
+                <th>Coupon</th>
+                <th>Discount</th>
+                <th>Limits</th>
+                <th>Window</th>
+                <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {coupons.map((c) => (
-                <tr key={c._id} style={{ borderBottom: "1px solid var(--slate-100)" }}>
-                  <td style={{ padding: "1rem" }}>
+                <tr key={c._id}>
+                  <td data-label="Coupon">
                     <span className="coupon-code-chip">{c.code}</span>
                     {c.description ? <div className="coupon-desc">{c.description}</div> : null}
                   </td>
-                  <td style={{ padding: "1rem" }}>
+                  <td data-label="Discount">
                     <div className="coupon-pct">
                       {c.discountType === "flat" ? `₹${c.flatAmount} OFF` : `${c.percent}% OFF`}
                     </div>
@@ -120,13 +124,13 @@ const CouponManagement = () => {
                       {c.firstBookingOnly ? " • 1st booking" : ""}
                     </div>
                   </td>
-                  <td style={{ padding: "1rem" }}>
+                  <td data-label="Limits">
                     <div className="coupon-desc">{usageLabel(c)}</div>
                   </td>
-                  <td style={{ padding: "1rem", whiteSpace: "nowrap" }}>{windowLabel(c)}</td>
-                  <td style={{ padding: "1rem" }}>{statusBadge(c)}</td>
-                  <td style={{ padding: "1rem" }}>
-                    <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <td data-label="Window" className="admin-td-nowrap">{windowLabel(c)}</td>
+                  <td data-label="Status">{statusBadge(c)}</td>
+                  <td data-label="Actions">
+                    <div className="admin-actions">
                       <button className="btn btn-outline btn-sm" onClick={() => openEdit(c)} title="Edit coupon">
                         <Pencil size={15} /> Edit
                       </button>
@@ -137,7 +141,7 @@ const CouponManagement = () => {
                       >
                         {c.active === false ? <><Power size={15} /> Activate</> : <><PowerOff size={15} /> Deactivate</>}
                       </button>
-                      <button className="btn btn-danger-outline btn-sm" onClick={() => handleDelete(c)} title="Delete coupon (only when never used)">
+                      <button className="btn btn-danger-outline btn-sm" onClick={() => setPendingDelete(c)} title="Delete coupon (only when never used)">
                         <Trash2 size={15} /> Delete
                       </button>
                     </div>
@@ -148,8 +152,8 @@ const CouponManagement = () => {
           </table>
         </div>
       ) : (
-        <div style={{ background: "white", border: "1px dashed var(--slate-300)", borderRadius: "var(--radius-lg)", padding: "2rem", textAlign: "center" }}>
-          <p style={{ color: "var(--slate-500)", margin: 0 }}>No coupons yet — create the first one!</p>
+        <div className="admin-bookings-empty">
+          <p>No coupons yet — create the first one!</p>
         </div>
       )}
 
@@ -161,6 +165,15 @@ const CouponManagement = () => {
           setShowModal(false);
           refetch();
         }}
+      />
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title={`Delete coupon ${pendingDelete?.code}?`}
+        message="This cannot be undone (coupons that were already used are kept instead)."
+        confirmLabel="Delete coupon"
+        tone="danger"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={handleDelete}
       />
     </div>
   );

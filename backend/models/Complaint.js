@@ -1,9 +1,18 @@
 const mongoose = require("mongoose");
 
-// A cook's complaint about a customer (filed from a booking, or standalone).
-// Admins triage these: open → in_review → resolved (or rejected when invalid).
+// A complaint about the other side of a booking. Cooks complain about
+// customers; customers complain about cooks (always tied to one of their own
+// bookings so the counterparty is derived, never user-typed). Admins triage
+// these: open → in_review → resolved (or rejected when invalid).
 const complaintSchema = new mongoose.Schema(
   {
+    // Who wrote it — decides who gets status updates and whose "my
+    // complaints" list it appears in.
+    filedBy: {
+      type: String,
+      enum: ["cook", "customer"],
+      default: "cook",
+    },
     cook: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -29,6 +38,8 @@ const complaintSchema = new mongoose.Schema(
         "address",
         "no_show",
         "safety",
+        "quality",
+        "hygiene",
         "other",
       ],
       default: "other",
@@ -57,6 +68,7 @@ const complaintSchema = new mongoose.Schema(
 );
 
 complaintSchema.index({ cook: 1, status: 1 });
+complaintSchema.index({ customer: 1, filedBy: 1, status: 1 });
 complaintSchema.index({ status: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Complaint", complaintSchema);

@@ -30,6 +30,9 @@ frontend/devserver.log
 # Test artifacts
 backend/test-output.txt
 backend/test-result.txt
+backend/concurrency-report-*.json
+backend/test-env*.ps1
+backend/scratch-*.js
 
 # OS / editor
 .vscode/

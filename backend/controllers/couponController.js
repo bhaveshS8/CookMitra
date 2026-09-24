@@ -67,7 +67,9 @@ exports.listActiveCoupons = async (req, res, next) => {
         ],
       })
         .select(
-          "code description discountType percent flatAmount maxDiscount minOrder firstBookingOnly validTo"
+          // perUserLimit is customer-facing ("one per customer") — keep it
+          // in the public list alongside the other enforced terms.
+          "code description discountType percent flatAmount maxDiscount minOrder firstBookingOnly perUserLimit validTo"
         )
         .sort({ percent: -1 }),
       pg
@@ -104,12 +106,42 @@ exports.listCoupons = async (req, res, next) => {
   }
 };
 
+// Phase 12: explicit write-allowlist (mass assignment). Only these fields may
+// ever reach the Coupon model — usage accounting (usedCount/usedBy/createdBy)
+// is server-owned, and $-prefixed keys can never become update operators.
+const COUPON_WRITABLE = [
+  "code",
+  "description",
+  "discountType",
+  "percent",
+  "flatAmount",
+  "maxDiscount",
+  "minOrder",
+  "usageLimit",
+  "perUserLimit",
+  "firstBookingOnly",
+  "applicableServices",
+  "validFrom",
+  "validTo",
+  "active",
+];
+const pickCouponWritable = (obj) => {
+  const out = {};
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return out;
+  for (const key of COUPON_WRITABLE) {
+    if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] !== undefined) {
+      out[key] = obj[key];
+    }
+  }
+  return out;
+};
+
 // POST /api/coupons — admin: create a coupon. Usage accounting is
 // server-owned: usedCount/usedBy can never be set at creation (update strips
 // them too) — otherwise promo history could be forged.
 exports.createCoupon = async (req, res, next) => {
   try {
-    const { usedCount, usedBy, ...body } = req.body;
+    const body = pickCouponWritable(req.body);
     const coupon = await Coupon.create({
       ...body,
       code: normalizeCode(req.body.code),
@@ -128,8 +160,8 @@ exports.createCoupon = async (req, res, next) => {
 // usedCount/usedBy history is append-only: edits can never rewrite it.
 exports.updateCoupon = async (req, res, next) => {
   try {
-    const { usedCount, usedBy, createdBy, code, ...editable } = req.body;
-    if (code !== undefined) editable.code = normalizeCode(code);
+    const editable = pickCouponWritable(req.body);
+    if (req.body.code !== undefined) editable.code = normalizeCode(req.body.code);
     const coupon = await Coupon.findByIdAndUpdate(req.params.id, editable, {
       new: true,
       runValidators: true,

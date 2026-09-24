@@ -9,6 +9,7 @@ import { formatCurrency, localTodayStr, slabPriceForDuration, LAUNCH_SLAB_PRICES
 import { saveBookingDraft, loadBookingDraft, clearBookingDraft } from "../utils/bookingDraft";
 import CouponApply from "./CouponApply";
 import CustomCalendar from "./CustomCalendar";
+import CookAvatar from "./CookAvatar";
 import {
   Calendar, CalendarDays, Clock, AlertCircle, Navigation,
   History, Copy, Check, ChefHat, Users, BookOpen, Scissors,
@@ -100,14 +101,14 @@ const DURATION_MIN = 1;
 const DURATION_MAX = 4;
 
 /* ── Component ───────────────────────────────────────────────────────── */
-const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
+const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) => {
   const showToast = useShowToast();
   const user = useSelector((s) => s.auth.user);
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState(() => ({
-    serviceType: "cook_with_me",
+    serviceType: "cook_for_me",
     date: localTodayStr(),
     startTime: defaultStartTime(),
     durationHours: "",
@@ -625,7 +626,9 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
     {/* Header — cook identity + trust + live price */}
     <div className="bk-head">
       <div className="bk-head-main">
-        <span className="bk-avatar" aria-hidden="true">{cookInitial}</span>
+        <span className="bk-avatar" aria-hidden="true">
+          <CookAvatar photoUrl={cookPhotoUrl} name={cookName} alt="" fallback={cookInitial} />
+        </span>
         <div className="bk-head-text">
           <span className="bk-eyebrow">
             <Sparkles size={12} /> Instant booking · replies in ~5 min
@@ -635,8 +638,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
             <span className="bk-trust"><ShieldCheck size={13} /> Verified</span>
             <span className="bk-dot" aria-hidden="true" />
             <span>No payment now</span>
-            <span className="bk-dot" aria-hidden="true" />
-            <span>Free reschedule</span>
           </p>
         </div>
       </div>
@@ -735,7 +736,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
                   aria-checked={active}
                   className={`bk-service-card ${active ? "active" : ""}`}
                   onClick={() => setFormData((p) => ({ ...p, serviceType: opt.value }))}
-                  aria-pressed={active}
                 >
                   {opt.tag && <span className="bk-service-tag">{opt.tag}</span>}
                   <span className="bk-service-icon"><Icon size={18} /></span>
@@ -825,7 +825,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
                       type="button"
                       role="radio"
                       aria-checked={active}
-                      aria-pressed={active}
                       className={`bk-price-cell ${active ? "active" : ""}`}
                       onClick={() => setFormData((p) => ({ ...p, durationHours: String(h) }))}
                       title={`Select ${h} hour${h !== 1 ? "s" : ""} for ${formatCurrency(LAUNCH_SLAB_PRICES[h])}`}

@@ -15,8 +15,11 @@ const HomeCoupons = () => {
     let alive = true;
     API.get("/coupons/active")
       .then((res) => {
-        if (alive && Array.isArray(res?.data)) {
-          setCoupons(res.data.filter((c) => c && c.code));
+        // Tolerate the paginated envelope ({ data, pagination }) as well as
+        // the bare array, so ?page/limit use can never blank the section.
+        const list = Array.isArray(res?.data) ? res.data : res?.data?.data;
+        if (alive && Array.isArray(list)) {
+          setCoupons(list.filter((c) => c && c.code));
         }
       })
       .catch(() => {
@@ -118,6 +121,10 @@ const HomeCoupons = () => {
             )}
             <ul className="coupon-meta">
               {c.minOrder ? <li>Min order ₹{c.minOrder}</li> : null}
+              {c.discountType !== "flat" && c.maxDiscount ? <li>Up to ₹{c.maxDiscount} off</li> : null}
+              {c.perUserLimit != null ? (
+                <li>{Number(c.perUserLimit) === 1 ? "One per customer" : `${c.perUserLimit} per customer`}</li>
+              ) : null}
               {c.firstBookingOnly ? <li>First booking only</li> : null}
               {c.validTo ? <li>Valid till {fmtDate(c.validTo)}</li> : null}
             </ul>

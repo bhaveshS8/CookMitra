@@ -11,6 +11,12 @@
 const Availability = require("../models/Availability");
 const Booking = require("../models/Booking");
 const CookProfile = require("../models/CookProfile");
+const {
+  istMidnight,
+  istDayRange,
+  istDayString,
+  istWeekday,
+} = require("./time");
 
 // Booking statuses that PERMANENTLY block overlapping re-booking.
 // Verdicts that free the slot (cancelled/rejected/completed/expired) never
@@ -65,35 +71,33 @@ const minutesToTime = (mins) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 };
 
-const dayBounds = (dateStr) => {
-  // Use parseDay so "YYYY-MM-DD" resolves to LOCAL midnight (plain
-  // new Date("YYYY-MM-DD") is UTC midnight and lands on the wrong local day
-  // on non-UTC servers).
-  const start = parseDay(dateStr);
-  const end = new Date(start);
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
+// IST business-day range for rival lookups (F-08): { start, end } UTC
+// instants covering the IST calendar day of `dateInput` ("YYYY-MM-DD" or a
+// stored Date). Identical to the old local-midnight range on IST-pinned
+// hosts; correct everywhere else.
+const dayBounds = (dateInput) => {
+  // Never return null: callers destructure { start, end } directly, and an
+  // unparseable day must yield "no rivals" (epoch range matches nothing),
+  // never a TypeError 500.
+  return (
+    istDayRange(dateInput) || { start: new Date(0), end: new Date(0) }
+  );
 };
 
-// Normalize a "YYYY-MM-DD" date-only string to LOCAL midnight so stored
-// Availability/Booking dates always fall inside dayBounds() ranges regardless
-// of server timezone (plain new Date("YYYY-MM-DD") is UTC midnight).
-const parseDay = (dateStr) => {
-  const m = String(dateStr || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  const d = new Date(dateStr);
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
+// Normalize a "YYYY-MM-DD" (or stored Date) to the UTC instant of IST
+// midnight starting that business day. Booking/Availability `date` fields are
+// stored in this form, so rival range queries always contain them regardless
+// of server timezone. Identical instants to the old local-midnight values on
+// IST-pinned hosts.
+const parseDay = (dateInput) => istMidnight(dateInput);
 
 const intervalsOverlap = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
 
-// Local "YYYY-MM-DD" day string for the given Date (avoids the UTC leak that
-// new Date("YYYY-MM-DD").toISOString() has on non-UTC servers).
-const localDayString = (d = new Date()) => {
-  const p = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-};
+// IST "YYYY-MM-DD" day string for the given Date (F-08): business-day
+// comparisons (unavailable auto-reset, blocked dates) run on the business
+// clock, not the server clock. Identical values to the old local version on
+// IST-pinned hosts.
+const localDayString = (d = new Date()) => istDayString(d);
 
 // A cook who toggled "unavailable" becomes available again automatically on the
 // next day. If the stored unavailableDate is before today, reset the flag in
@@ -122,14 +126,73 @@ const resolveCookAvailability = async (profile) => {
   return status == null || status === "available";
 };
 
+// ── Cook working hours ─────────────────────────────────────────────────────
+// The universal service day every cook starts from (08:00–20:00).
+const serviceDayWindow = () => ({
+  startTime: minutesToTime(SERVICE_DAY_START_MIN),
+  endTime: minutesToTime(SERVICE_DAY_END_MIN),
+  status: "available",
+  derived: true,
+});
+
+// Windows a cook has actually agreed to work on `dateStr`, derived from the
+// weekly schedule published on their profile:
+//   - no schedule configured → the universal 08:00–20:00 day (back-compat:
+//     cooks who never opened the schedule editor stay bookable as before);
+//   - the date is in `blockedDates` → nothing at all;
+//   - otherwise → that weekday's enabled windows, clamped to the service day.
+// Pure and in-memory: callers pass a profile whose `schedule` is loaded, or a
+// lean profile object straight out of a find().
+const resolveCookWindows = (profile, dateStr) => {
+  const schedule = profile?.schedule || null;
+  const weekly = Array.isArray(schedule?.weekly) ? schedule.weekly : [];
+  const enabled = weekly.filter((w) => w && w.enabled);
+  if (enabled.length === 0) return [serviceDayWindow()];
+
+  const day = parseDay(dateStr);
+  if (!day || Number.isNaN(day.getTime())) return [serviceDayWindow()];
+  const blocked = Array.isArray(schedule?.blockedDates) ? schedule.blockedDates : [];
+  if (blocked.includes(localDayString(day))) return [];
+
+  // IST weekday (F-08): Date#getDay is server-local and picks the wrong
+  // weekday on non-IST hosts.
+  const weekday = istWeekday(day);
+  if (weekday == null) return [serviceDayWindow()];
+  const windows = [];
+  for (const w of enabled) {
+    if (Number(w.day) !== weekday) continue;
+    const s = timeToMinutes(w.startTime);
+    const e = timeToMinutes(w.endTime);
+    if (s == null || e == null || e <= s) continue;
+    const start = Math.max(s, SERVICE_DAY_START_MIN);
+    const end = Math.min(e, SERVICE_DAY_END_MIN);
+    if (end <= start) continue;
+    windows.push({
+      startTime: minutesToTime(start),
+      endTime: minutesToTime(end),
+      status: "available",
+      derived: true,
+    });
+  }
+  return windows;
+};
+
+// Windows for a cook on a date. Cooks publish their own working hours; the
+// fallback is the universal service day. `cookId` is a USER id (the id stored
+// on Booking.cook), and a missing cook / unreadable profile keeps the old
+// full-day behaviour so a schedule lookup can never make a cook unbookable.
 const getDayWindows = async (cookId, dateStr) => {
-  // Universal full-day availability: every cook's service day is 08:00–20:00
-  // regardless of published Availability windows — existing bookings (and the
-  // whole-day unavailable toggle, enforced by callers) are the only blockers.
-  // The cookId/date params are kept for signature compatibility with callers.
-  void cookId;
-  void dateStr;
-  return [{ startTime: "08:00", endTime: "20:00", status: "available", derived: true }];
+  if (!cookId) return [serviceDayWindow()];
+  let profile = null;
+  try {
+    const CookProfile = require("../models/CookProfile");
+    profile = await CookProfile.findOne({ user: cookId }).select("schedule").lean();
+  } catch {
+    // No DB (unit tests) or the profile is missing — fall back to full day.
+    profile = null;
+  }
+  if (!profile) return [serviceDayWindow()];
+  return resolveCookWindows(profile, dateStr);
 };
 
 const getDayBookings = (cookId, dateStr) => {
@@ -226,6 +289,8 @@ module.exports = {
   resolveCookAvailability,
   intervalsOverlap,
   getDayWindows,
+  resolveCookWindows,
+  serviceDayWindow,
   getDayBookings,
   computeStartOptions,
   suggestDurations,

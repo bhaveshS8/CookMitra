@@ -176,3 +176,44 @@
   .service-card-modern:hover { transform: none; }
   .service-card-modern:hover .service-icon-wrapper { transform: none; }
 }
+
+/* ---- Register component embedded in home page — compact card mode ---- */
+.home-registration-form .login-split {
+  display: block;
+  min-height: auto;
+  overflow: visible;
+  background: transparent;
+}
+.home-registration-form .login-split > * { min-width: auto; }
+.home-registration-form .login-showcase { display: none; }
+.home-registration-form .login-mobile-brand { display: none; }
+.home-registration-form .login-form-side {
+  display: block;
+  padding: 0;
+  background: transparent;
+  width: 100%;
+}
+.home-registration-form .login-card {
+  width: 100%;
+  max-width: 100%;
+  box-shadow: none;
+  border: none;
+  padding: 0;
+  animation: none;
+  background: transparent;
+}
+.home-registration-form .login-card-header { margin-bottom: 0.5rem; }
+.home-registration-form .login-card-header h2 { font-size: 1.15rem; }
+.home-registration-form .login-card-header p { font-size: 0.82rem; }
+.home-registration-form .register-role-grid {
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.home-registration-form .register-role-tile { padding: 0.6rem 0.7rem; }
+.home-registration-form .register-submit { min-height: 44px; font-size: 0.88rem; }
+.home-registration-form .auth-footer-prompt { margin-top: 0.75rem; font-size: 0.8rem; }
+.home-registration-form .login-secure-note { display: none; }
+.home-registration-form .register-terms { display: none; }
+.home-registration-form .register-strength { display: none; }
+.home-registration-form .register-grid-2 { grid-template-columns: 1fr 1fr; }

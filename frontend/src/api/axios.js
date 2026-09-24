@@ -47,6 +47,10 @@ const API = axios.create({
   // Fail fast instead of hanging forever when the backend is unreachable —
   // hung requests pile up and make the app look frozen.
   timeout: 15000,
+  // Send the hardened __Host-cm_session httpOnly cookie alongside the
+  // Authorization header (P0-3 migration: cookie is the future, Bearer is
+  // kept for compatibility until all clients migrate off localStorage).
+  withCredentials: true,
 });
 
 // Session token lives in localStorage ("Keep me signed in") or

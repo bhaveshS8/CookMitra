@@ -31,3 +31,15 @@
   color: var(--slate-700);
   margin-bottom: 0.25rem;
 }
+
+/* Coupon table inherits .admin-table (shared admin responsive pattern) */
+.coupon-table .coupon-code-chip { white-space: nowrap; }
+
+@media (max-width: 768px) {
+  .coupon-table .coupon-pct { font-size: 1.05rem; }
+  .coupon-table .coupon-sub { font-size: 0.84rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coupon-active-toggle { transition: none; }
+}

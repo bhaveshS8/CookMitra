@@ -16,6 +16,9 @@
 // - Sticky sessions are NOT needed — the API is stateless (JWT auth).
 // - A dead worker is reforked automatically; the master never serves traffic.
 
+// Business clock: Asia/Kolkata (see server.js) — set before anything else so
+// workers inherit the pinned timezone.
+if (!process.env.TZ) process.env.TZ = "Asia/Kolkata";
 const cluster = require("node:cluster");
 const os = require("node:os");
 

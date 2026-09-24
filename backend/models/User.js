@@ -53,8 +53,15 @@ const userSchema = new mongoose.Schema(
       required: function () {
         return !this.googleId;
       },
-      minlength: 6,
+      minlength: 8,
       select: false,
+    },
+    // Session invalidation counter (Phase 10): embedded in every JWT as `tv`
+    // and bumped on password reset. Pre-bump tokens stop verifying at once.
+    // Defaults to 0 so legacy tokens (no tv claim) keep working until reset.
+    tokenVersion: {
+      type: Number,
+      default: 0,
     },
     role: {
       type: String,

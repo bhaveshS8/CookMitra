@@ -279,8 +279,8 @@ const AddCookModal = ({ open, onClose, onCreated }) => {
                 className="form-control"
                 value={form.password}
                 onChange={handleChange}
-                placeholder="min 6 characters"
-                minLength={6}
+                placeholder="min 8 characters"
+                minLength={8}
                 required
               />
             </div>

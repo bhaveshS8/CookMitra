@@ -67,7 +67,7 @@ async function testAuth() {
   const mu = makeUser("customer");
 
   // 1.1 Register (new email)
-  { const oC = User.create, oF = User.findOne; User.findOne = async () => null; User.create = async (d) => ({ _id: new Types.ObjectId(), ...d }); const r = makeRes(); try { await authCtrl.register({ body: { name: "New", email: "new@e.com", password: "pass123", phone: "9876543210", role: "customer" } }, r, next); check("1.1 Register ok", r.statusCode === 201 && r.body?.token, `s=${r.statusCode}`); } catch (e) { check("1.1 Register ok", false, e.message); } finally { User.create = oC; User.findOne = oF; } }
+  { const oC = User.create, oF = User.findOne; User.findOne = async () => null; User.create = async (d) => ({ _id: new Types.ObjectId(), ...d }); const r = makeRes(); try { await authCtrl.register({ body: { name: "New", email: "new@e.com", password: "pass1234", phone: "9876543210", role: "customer" } }, r, next); check("1.1 Register ok", r.statusCode === 201 && r.body?.token, `s=${r.statusCode}`); } catch (e) { check("1.1 Register ok", false, e.message); } finally { User.create = oC; User.findOne = oF; } }
 
   // 1.2 Duplicate email -> 400
   { const oF = User.findOne; User.findOne = async () => mu; const r = makeRes(); try { await authCtrl.register({ body: { name: "T", email: "t@e.com", password: "p" } }, r, next); check("1.2 Dup email fails", r.statusCode === 400, `s=${r.statusCode}`); } catch (e) { check("1.2 Dup email fails", false, e.message); } finally { User.findOne = oF; } }
@@ -158,11 +158,17 @@ async function testCustomer() {
     User.findById = () => ({ select: () => Promise.resolve({ name: "Neha", phone: "9876543210" }) });
     const r = makeRes();
     try {
+      // A safely-future date inside the booking horizon (far-future dates
+      // are refused so slots can't be squatted indefinitely).
+      const d30 = new Date();
+      d30.setDate(d30.getDate() + 30);
+      const pp = (n) => String(n).padStart(2, "0");
+      const FUTURE_DATE = `${d30.getFullYear()}-${pp(d30.getMonth() + 1)}-${pp(d30.getDate())}`;
       await bookingCtrl.createBooking(
         {
           user: { id: userId, name: "Neha" },
           body: {
-            cook: cookId, serviceType: "cook_for_me", date: "2099-01-02",
+            cook: cookId, serviceType: "cook_for_me", date: FUTURE_DATE,
             startTime: "09:00", endTime: "11:00", durationHours: 2, address: "Pune",
             customer: new Types.ObjectId().toString(),
             cookArrived: true, hoursCompleted: true,

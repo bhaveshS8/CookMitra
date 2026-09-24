@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
@@ -29,6 +29,26 @@ const GoogleSignInButton = ({
   const showToast = useShowToast();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  // GSI only accepts fixed pixel widths (200–400) — a 320px button
+  // overflows narrow auth cards, so shrink it on very small phones.
+  const [narrowPhone, setNarrowPhone] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(max-width: 400px)").matches
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(max-width: 400px)");
+    const onChange = (e) => setNarrowPhone(e.matches);
+    if (typeof mq.addEventListener === "function") {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    }
+    // Legacy Safari (< 14): addListener only.
+    mq.addListener(onChange);
+    return () => mq.removeListener(onChange);
+  }, []);
 
   if (!isGoogleConfigured) {
     return (
@@ -106,7 +126,7 @@ const GoogleSignInButton = ({
         shape="rectangular"
         theme="outline"
         size="large"
-        width="320"
+        width={narrowPhone ? "240" : "320"}
       />
     </div>
   );

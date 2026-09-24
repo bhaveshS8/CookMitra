@@ -12,7 +12,9 @@ import {
 } from "lucide-react";
 import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
-import { SERVICE_DETAILS, formatDate } from "../utils/constants";
+import { SERVICE_DETAILS, formatDate, formatTimeRange12 } from "../utils/constants";
+import { buildRetryState } from "../utils/bookingRetry";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 const WINDOW_MS = 5 * 60 * 1000; // 5-minute acceptance window
 // Calmed for scale: 4s x 1000 waiting users ~= 250 rps sustained. 8s halves
@@ -46,46 +48,6 @@ const SORRY_COPY = {
   },
 };
 
-// Snapshot of the dead request so "Find another cook" can land straight on
-// step 3 (venue + cook list) with the same date/slot, minus the cook who
-// didn't respond. CookBooking.jsx consumes this via location.state.
-const toLocalDayStr = (d) => {
-  if (!d) return "";
-  const dt = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(dt.getTime())) return "";
-  const p = (n) => String(n).padStart(2, "0");
-  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
-};
-
-const buildRetryState = (b) => {
-  if (!b) return null;
-  const addr = b.addressDetails || {};
-  return {
-    form: {
-      serviceType: b.serviceType,
-      date: toLocalDayStr(b.date),
-      guests: b.guests != null ? String(b.guests) : "4",
-      durationHours: b.durationHours != null ? String(b.durationHours) : "",
-      flatNo: addr.flatNo || "",
-      society: addr.society || "",
-      landmark: addr.landmark || "",
-      city: addr.city || "",
-      customDishes: (b.selectedItems || []).join(", "),
-      notes: b.notes || "",
-    },
-    selectedSlot:
-      b.startTime && b.endTime
-        ? { startTime: b.startTime, endTime: b.endTime }
-        : null,
-    coords:
-      b.location?.lat != null && b.location?.lng != null
-        ? { lat: b.location.lat, lng: b.location.lng }
-        : null,
-    excludeCookId:
-      (typeof b.cook === "string" ? b.cook : b.cook?._id) || null,
-  };
-};
-
 const BookingWaiting = () => {
   const { bookingId } = useParams();
   const navigate = useNavigate();
@@ -97,15 +59,21 @@ const BookingWaiting = () => {
   const [now, setNow] = useState(Date.now());
   const [factIdx, setFactIdx] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [redirectIn, setRedirectIn] = useState(REDIRECT_S);
   const handledRef = useRef(false);
   const aliveRef = useRef(true);
   const pollRef = useRef(null);
 
+  // Consecutive poll failures before surfacing an error: a single transient
+  // blip must not kick the customer off the waiting screen (F-05), but a
+  // persistently failing fetch must not spin forever either.
+  const failCountRef = useRef(0);
   const load = useCallback(async () => {
     try {
       const res = await API.get(`/bookings/${bookingId}`);
       if (!aliveRef.current || handledRef.current) return;
+      failCountRef.current = 0;
       const b = res.data;
       setBooking(b);
       const st = b.status;
@@ -128,8 +96,17 @@ const BookingWaiting = () => {
         setPhase("waiting");
       }
     } catch (err) {
-      if (!aliveRef.current) return;
+      if (!aliveRef.current || handledRef.current) return;
       if (err.response?.status === 404) {
+        handledRef.current = true;
+        setPhase("error");
+        return;
+      }
+      // Non-404 (network/server) failures: stay on the waiting screen for a
+      // couple of retries, then show the error state with a retry action
+      // instead of spinning silently forever.
+      failCountRef.current += 1;
+      if (failCountRef.current >= 3) {
         handledRef.current = true;
         setPhase("error");
       }
@@ -195,16 +172,23 @@ const BookingWaiting = () => {
 
   const cancelNow = async () => {
     if (cancelling || handledRef.current) return;
+    setConfirmCancel(false);
     setCancelling(true);
     try {
-      await API.patch(`/bookings/${bookingId}/cancel`);
+      const res = await API.patch(`/bookings/${bookingId}/cancel`);
       handledRef.current = true;
-      setSorryReason("cancelled");
+      // Show the SERVER-confirmed outcome (alreadyCancelled conflicts return
+      // 200 with the canonical state — never assume the local guess).
+      setSorryReason(res.data?.status || "cancelled");
       setPhase("sorry");
-      showToast("Request cancelled — the slot has been released.", "info");
+      showToast(res.data?.message || "Request cancelled — the slot has been released.", "info");
     } catch (err) {
+      // A 409 (already accepted/confirmed by the cook racing this tap) lands
+      // here: surface the server message and reload the authoritative state
+      // instead of showing a stale "cancelled" screen.
       showToast(err.response?.data?.message || "Could not cancel the request", "error");
       setCancelling(false);
+      load();
     }
   };
 
@@ -225,6 +209,18 @@ const BookingWaiting = () => {
       ? createdAtMs + WINDOW_MS
       : null;
   const remainingMs = expiresAtMs ? Math.max(0, expiresAtMs - now) : WINDOW_MS;
+  // Deadline reached locally: don't sit on 00:00 until the next 8s poll —
+  // stop polling and fetch once immediately so the server-confirmed outcome
+  // (usually expired, flipped on read) shows right away.
+  useEffect(() => {
+    if (phase !== "waiting" || !expiresAtMs || handledRef.current) return;
+    if (expiresAtMs - Date.now() > 0) return;
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    load();
+  }, [phase, expiresAtMs, now, load]);
   const secondsLeft = Math.ceil(remainingMs / 1000);
   const clockText = `${String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:${String(
     secondsLeft % 60
@@ -246,15 +242,26 @@ const BookingWaiting = () => {
   }
 
   if (phase === "error") {
+    const retryLoad = () => {
+      failCountRef.current = 0;
+      handledRef.current = false;
+      setPhase("loading");
+      load();
+    };
     return (
       <div className="booking-flow-page">
         <div className="bf-card bf-center">
           <XCircle className="bf-sorry-icon" size={56} />
-          <h1 className="bf-title">Booking not found</h1>
-          <p className="bf-sub">We couldn't find this request. It may have been removed.</p>
-          <button className="btn btn-primary bf-btn" onClick={() => navigate("/cook-on-demand")}>
-            <Search size={18} /> Browse cooks
-          </button>
+          <h1 className="bf-title">Couldn't load this request</h1>
+          <p className="bf-sub">We couldn't reach the server or find this request. It may have been removed.</p>
+          <div style={{ display: "flex", gap: "0.6rem", justifyContent: "center", flexWrap: "wrap" }}>
+            <button className="btn btn-primary bf-btn" onClick={retryLoad}>
+              Try again
+            </button>
+            <button className="btn btn-outline bf-btn" onClick={() => navigate("/cook-on-demand")}>
+              <Search size={18} /> Browse cooks
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -344,7 +351,7 @@ const BookingWaiting = () => {
         <div className="bf-summary">
           <span className="bf-chip"><UtensilsCrossed size={14} /> {service.label || "Home cooking"}</span>
           <span className="bf-chip">📅 {formatDate(booking?.date)}</span>
-          <span className="bf-chip">⏰ {booking?.startTime} – {booking?.endTime}</span>
+          <span className="bf-chip">⏰ {formatTimeRange12(booking?.startTime, booking?.endTime)}</span>
           {booking?.guests ? <span className="bf-chip">👨‍👩‍👧 {booking.guests} guests</span> : null}
         </div>
 
@@ -354,11 +361,20 @@ const BookingWaiting = () => {
         </div>
 
         <div className="bf-actions">
-          <button className="btn btn-outline bf-btn-ghost" onClick={cancelNow} disabled={cancelling}>
+          <button className="btn btn-outline bf-btn-ghost" onClick={() => setConfirmCancel(true)} disabled={cancelling}>
             <XCircle size={16} /> {cancelling ? "Cancelling…" : "Cancel request"}
           </button>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmCancel}
+        title="Cancel this booking request?"
+        message="The cook will be notified and the slot released. This cannot be undone — but you can still find another cook afterwards."
+        confirmLabel="Yes, cancel it"
+        tone="danger"
+        onCancel={() => setConfirmCancel(false)}
+        onConfirm={cancelNow}
+      />
     </div>
   );
 };

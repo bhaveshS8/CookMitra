@@ -8,39 +8,70 @@
   grid-template-columns: 0.9fr 1.1fr;
   gap: 0;
   min-height: calc(100vh - 68px);
-  background:
-    radial-gradient(1200px 450px at 20% 0%, rgba(249, 169, 76, 0.16), transparent 58%),
-    radial-gradient(800px 420px at 100% 100%, rgba(194, 65, 12, 0.14), transparent 52%),
-    linear-gradient(135deg, #f7efe7 0%, #f2e1d0 28%, #f6efe8 100%);
+  min-height: calc(100dvh - 68px);
+  width: 100%;
+  overflow-x: clip;
+  background: linear-gradient(160deg, #fefcfa 0%, #fdf6f0 40%, #f8f0e8 100%);
 }
+/* Grid children must be allowed to shrink or long content (emails, error
+   text) forces horizontal overflow on narrow viewports. */
+.login-split > * { min-width: 0; }
 
+/* ---- Showcase (left panel) ---- */
 .login-showcase {
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(680px 440px at 12% 0%, rgba(192, 120, 57, 0.38), transparent 58%),
-    radial-gradient(720px 500px at 90% 100%, rgba(251, 191, 36, 0.11), transparent 56%),
-    linear-gradient(150deg, #1d120d 0%, #2b1b14 38%, #130d09 100%);
+    radial-gradient(600px 420px at 15% 5%, rgba(251, 146, 60, 0.2), transparent 60%),
+    radial-gradient(520px 480px at 85% 95%, rgba(234, 88, 12, 0.12), transparent 55%),
+    linear-gradient(155deg, #1a0f0a 0%, #281710 38%, #140e09 100%);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 3rem 1.5rem;
-  border-right: 1px solid rgba(255,255,255,0.08);
+  padding: 3.5rem 2rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
 }
-.login-showcase-glow { position: absolute; border-radius: 50%; filter: blur(60px); pointer-events: none; }
-.login-showcase-glow-1 { width: 320px; height: 320px; top: -70px; left: 8%; background: rgba(251, 191, 36, 0.24); }
-.login-showcase-glow-2 { width: 380px; height: 380px; right: -90px; bottom: 8%; background: rgba(234, 88, 12, 0.24); }
+
+/* Ambient glow orbs */
+.login-showcase-glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  pointer-events: none;
+  animation: showcaseGlowPulse 6s ease-in-out infinite alternate;
+}
+.login-showcase-glow-1 {
+  width: 340px;
+  height: 340px;
+  top: -80px;
+  left: 6%;
+  background: rgba(251, 191, 36, 0.2);
+}
+.login-showcase-glow-2 {
+  width: 400px;
+  height: 400px;
+  right: -100px;
+  bottom: 6%;
+  background: rgba(234, 88, 12, 0.18);
+  animation-delay: -3s;
+}
+@keyframes showcaseGlowPulse {
+  0% { opacity: 0.7; transform: scale(1); }
+  100% { opacity: 1; transform: scale(1.08); }
+}
 
 .login-showcase-inner {
   position: relative;
   z-index: 1;
-  max-width: 420px;
+  max-width: 400px;
   width: 100%;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
 }
+
+/* Brand link in showcase */
 .login-brand {
   display: inline-flex;
   align-items: center;
@@ -48,61 +79,97 @@
   font-weight: 800;
   font-size: 1.15rem;
   color: #fff;
-  margin-bottom: 1.8rem;
+  margin-bottom: 2rem;
   letter-spacing: -0.02em;
   text-shadow: 0 4px 14px rgba(251, 191, 36, 0.16);
 }
+
 .login-showcase-title {
-  font-size: clamp(2.2rem, 3vw, 3rem);
+  font-size: clamp(2.2rem, 3vw, 2.8rem);
   font-weight: 800;
   letter-spacing: -0.03em;
   color: #fff;
-  margin-bottom: 0.6rem;
-  line-height: 1.06;
+  margin-bottom: 0.65rem;
+  line-height: 1.1;
 }
 .login-showcase-sub {
-  color: rgba(255, 255, 255, 0.82);
+  color: rgba(255, 255, 255, 0.75);
   font-size: 1rem;
-  margin-bottom: 1.6rem;
+  margin-bottom: 2rem;
   max-width: 30ch;
+  line-height: 1.55;
 }
 
-.login-perks { list-style: none; padding: 0; margin: 0 0 1.6rem; display: flex; flex-direction: column; gap: 0.8rem; }
-.login-perk-item { display: flex; align-items: center; gap: 0.6rem; color: rgba(255, 255, 255, 0.9); font-weight: 600; font-size: 0.95rem; }
+/* Perks list */
+.login-perks {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.login-perk-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: rgba(255, 255, 255, 0.88);
+  font-weight: 600;
+  font-size: 0.93rem;
+}
 .login-perk-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 11px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: #ffd24d;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fbbf24;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  backdrop-filter: blur(6px);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.login-perk-item:hover .login-perk-icon {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
-.login-showcase-proof { display: flex; align-items: center; gap: 0.9rem; }
+/* Social proof bar — wraps just above the 900px hide-breakpoint where the
+   inner column gets tight (~901–1000px viewports). */
+.login-showcase-proof {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  padding: 0.9rem 1rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  backdrop-filter: blur(8px);
+}
+.login-showcase-proof > div:last-child { min-width: 0; }
 .login-avatars { display: flex; align-items: center; }
 .login-avatars > span {
-  width: 38px;
-  height: 38px;
-  min-width: 38px;
-  min-height: 38px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
   border-radius: 50%;
   background: var(--primary-gradient);
   color: #fff;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.02em;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid rgba(255, 255, 255, 0.85);
-  margin-left: -10px;
+  border: 2px solid rgba(255, 255, 255, 0.75);
+  margin-left: -9px;
   flex-shrink: 0;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 .login-avatars > span:first-child { margin-left: 0; }
 /* Distinct cook colors so stacked avatars are distinguishable */
@@ -112,13 +179,13 @@
 /* Count pill — needs higher specificity than `.login-avatars > span` to apply */
 .login-avatars > span.login-avatars-more {
   width: auto;
-  height: 38px;
-  min-height: 38px;
+  height: 36px;
+  min-height: 36px;
   padding: 0 0.6rem;
   border-radius: 99px;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.14);
   backdrop-filter: blur(6px);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 800;
 }
 .login-avatars img {
@@ -128,112 +195,198 @@
   border-radius: 50%;
   display: block;
 }
-.login-proof-stars { color: #ffd24d; font-weight: 800; font-size: 0.9rem; letter-spacing: 0.08em; }
-.login-proof-text { font-size: 0.85rem; color: rgba(255, 255, 255, 0.75); }
+.login-proof-stars { color: #fbbf24; font-weight: 800; font-size: 0.88rem; letter-spacing: 0.06em; }
+.login-proof-text { font-size: 0.82rem; color: rgba(255, 255, 255, 0.65); }
 
-/* Login card */
+/* ---- Form side (right panel) — top-aligned like register ---- */
+.login-form-side {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: start;
+  justify-items: center;
+  padding: clamp(2rem, 3.5vw, 2.6rem) 1.5rem;
+  width: 100%;
+  min-width: 0;
+  background:
+    radial-gradient(500px 300px at 10% 8%, rgba(251, 191, 36, 0.08), transparent 60%),
+    radial-gradient(400px 250px at 90% 90%, rgba(234, 88, 12, 0.05), transparent 55%),
+    linear-gradient(180deg, rgba(255, 252, 249, 0.9), rgba(250, 244, 236, 0.6));
+}
+.login-form { min-width: 0; }
+/* 48px inputs meet WCAG 2.5.8 target size on touch screens. */
+.login-input { min-height: 48px; }
+
+/* ---- Login card — same chrome rhythm as .register-card ---- */
 .login-card {
-  width: min(100%, 470px);
-  max-width: 470px;
+  width: min(100%, 460px);
+  max-width: 460px;
+  min-width: 0;
+  overflow-wrap: break-word;
   margin: 0 auto;
-  background: linear-gradient(180deg, rgba(255, 251, 246, 0.98), rgba(246, 236, 226, 0.96));
-  border-radius: 26px;
-  box-shadow: 0 28px 70px -30px rgba(75, 44, 28, 0.46), 0 14px 36px -22px rgba(176, 88, 39, 0.35);
-  border: 1px solid rgba(183, 102, 48, 0.28);
-  padding: 2.2rem 1.8rem;
-  backdrop-filter: blur(8px);
-  color: #3a2717;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(255, 255, 255, 0.9));
+  border-radius: 28px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(120, 60, 20, 0.04),
+    0 0 0 1px rgba(16, 24, 40, 0.05),
+    0 1px 2px rgba(16, 24, 40, 0.05),
+    0 6px 16px -4px rgba(16, 24, 40, 0.1),
+    0 18px 44px -12px rgba(16, 24, 40, 0.16),
+    0 36px 80px -24px rgba(120, 60, 20, 0.22),
+    0 64px 120px -40px rgba(120, 60, 20, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  padding: 2.1rem 2rem 1.8rem;
+  backdrop-filter: blur(16px);
+  color: var(--slate-800);
+  animation: loginCardEntry 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
-@media (max-width: 400px) {
-  .login-card { padding: 1.5rem 1rem; }
-  .auth-card-modern { padding: 1.5rem 1rem; }
+@keyframes loginCardEntry {
+  from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
-.login-card-header { text-align: center; margin-bottom: 1.5rem; }
+
+/* Card header */
+.login-card-header {
+  text-align: center;
+  margin-bottom: 1.2rem;
+}
 .login-card-header h1,
 .login-card-header h2 {
-  font-size: clamp(1.8rem, 2vw, 2.1rem);
-  margin-bottom: 0.35rem;
-  letter-spacing: -0.02em;
-  color: #2d1b12;
+  font-size: clamp(1.6rem, 2.2vw, 1.9rem);
+  margin-bottom: 0.4rem;
+  letter-spacing: -0.025em;
+  color: var(--slate-900);
+  font-weight: 800;
 }
-.login-card-header p { color: rgba(88, 60, 40, 0.8); font-size: 0.9rem; margin: 0; }
+.login-card-header p {
+  color: var(--slate-500);
+  font-size: 0.92rem;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Mobile brand (shown < 900px) */
 .login-mobile-brand {
   display: none;
   justify-content: center;
   align-items: center;
   gap: 0.6rem;
   font-weight: 800;
-  margin-bottom: 1.6rem;
-  color: #2d1b12;
+  margin-bottom: 1.2rem;
+  color: var(--slate-900);
+  font-size: 1.1rem;
 }
-.login-mobile-brand .brand-accent { color: #b86f3c; }
-.login-form-side {
-  display: grid;
-  grid-template-columns: 1fr;
-  align-items: center;
-  justify-items: center;
-  padding: clamp(1.8rem, 3vw, 2.8rem) 1.5rem;
-  width: 100%;
-  background:
-    radial-gradient(420px 260px at 14% 10%, rgba(243, 188, 115, 0.18), transparent 58%),
-    linear-gradient(180deg, rgba(255, 248, 241, 0.72), rgba(247, 235, 220, 0.82));
-}
+.login-mobile-brand .brand-accent { color: var(--primary); }
+
+/* Submit button */
 .login-submit {
   width: 100%;
-  margin-top: 0.25rem;
+  margin-top: 0.5rem;
   min-height: 52px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  border-radius: 14px;
+  letter-spacing: -0.01em;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 1px 2px rgba(120, 60, 20, 0.2),
+    0 6px 16px -4px rgba(232, 89, 12, 0.4),
+    0 14px 28px -10px rgba(232, 89, 12, 0.35);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
 }
+.login-submit:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 2px 4px rgba(120, 60, 20, 0.2),
+    0 10px 22px -6px rgba(232, 89, 12, 0.5),
+    0 20px 40px -12px rgba(232, 89, 12, 0.45);
+}
+
 .login-error { margin-bottom: 0.75rem; }
+
+/* Google role note */
 .auth-google-role-note {
   margin-top: 0.6rem;
   font-size: 0.8rem;
-  color: rgba(88, 60, 40, 0.7);
+  color: var(--slate-400);
   text-align: center;
   line-height: 1.5;
 }
+
+/* Secure note — full-width flex row so `margin: auto` centering actually
+   applies (auto margins compute to 0 on inline-level boxes). */
 .login-secure-note {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  text-align: center;
   gap: 0.4rem;
-  width: fit-content;
   color: var(--slate-400);
-  font-size: 0.8rem;
-  margin: 1rem auto 0;
+  font-size: 0.78rem;
+  margin: 1.2rem 0 0;
+  padding: 0.35rem 0.7rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.02);
 }
+
+/* Footer prompt */
 .auth-footer-prompt {
   text-align: center;
   font-size: 0.92rem;
-  color: rgba(61, 42, 28, 0.8);
-  margin-top: 1.2rem;
+  color: var(--slate-500);
+  margin-top: 1.4rem;
 }
 .auth-footer-prompt a {
   font-weight: 700;
-  color: #a7501f;
+  color: var(--primary);
+  transition: color 0.15s ease;
+}
+.auth-footer-prompt a:hover {
+  color: var(--primary-700);
 }
 
-.auth-footer-prompt a:hover {
-  color: #7d3a12;
+/* Legal line under the login submit (mirrors .register-terms) */
+.login-terms {
+  text-align: center;
+  font-size: 0.79rem;
+  color: var(--slate-500);
+  line-height: 1.55;
+  margin: 0.9rem 0 0;
 }
+.login-terms a { font-weight: 700; }
+
+/* Row holding remember-me — space-between like register option rows */
+.login-options-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+}
+
 .role-hint { font-size: 0.82rem; color: var(--slate-500); }
 
-/* ---- Google sign-in ---- */
+/* ---- Google sign-in divider ---- */
 .auth-divider {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin: 1.25rem 0 1rem;
+  gap: 0.85rem;
+  margin: 1.4rem 0 1.1rem;
   color: var(--slate-400);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
 }
 .auth-divider::before,
 .auth-divider::after {
   content: "";
   flex: 1;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(142, 86, 43, 0.4), transparent);
+  background: var(--slate-200);
 }
 .google-btn-wrapper {
   display: flex;
@@ -294,6 +447,7 @@
   width: 64px;
   height: 64px;
   object-fit: contain;
+  border-radius: 24%;
   display: block;
   margin: 0 auto 0.9rem;
 }
@@ -306,7 +460,522 @@
   font-size: 0.84rem;
   font-weight: 600;
   line-height: 1.45;
-  border-radius: 10px;
-  padding: 0.55rem 0.8rem;
-  margin-bottom: 0.9rem;
+  border-radius: 12px;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 1rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Register (professional split, mirrors login) ---- */
+.register-split {
+  grid-template-columns: 0.95fr 1.05fr;
+}
+
+.register-eyebrow-badge,
+.login-eyebrow-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.85rem;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fed7aa;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-bottom: 1.1rem;
+  backdrop-filter: blur(6px);
+}
+
+/* Mini stepper in the showcase */
+.register-steps {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0;
+  margin: 0 0 2rem;
+}
+.register-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.55);
+}
+.register-step.active { color: #fff; }
+.register-step-dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.8);
+}
+.register-step.active .register-step-dot {
+  background: var(--primary-gradient);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: var(--shadow-brand);
+}
+.register-step-sep {
+  width: 26px;
+  height: 1.5px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+}
+
+/* Form side + wider card */
+.register-form-side {
+  align-items: start;
+  padding-top: 2.2rem;
+  padding-bottom: 2.2rem;
+}
+.register-card {
+  width: min(100%, 560px);
+  max-width: 560px;
+  min-width: 0;
+  overflow-wrap: break-word;
+  padding: 2.1rem 2rem 1.8rem;
+}
+.register-card-header { margin-bottom: 1.2rem; }
+.register-eyebrow {
+  display: inline-block;
+  max-width: 100%;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--primary-700);
+  background: var(--primary-light);
+  border: 1px solid var(--primary-100);
+  padding: 0.32rem 0.7rem;
+  border-radius: 99px;
+  margin-bottom: 0.8rem;
+}
+.register-card-header h2,
+.login-card-header h2 { margin-top: 0; }
+.register-required,
+.login-required { color: var(--primary); font-weight: 800; }
+
+/* Role tiles — professional selectable cards */
+.register-role-grid {
+  background: transparent;
+  padding: 0;
+  gap: 0.7rem;
+  margin: 0 0 1.2rem;
+  border: none;
+}
+.register-role-tile {
+  flex-direction: row;
+  align-items: center;
+  text-align: left;
+  gap: 0.7rem;
+  padding: 0.8rem 0.85rem;
+  background: #fff;
+  border: 1.5px solid var(--slate-200);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8),
+    0 1px 2px rgba(16, 24, 40, 0.05),
+    0 6px 14px -6px rgba(16, 24, 40, 0.12);
+  position: relative;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+.register-role-tile:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  transform: translateY(-1px);
+}
+.register-role-tile:focus-visible {
+  outline: 3px solid var(--primary-glow);
+  outline-offset: 2px;
+}
+.register-role-tile.active {
+  background: #fff;
+  border-color: var(--primary);
+  color: var(--slate-900);
+  box-shadow: 0 0 0 3px var(--primary-glow), var(--shadow-sm);
+}
+.register-role-icon {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 13px;
+  background: var(--slate-100);
+  border: 1px solid var(--slate-200);
+  color: var(--slate-500);
+  transition: all 0.16s ease;
+}
+.register-role-tile.active .register-role-icon {
+  background: var(--primary-gradient);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: var(--shadow-brand);
+}
+.register-role-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1;
+}
+.register-role-text strong {
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--slate-900);
+}
+.register-role-tile.active .register-role-text strong { color: var(--primary-700); }
+.register-role-check {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--slate-300);
+  background: var(--slate-50);
+  color: transparent;
+  transition: all 0.16s ease;
+}
+.register-role-tile.active .register-role-check {
+  background: var(--accent-emerald);
+  border-color: var(--accent-emerald);
+  color: #fff;
+}
+
+/* Two-column field grid */
+.register-form { display: flex; flex-direction: column; min-width: 0; }
+.register-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 0.8rem;
+  min-width: 0;
+}
+/* Grid/button children must shrink or long errors, emails and hints force
+   horizontal overflow on narrow viewports. */
+.register-grid-2 > *,
+.register-role-grid > * { min-width: 0; }
+/* font-size intentionally inherits .form-control — a class-level override here
+   would beat forms.css's ≤640px 16px rule (same specificity, later import)
+   and re-trigger iOS focus-zoom on phones. */
+.register-input {
+  min-height: 48px;
+  border-radius: 13px;
+  min-width: 0;
+}
+.register-error { margin: 0 0 1rem; }
+
+/* Segmented password strength */
+.register-strength { margin: 0.1rem 0 0.9rem; }
+.register-strength-bars {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 0.45rem;
+}
+.register-strength-seg {
+  flex: 1;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--slate-200);
+  transition: background 0.2s ease;
+}
+.register-strength-seg.on.strength-1 { background: var(--accent-rose); }
+.register-strength-seg.on.strength-2 { background: #d97706; }
+.register-strength-seg.on.strength-3,
+.register-strength-seg.on.strength-4 { background: var(--accent-emerald); }
+.register-strength .password-strength-label strong {
+  color: var(--slate-700);
+  font-weight: 800;
+}
+.register-strength-hint { color: var(--slate-500); }
+
+.register-submit { margin-top: 0.4rem; }
+
+.register-terms {
+  text-align: center;
+  font-size: 0.79rem;
+  color: var(--slate-500);
+  line-height: 1.55;
+  margin: 0.9rem 0 0;
+}
+.register-terms a { font-weight: 700; }
+
+/* Keep legacy centered card styles for any residual usage */
+.auth-wrapper.register-legacy { display: none; }
+
+/* ==========================================================================
+   Auth responsive — login + register across all viewports
+   Breakpoints: 1600 (ultra-wide cap), 1200 (wide tablet/laptop), 1150
+   (mobile navbar), 1100/1024 (tablet), 900 (showcase drops), 768 (small
+   tablet), 640 (phone), 480 (small phone), 400 / 360 (tiny), max-height
+   560 (short screens). Single owner of login/register responsive rules.
+   ========================================================================== */
+
+/* ---- Wide tablet / small laptop: tighten the showcase so neither panel
+      crowds the other before the 900px single-column collapse. ---- */
+@media (min-width: 901px) and (max-width: 1200px) {
+  .login-showcase { padding: 2.5rem 1.5rem; }
+  .register-showcase { padding: 2.5rem 1.5rem; }
+  .login-showcase-inner { max-width: 340px; }
+  .register-showcase-inner { max-width: 340px; }
+  .login-showcase-title { font-size: clamp(1.85rem, 2.6vw, 2.4rem); }
+  .login-showcase-sub { font-size: 0.95rem; margin-bottom: 1.4rem; }
+  .login-brand { margin-bottom: 1.4rem; font-size: 1.05rem; }
+  .login-perks { gap: 0.7rem; margin-bottom: 1.4rem; }
+  .login-perk-item { font-size: 0.88rem; }
+  .login-perk-icon { width: 32px; height: 32px; border-radius: 9px; }
+  .register-eyebrow-badge { margin-bottom: 0.85rem; }
+  .register-steps { margin-bottom: 1.4rem; flex-wrap: wrap; row-gap: 0.5rem; }
+  .login-showcase-proof { padding: 0.75rem 0.85rem; gap: 0.7rem; }
+  .login-form-side { padding: clamp(1.5rem, 3vw, 2.2rem) 1.25rem; }
+  .register-form-side { padding: clamp(1.5rem, 3vw, 2.2rem) 1.25rem; }
+}
+
+/* ---- Tablet: rebalance split + keep form comfortable ---- */
+@media (max-width: 1100px) {
+  .register-split { grid-template-columns: 0.9fr 1.1fr; }
+}
+
+@media (max-width: 1024px) {
+  .login-split { grid-template-columns: 0.85fr 1.15fr; }
+  .register-split { grid-template-columns: 0.85fr 1.15fr; }
+}
+
+/* ---- ≤900px: showcase hides, mobile brand appears, card goes full-bleed
+      center. Form panel padding scales with the viewport. ---- */
+@media (max-width: 900px) {
+  .login-split,
+  .register-split { grid-template-columns: 1fr; }
+  .login-showcase,
+  .register-showcase { display: none; }
+  .login-mobile-brand { display: flex; }
+  .login-form-side,
+  .register-form-side {
+    padding: clamp(1.25rem, 4vw, 2.25rem) clamp(1rem, 4vw, 1.75rem);
+    align-items: start;
+    justify-items: center;
+  }
+  .login-card {
+    width: min(100%, 520px);
+    max-width: 520px;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.85),
+      0 0 0 1px rgba(16, 24, 40, 0.05),
+      0 2px 6px rgba(16, 24, 40, 0.06),
+      0 12px 28px -8px rgba(16, 24, 40, 0.14),
+      0 28px 56px -20px rgba(120, 60, 20, 0.18);
+    border: 1px solid var(--slate-200);
+  }
+  .register-card {
+    width: min(100%, 560px);
+    max-width: 560px;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.85),
+      0 0 0 1px rgba(16, 24, 40, 0.05),
+      0 2px 6px rgba(16, 24, 40, 0.06),
+      0 12px 28px -8px rgba(16, 24, 40, 0.14),
+      0 28px 56px -20px rgba(120, 60, 20, 0.18);
+    border: 1px solid var(--slate-200);
+  }
+}
+
+/* ---- ≤1150px: mobile navbar (62px) takes over — auth pages track it ---- */
+@media (max-width: 1150px) {
+  .login-split,
+  .register-split {
+    min-height: calc(100vh - 62px);
+    min-height: calc(100dvh - 62px);
+  }
+}
+
+/* ---- Small tablet: soften card chrome + two-col fields still fit ---- */
+@media (max-width: 768px) {
+  .login-card,
+  .register-card { padding: 1.85rem 1.5rem 1.55rem; }
+  .login-card-header h1,
+  .login-card-header h2 { font-size: clamp(1.45rem, 4vw, 1.75rem); }
+  .register-eyebrow { font-size: 0.66rem; padding: 0.28rem 0.6rem; }
+  .login-form-side,
+  .register-form-side { padding: clamp(1.25rem, 3vw, 1.85rem) 1.5rem; }
+}
+
+/* ---- Phone ---- */
+@media (max-width: 640px) {
+  /* Notch / home-indicator safe areas — keep the card off rounded edges. */
+  .login-form-side,
+  .register-form-side {
+    padding:
+      clamp(1rem, 4vw, 1.5rem)
+      calc(1rem + env(safe-area-inset-right, 0px))
+      calc(1.75rem + env(safe-area-inset-bottom, 0px))
+      calc(1rem + env(safe-area-inset-left, 0px));
+  }
+
+  .login-card,
+  .register-card {
+    padding: 1.5rem 1.15rem;
+    border-radius: 22px;
+  }
+  .login-card-header,
+  .register-card-header { margin-bottom: 1rem; }
+  .login-card-header p { font-size: 0.88rem; }
+  .login-mobile-brand { margin-bottom: 0.9rem; font-size: 1.05rem; }
+  .login-remember { font-size: 0.84rem; }
+  .login-error { font-size: 0.85rem; }
+  .register-eyebrow {
+    font-size: 0.64rem;
+    letter-spacing: 0.1em;
+    padding: 0.28rem 0.55rem;
+  }
+
+  /* Stack email/phone and password/confirm pairs. */
+  .register-grid-2 {
+    grid-template-columns: 1fr;
+    row-gap: 0;
+  }
+
+  /* 16px inputs — required so iOS Safari does not auto-zoom on focus.
+     .register-input no longer sets font-size, so forms.css's rule applies. */
+  .login-input,
+  .register-input,
+  .login-card .form-control,
+  .register-card .form-control {
+    font-size: 16px;
+    min-height: 48px;
+  }
+
+  /* Role tiles: comfortable thumb targets, hint text stays readable. */
+  .register-role-tile {
+    padding: 0.75rem 0.8rem;
+    min-height: 56px;
+    border-radius: 14px;
+  }
+  .register-role-icon { width: 40px; height: 40px; border-radius: 12px; }
+  .register-role-text strong { font-size: 0.88rem; }
+  .role-hint { font-size: 0.78rem; line-height: 1.35; }
+
+  .login-submit { min-height: 50px; font-size: 0.95rem; }
+  .register-submit { min-height: 50px; font-size: 0.95rem; }
+  .register-terms,
+  .login-terms { font-size: 0.75rem; }
+  .auth-footer-prompt { font-size: 0.88rem; margin-top: 1.1rem; }
+  .login-secure-note { font-size: 0.74rem; margin-top: 1rem; }
+  .auth-resume-note { font-size: 0.8rem; padding: 0.55rem 0.75rem; }
+  .register-strength-hint { display: inline; }
+  .password-strength-label { font-size: 0.75rem; }
+  .field-error,
+  .field-hint { font-size: 0.78rem; }
+}
+
+/* ---- Small phone: single-column role picker, tighter rhythm ---- */
+@media (max-width: 480px) {
+  .register-role-grid { grid-template-columns: 1fr; gap: 0.6rem; }
+  .register-role-tile { gap: 0.6rem; }
+  .register-strength-bars { gap: 5px; }
+  .register-strength-seg { height: 5px; }
+  .login-options-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.65rem;
+  }
+}
+
+/* ---- Tiny phone (≤400px): compact card, no cramped chrome ---- */
+@media (max-width: 400px) {
+  .login-form-side,
+  .register-form-side { padding: 1rem 0.75rem 1.75rem; }
+  .login-card,
+  .register-card {
+    padding: 1.35rem 1rem 1.35rem;
+    border-radius: 20px;
+  }
+  .auth-card-modern { padding: 1.5rem 1rem; }
+  .login-card-header h1,
+  .login-card-header h2 { font-size: 1.35rem; }
+  .login-label-row { gap: 0.25rem 0.5rem; }
+  .login-link-btn { font-size: 0.8rem; }
+  .login-remember { font-size: 0.8rem; }
+  .register-eyebrow { letter-spacing: 0.06em; }
+  .register-eyebrow-badge,
+  .login-eyebrow-badge {
+    font-size: 0.7rem;
+    padding: 0.35rem 0.7rem;
+    max-width: 100%;
+    text-align: center;
+    justify-content: center;
+  }
+  .register-role-icon { width: 38px; height: 38px; }
+  .register-role-check { width: 20px; height: 20px; }
+  .login-submit { min-height: 48px; border-radius: 12px; }
+  /* Generic segmented control also collapses here (see responsive.css). */
+  .role-segmented-control { grid-template-columns: 1fr; }
+}
+
+/* ---- ≤360px: keep every tap target ≥40px, shrink logo/brand ---- */
+@media (max-width: 360px) {
+  .login-form-side,
+  .register-form-side { padding: 0.9rem 0.6rem 1.5rem; }
+  .login-mobile-brand { font-size: 0.98rem; gap: 0.45rem; }
+  .login-mobile-brand .brand-logo-img { width: 30px; height: 30px; }
+  .auth-footer-prompt { font-size: 0.84rem; }
+  .register-role-tile { padding: 0.65rem 0.7rem; min-height: 52px; }
+  .register-role-icon { width: 36px; height: 36px; }
+  .register-role-text strong { font-size: 0.84rem; }
+  .role-hint { font-size: 0.74rem; }
+  .login-card,
+  .register-card { padding: 1.2rem 0.9rem; border-radius: 18px; }
+  .login-card-header h1,
+  .login-card-header h2 { font-size: 1.25rem; }
+}
+
+/* ---- Short viewports (landscape phones, short desktop windows): compact
+      vertical rhythm so the whole card fits without excessive scrolling. ---- */
+@media (max-height: 560px) {
+  .login-form-side,
+  .register-form-side { padding-top: 1.25rem; padding-bottom: 1.25rem; }
+  .login-card,
+  .register-card { padding-top: 1.4rem; padding-bottom: 1.3rem; }
+  .login-card-header { margin-bottom: 0.9rem; }
+  .login-mobile-brand { margin-bottom: 0.8rem; }
+  .login-perks { margin-bottom: 1.2rem; }
+  .auth-footer-prompt { margin-top: 1rem; }
+  .login-secure-note { margin-top: 0.9rem; }
+}
+
+/* ---- Ultra-wide monitors: cap line lengths instead of stretching edge
+      to edge. ---- */
+@media (min-width: 1600px) {
+  .login-split,
+  .register-split { grid-template-columns: 1fr 1fr; }
+  .login-showcase-inner { max-width: 440px; }
+  .register-showcase-inner { max-width: 440px; }
+  .login-form-side,
+  .register-form-side { padding-inline: clamp(1.5rem, 5vw, 5rem); }
+  .login-card { width: min(100%, 480px); max-width: 480px; }
+  .register-card { width: min(100%, 560px); max-width: 560px; }
+}
+
+/* ---- Reduced motion: no card entry / tile transitions ---- */
+@media (prefers-reduced-motion: reduce) {
+  .login-card { animation: none; }
+  .login-submit, .login-perk-icon { transition: none; }
+  .register-role-tile,
+  .register-role-icon,
+  .register-role-check { transition: none; }
+  .register-role-tile:hover { transform: none; }
+  .login-showcase-glow { animation: none; }
 }

@@ -71,19 +71,24 @@ const stubFindOne = (doc) => () => Q(doc);
     check("active route is public (single handler = listActiveCoupons)",
       handlerList("/active", "get").length === 1 && lastIs("/active", "get", couponCtrl.listActiveCoupons),
       JSON.stringify(handlerList("/active", "get").map((h) => h.is)));
-    check("validate route is auth + customer authorize + validateCoupon",
-      firstIsAuth("/validate", "post") && handlerList("/validate", "post").length === 3 && lastIs("/validate", "post", couponCtrl.validateCoupon),
+    check("validate route is auth + customer authorize + validators + validateCoupon",
+      firstIsAuth("/validate", "post") && handlerList("/validate", "post").length > 3 && lastIs("/validate", "post", couponCtrl.validateCoupon),
       JSON.stringify(handlerList("/validate", "post").length));
     for (const [m, fn] of [["get", couponCtrl.listCoupons], ["post", couponCtrl.createCoupon]]) {
-      check(`admin ${m.toUpperCase()} / has auth + admin + ${fn === couponCtrl.listCoupons ? "list" : "create"}`,
-        firstIsAuth("/", m) && handlerList("/", m).length === 3 && lastIs("/", m, fn),
+      // GET / stays lean (auth + admin + list); POST / carries body validators.
+      const wantLen = m === "get" ? 3 : ">3";
+      const lenOk = m === "get"
+        ? handlerList("/", m).length === 3
+        : handlerList("/", m).length > 3;
+      check(`admin ${m.toUpperCase()} / has auth + admin + ${fn === couponCtrl.listCoupons ? "list" : "create"} (len ${wantLen})`,
+        firstIsAuth("/", m) && lenOk && lastIs("/", m, fn),
         JSON.stringify(handlerList("/", m).length));
     }
-    check("admin PATCH /:id is auth + admin + updateCoupon",
-      firstIsAuth("/:id", "patch") && handlerList("/:id", "patch").length === 3 && lastIs("/:id", "patch", couponCtrl.updateCoupon),
+    check("admin PATCH /:id is auth + admin + validators + updateCoupon",
+      firstIsAuth("/:id", "patch") && handlerList("/:id", "patch").length > 3 && lastIs("/:id", "patch", couponCtrl.updateCoupon),
       JSON.stringify(handlerList("/:id", "patch").length));
-    check("admin DELETE /:id is auth + admin + deleteCoupon",
-      firstIsAuth("/:id", "delete") && handlerList("/:id", "delete").length === 3 && lastIs("/:id", "delete", couponCtrl.deleteCoupon),
+    check("admin DELETE /:id is auth + admin + id check + deleteCoupon",
+      firstIsAuth("/:id", "delete") && handlerList("/:id", "delete").length > 3 && lastIs("/:id", "delete", couponCtrl.deleteCoupon),
       JSON.stringify(handlerList("/:id", "delete").length));
 
     console.log("\n═══ COUPON VALIDATE (no mutation) ═══");

@@ -1,3 +1,8 @@
+// Business clock runs on Asia/Kolkata: pin the process timezone FIRST (before
+// any Date is constructed) so server-local calls agree with IST. All booking
+// math additionally resolves IST explicitly (F-08), so this is defense in
+// depth — a host that ignores TZ still computes correct cutoffs.
+if (!process.env.TZ) process.env.TZ = "Asia/Kolkata";
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -22,12 +27,62 @@ const app = express();
 app.set("trust proxy", 1);
 
 // ---- Security + throughput headers/payload hardening (1000-user ready) ----
-// helmet: safe defaults (HSTS, noSniff, frameguard, XSS filter).
+// helmet: safe defaults (HSTS in production, noSniff, frameguard).
 // crossOriginResourcePolicy "cross-origin" keeps /uploads images + API
 // usable when the frontend is hosted on a different origin (CLIENT_URL).
-// contentSecurityPolicy is OFF: the app serves inline CRA scripts/styles and
-// Razorpay/GA third-party scripts that a strict CSP would break.
-app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: "cross-origin" } }));
+// A restrictive CSP is enabled: same-origin scripts/styles plus the
+// explicitly required third parties (Razorpay checkout, Google Identity
+// Services + Fonts). Inline CRA runtime chunks are allowed via
+// 'unsafe-inline' for scripts/styles ONLY (no 'unsafe-eval'), and images
+// may be data:/blob: for upload previews. Objects/frames default to none;
+// framing is denied (frameguard) except the Razorpay/Google flows that use
+// popups, not iframes.
+const cspDirectives = {
+  defaultSrc: ["'self'"],
+  scriptSrc: [
+    "'self'",
+    "'unsafe-inline'",
+    "https://checkout.razorpay.com",
+    "https://accounts.google.com",
+    "https://apis.google.com",
+  ],
+  styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+  fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+  imgSrc: ["'self'", "data:", "blob:", "https://*.googleusercontent.com", "https://cdn.razorpay.com"],
+  connectSrc: [
+    "'self'",
+    "https://api.razorpay.com",
+    "https://checkout.razorpay.com",
+    "https://cdn.razorpay.com",
+    "https://accounts.google.com",
+  ],
+  frameSrc: ["'self'", "https://checkout.razorpay.com", "https://api.razorpay.com"],
+  objectSrc: ["'none'"],
+  baseUri: ["'self'"],
+  formAction: ["'self'"],
+};
+app.use(
+  helmet({
+    contentSecurityPolicy: { directives: cspDirectives },
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    // Sign in with Google opens an accounts.google.com popup that must talk
+    // back to this page via window.opener. Helmet's default COOP
+    // (same-origin) severs that link, so the popup closes and no credential
+    // ever arrives — but ONLY in production, where this server (not the CRA
+    // dev server) serves the page. Google's own GIS docs require
+    // same-origin-allow-popups for this flow.
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+  })
+);
+// Extra hardening headers not covered by helmet defaults.
+app.use((req, res, next) => {
+  // No sniffing of uploads/API payloads.
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  // Least-privilege device APIs for the whole app.
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)");
+  next();
+});
 // compression: gzip JSON/API + static frontend (threshold 1kb).
 app.use(compression({ threshold: 1024 }));
 
@@ -97,8 +152,9 @@ if (process.env.NODE_ENV === "production") {
   }
   if (process.env.ALLOW_TEST_PAYMENTS === "true") {
     console.error(
-      "CONFIG WARNING: ALLOW_TEST_PAYMENTS=true is set while NODE_ENV=production. Test-mode checkout is now force-disabled in code, but unset this var to remove confusion."
+      "CONFIG ERROR: ALLOW_TEST_PAYMENTS=true is set while NODE_ENV=production. Refusing to start: test-mode checkout must never be enabled on the live site. Unset the variable and restart."
     );
+    process.exit(1);
   }
   if (!process.env.GOOGLE_CLIENT_ID) {
     console.warn(
@@ -121,19 +177,53 @@ if (process.env.NODE_ENV === "production") {
       "CONFIG NOTICE: RAZORPAY_WEBHOOK_SECRET is not set — POST /api/payments/webhook cannot verify signatures (browser payments still work, webhook reconcile is skipped)."
     );
   }
+  // Opt-in hard gate for real-money deployments: with REQUIRE_PAYMENTS=true
+  // the process refuses to boot unless live gateway keys AND the webhook
+  // secret are present, so a misconfigured deploy can never silently take
+  // (or fail) payments.
+  if (process.env.REQUIRE_PAYMENTS === "true") {
+    let paymentsReady = false;
+    try {
+      paymentsReady =
+        require("./config/razorpay").isConfigured && Boolean(process.env.RAZORPAY_WEBHOOK_SECRET);
+    } catch {
+      paymentsReady = false;
+    }
+    if (!paymentsReady) {
+      console.error(
+        "CONFIG ERROR: REQUIRE_PAYMENTS=true but live Razorpay keys and/or RAZORPAY_WEBHOOK_SECRET are missing. Refusing to start."
+      );
+      process.exit(1);
+    }
+  }
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    console.warn(
+      "CONFIG NOTICE: SMTP_HOST/SMTP_USER are not set — password-reset emails cannot be delivered (users get a generic message and no link arrives). Set SMTP_HOST/PORT/USER/PASS/FROM to enable."
+    );
+  }
 }
 
 // Background retry loop — never throws, never exits. The API stays up
 // (health reports db status) even while MongoDB is unreachable.
 connectDB();
 
-// A single stray async error must not kill the whole server. Log loudly,
-// keep serving.
+// Fail-fast on uncaught exceptions (S-14): continuing to serve with
+// potentially corrupt in-memory state risks wrong bookings/payments. The
+// process manager (Render / Docker / cluster master) restarts us; the
+// health check fails until then. Unhandled rejections are still logged
+// without exiting (request-scoped promise bugs shouldn't drop the process).
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled promise rejection (server kept alive):", reason);
 });
 process.on("uncaughtException", (err) => {
-  console.error("Uncaught exception (server kept alive):", err);
+  console.error("Uncaught exception — exiting so the process manager restarts clean:", err);
+  try {
+    mongoose.connection.close(false);
+  } catch {
+    // best-effort
+  } finally {
+    process.exit(1);
+  }
 });
 
 // CORS: allow the deployed frontend origin (CLIENT_URL, comma-separated for
@@ -167,8 +257,15 @@ app.use("/api/payments/webhook", express.raw({ type: "application/json", limit: 
 // Bounded JSON bodies: a 10MB default lets one client burn memory per request.
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: false, limit: "100kb" }));
+// Scrub single-purpose doc tokens out of access logs: the signed URL query
+// (?docToken=) must never be persisted to log files (P0-2). Session JWTs are
+// never in URLs anymore, so nothing else needs scrubbing.
+morgan.token("scrubbed-url", (req) => {
+  const url = req.originalUrl || req.url || "";
+  return url.replace(/([?&]docToken=)[^&\s]*/g, "$1[REDACTED]");
+});
 app.use(
-  morgan(isProduction ? "combined" : "dev", {
+  morgan(isProduction ? ':remote-addr - :remote-user [:date[clf]] ":method :scrubbed-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"' : "dev", {
     // Keep health-check noise out of production logs.
     skip: (req) => req.path === "/api/health" && isProduction,
   })
@@ -176,16 +273,27 @@ app.use(
 
 // Uploaded cook verification documents (Aadhaar / PAN / photo).
 // Identity docs are private: public profile photos (photo_*) stay open, but
-// aadhar_*/pan_* need the owning cook or an admin. Browsers fetch these via
-// plain <img>/<a>/<iframe> (no auth headers), so a ?token= query is accepted
-// alongside the Authorization header — the frontend appends it automatically.
+// aadhar_*/pan_* are served ONLY via short-lived single-purpose signed URLs
+// (GET /api/docs/view?docToken=..., minted by POST /api/docs/signed-url).
+// Long-lived session JWTs are NEVER accepted in URLs (P0-2): they leak via
+// browser history, server logs, and Referer headers. Browsers fetch these
+// via plain <img>/<a>/<iframe> (no auth headers), which is exactly what the
+// expiring doc token is for.
 const uploadAccess = async (req, res, next) => {
   try {
     const base = path.basename(req.path || "");
     if (/^photo_/i.test(base)) return next();
+    // Legacy ?token=<session JWT> support has been REMOVED. Any request
+    // still carrying it is rejected with a clear migration message.
+    if (req.query && String(req.query.token || "").trim()) {
+      return res.status(401).json({
+        message: "Document links using session tokens are no longer supported. Please refresh to get a secure view link.",
+        code: "DOC_TOKEN_DEPRECATED",
+      });
+    }
     const header = req.header("Authorization") || req.header("authorization") || "";
     const headerToken = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-    const token = (req.query && String(req.query.token || "").trim()) || headerToken;
+    const token = headerToken;
     if (!token || !process.env.JWT_SECRET) {
       return res.status(401).json({ message: "Authentication required to view this document" });
     }
@@ -196,7 +304,7 @@ const uploadAccess = async (req, res, next) => {
       return res.status(401).json({ message: "Token is not valid" });
     }
     const User = require("./models/User");
-    const account = await User.findById(decoded.id).select("role status");
+    const account = await User.findById(decoded.id).select("role status tokenVersion");
     if (!account) {
       return res.status(401).json({ message: "Account no longer exists. Please log in again." });
     }
@@ -205,9 +313,13 @@ const uploadAccess = async (req, res, next) => {
         message: "Your account has been blocked by an administrator. Please contact support.",
       });
     }
-    // Filenames embed the uploader: <field>_<userId>_<ts>_... — the owner or
-    // an admin may view; everyone else is refused.
-    const ownerId = String(base).split("_")[1] || "";
+    if (Number(account.tokenVersion) > 0 && decoded.tv !== Number(account.tokenVersion)) {
+      return res.status(401).json({ message: "Session expired. Please log in again." });
+    }
+    // Filenames embed the OWNER cook: <field>_<userId>_<ts>_... — the owner
+    // or an admin may view; everyone else is refused.
+    const { ownerIdOf } = require("./utils/storage");
+    const ownerId = ownerIdOf(base);
     const isOwner = ownerId && ownerId.toLowerCase() === String(account._id).toLowerCase();
     if (String(account.role).toUpperCase() !== "ADMIN" && !isOwner) {
       return res.status(403).json({ message: "Not authorized for this action" });
@@ -217,9 +329,14 @@ const uploadAccess = async (req, res, next) => {
     return res.status(401).json({ message: "Authentication required to view this document" });
   }
 };
-app.use("/uploads", uploadAccess, express.static(path.join(__dirname, "uploads")));
+// Static root is the PARENT of the storage dir so the public URL prefix stays
+// /uploads/cook-docs/<file> in every environment (UPLOAD_DIR must therefore
+// end in "cook-docs" — enforced in utils/storage).
+const { uploadDir } = require("./utils/storage");
+app.use("/uploads", uploadAccess, express.static(path.dirname(uploadDir)));
 
 app.use("/api/auth", authLimiter, require("./routes/auth"));
+app.use("/api/docs", require("./routes/docs"));
 app.use("/api/cooks", require("./routes/cooks"));
 app.use("/api/bookings", require("./routes/bookings"));
 app.use("/api/payments", strictLimiter, require("./routes/payments"));
@@ -230,6 +347,7 @@ app.use("/api/notifications", require("./routes/notifications"));
 app.use("/api/leads", require("./routes/leads"));
 app.use("/api/coupons", require("./routes/coupons"));
 app.use("/api/analytics", require("./routes/analytics"));
+app.use("/api/payouts", strictLimiter, require("./routes/payouts"));
 // Visit pings fire once per browser session — own lighter bucket so a traffic
 // spike can't eat the general budget (or vice versa).
 app.use("/api/stats/public/visit", visitLimiter);

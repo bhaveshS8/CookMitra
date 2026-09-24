@@ -93,6 +93,60 @@ const cookProfileSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Working hours the cook actually agreed to. Empty `weekly` = the
+    // historical default (every cook bookable 08:00–20:00), so existing
+    // profiles keep working until the cook publishes a real schedule.
+    // day: 0 = Sunday … 6 = Saturday (JS getDay convention).
+    schedule: {
+      weekly: [
+        {
+          day: { type: Number, min: 0, max: 6 },
+          startTime: { type: String, default: "" },
+          endTime: { type: String, default: "" },
+          enabled: { type: Boolean, default: false },
+        },
+      ],
+      // "YYYY-MM-DD" dates the cook blocks entirely (leave/travel).
+      blockedDates: { type: [String], default: [] },
+      updatedAt: { type: Date },
+    },
+    // Where the cook's 75% should be paid. Only the last 4 digits of an
+    // account are stored — the transfer itself happens in the bank/UPI app.
+    payoutDetails: {
+      method: {
+        type: String,
+        enum: ["upi", "bank", ""],
+        default: "",
+      },
+      upiId: { type: String, default: "", trim: true },
+      holderName: { type: String, default: "", trim: true },
+      bankName: { type: String, default: "", trim: true },
+      accountLast4: { type: String, default: "", trim: true },
+      ifsc: { type: String, default: "", trim: true },
+      note: { type: String, default: "", trim: true },
+      updatedAt: { type: Date },
+    },
+    // Append-only destination history (capped): every saved payoutDetails is
+    // snapshotted here before replacement, so a destination swapped right
+    // before settlement stays auditable. Settlements freeze their own copy
+    // on the booking (payout.recipient) — this is the change trail.
+    payoutDetailsHistory: {
+      type: [
+        {
+          method: { type: String, default: "", trim: true },
+          upiId: { type: String, default: "", trim: true },
+          holderName: { type: String, default: "", trim: true },
+          bankName: { type: String, default: "", trim: true },
+          accountLast4: { type: String, default: "", trim: true },
+          ifsc: { type: String, default: "", trim: true },
+          changedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
+    // Bookings the cook cancelled after accepting (reliability signal shown
+    // on the admin dossier). Bumped atomically in cancelBooking.
+    cancelledByCookCount: { type: Number, default: 0, min: 0 },
     // Rating aggregate, maintained by createReview only (updateCookProfile
     // strips a `rating` payload so a cook can never edit their own score).
     // `sum`/`count` are the authoritative counters, bumped atomically with

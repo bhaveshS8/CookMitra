@@ -27,7 +27,10 @@ const bookingDoc = new Booking({
   addressDetails: { flatNo: "H-12", society: "Green Park", city: "Delhi" },
   location: { lat: 28.6139, lng: 77.209 },
   amount: 900,
-  payment: { status: "pending" },
+  // Stored by POST /payments/order at checkout time — payBooking binds the
+  // submitted triple to this id (replay protection). Fixtures must carry it,
+  // exactly like a real booking awaiting confirmation.
+  payment: { status: "pending", razorpayOrderId: "order_test_1" },
   status: "accepted",
   statusHistory: [],
 });
@@ -36,12 +39,33 @@ bookingDoc.save = async function () {
 };
 
 const savedFindOne = Booking.findOne;
+const savedFindOneAndUpdate = Booking.findOneAndUpdate;
 const savedUserFindById = User.findById;
 const savedNotifCreate = Notification.create;
 const savedProfileFindOne = CookProfile.findOne;
+const LedgerEntry = require("./models/LedgerEntry");
+const savedLedgerCreate = LedgerEntry.create;
+const ledgerRows = [];
 
 const notifications = [];
 Booking.findOne = () => bookingDoc;
+// Emulate the atomic pay claim (accepted+unpaid -> confirmed+paid) without a
+// DB: only the live booking wins; anything else loses like the real
+// conditional update. Ledger writes are captured in-memory (no buffering).
+Booking.findOneAndUpdate = async (filter, update) => {
+  if (String(filter?._id) !== String(bookingDoc._id)) return null;
+  if (bookingDoc.status !== "accepted" || bookingDoc.payment?.status === "paid") return null;
+  const set = update?.$set || {};
+  if (set.payment) bookingDoc.payment = { ...(bookingDoc.payment || {}), ...set.payment };
+  if (set.status) bookingDoc.status = set.status;
+  const pushed = update?.$push?.statusHistory;
+  if (pushed) bookingDoc.statusHistory.push(pushed);
+  return bookingDoc;
+};
+LedgerEntry.create = async (e) => {
+  ledgerRows.push(e);
+  return e;
+};
 User.findById = (id) => ({
   select: async () =>
     String(id) === "507f1f77bcf86cd799439013"
@@ -235,8 +259,10 @@ const next = (e) => {
     process.exit(1);
   } finally {
     Booking.findOne = savedFindOne;
+    Booking.findOneAndUpdate = savedFindOneAndUpdate;
     User.findById = savedUserFindById;
     Notification.create = savedNotifCreate;
     CookProfile.findOne = savedProfileFindOne;
+    LedgerEntry.create = savedLedgerCreate;
   }
 })();

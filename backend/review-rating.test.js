@@ -88,6 +88,8 @@ const ownedBooking = (overrides = {}) => ({
   customer: CUSTOMER_ID,
   cook: COOK_ID,
   status: "completed",
+  // A completed service implies captured payment — reviews require it.
+  payment: { status: "paid" },
   ...overrides,
 });
 // Drives the controller and hands back the fake response so each case can
@@ -346,6 +348,16 @@ const testGuardRails = async () => {
   await runCase("review on a pending request -> 400", {
     booking: ownedBooking({ status: "requested" }),
     create: async (doc) => ({ _id: "r3", ...doc }),
+    expectStatus: 400,
+  });
+
+  // Unpaid holds are not rendered service — no review even after the slot
+  // time passes. The create must never run.
+  await runCase("review on an unpaid booking -> 400 with no write", {
+    booking: ownedBooking({ status: "confirmed", payment: { status: "pending" } }),
+    create: async () => {
+      throw new Error("Review.create must not run for unpaid bookings");
+    },
     expectStatus: 400,
   });
 

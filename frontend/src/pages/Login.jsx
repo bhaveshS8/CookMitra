@@ -5,6 +5,13 @@ import { loginUser } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
 import { safeNextPath } from "../utils/bookingDraft";
 import {
+  authErrorMessage,
+  fieldErrorsFromResponse,
+  normalizeEmail,
+  validateEmail,
+  validatePassword,
+} from "../utils/authValidation";
+import {
   Mail,
   Lock,
   Eye,
@@ -13,17 +20,21 @@ import {
   AlertCircle,
   CalendarCheck,
   Wallet,
-  Star,
   ShieldCheck,
   Loader2,
+  Users,
+  BadgeCheck,
 } from "lucide-react";
 import cookMitraLogo from "../assets/logo.png";
-import GoogleSignInButton from "../components/GoogleSignInButton";
+// Google sign-in intentionally disabled for now — re-enable together with the
+// commented <GoogleSignInButton /> block below.
+// import GoogleSignInButton from "../components/GoogleSignInButton";
 
 const Login = () => {
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -37,17 +48,41 @@ const Login = () => {
   const registerTo = next ? `/register?next=${encodeURIComponent(next)}` : "/register";
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+    // Clear the field's error as soon as the user fixes it.
+    setFieldErrors((prev) => (prev[name] ? { ...prev, [name]: "" } : prev));
+    if (error) setError("");
+  };
+
+  const validate = () => {
+    const errors = {};
+    const emailErr = validateEmail(formData.email);
+    if (emailErr) errors.email = emailErr;
+    if (!formData.password) errors.password = "Password is required";
+    else {
+      const pwErr = validatePassword(formData.password);
+      if (pwErr) errors.password = pwErr;
+    }
+    setFieldErrors(errors);
+    return errors;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
+    const errors = validate();
+    if (Object.values(errors).some(Boolean)) {
+      setError("Please fix the highlighted fields and try again.");
+      return;
+    }
     setLoading(true);
     setError("");
 
     try {
+      const email = normalizeEmail(formData.email);
       const { user } = await dispatch(
-        loginUser({ email: formData.email, password: formData.password, rememberMe })
+        loginUser({ email, password: formData.password, rememberMe })
       ).unwrap();
 
       showToast(`Welcome back, ${user.name}!`, "success");
@@ -62,7 +97,9 @@ const Login = () => {
         navigate("/");
       }
     } catch (err) {
-      const msg = err.response?.data?.message || "Invalid credentials. Please try again.";
+      const serverFields = fieldErrorsFromResponse(err);
+      if (Object.keys(serverFields).length) setFieldErrors(serverFields);
+      const msg = authErrorMessage(err, "Invalid credentials. Please try again.");
       setError(msg);
       showToast(msg, "error");
     } finally {
@@ -72,21 +109,21 @@ const Login = () => {
 
   return (
     <div className="login-split">
+      {/* ---- Professional showcase panel (mirrors register) ---- */}
       <aside className="login-showcase">
         <div className="login-showcase-glow login-showcase-glow-1" />
         <div className="login-showcase-glow login-showcase-glow-2" />
         <div className="login-showcase-inner">
-          <Link to="/" className="login-brand">
-            <img
-              src={cookMitraLogo}
-              alt="Cook Mitra logo"
-              className="brand-logo-img"
-            />
+          <Link to="/" className="login-brand" tabIndex={-1}>
+            <img src={cookMitraLogo} alt="Cook Mitra logo" className="brand-logo-img" />
             <span>
               Cook<span className="brand-accent">Mitra</span>
             </span>
           </Link>
 
+          <span className="login-eyebrow-badge">
+            <Users size={14} /> Trusted by 12,000+ households
+          </span>
           <h1 className="login-showcase-title">Welcome back</h1>
           <p className="login-showcase-sub">
             Sign in to manage your bookings, profile and festive favourites.
@@ -101,9 +138,9 @@ const Login = () => {
             </li>
             <li className="login-perk-item">
               <span className="login-perk-icon">
-                <Star size={17} />
+                <BadgeCheck size={17} />
               </span>
-              4.8-rated verified home cooks
+              ID-verified, background-checked cooks
             </li>
             <li className="login-perk-item">
               <span className="login-perk-icon">
@@ -128,6 +165,7 @@ const Login = () => {
         </div>
       </aside>
 
+      {/* ---- Form panel (mirrors register card chrome) ---- */}
       <div className="login-form-side">
         <div className="login-card">
           <div className="login-card-header">
@@ -143,7 +181,7 @@ const Login = () => {
               </span>
             </div>
             <h2>Sign in</h2>
-            <p>Enter your email and password to continue</p>
+            <p>Access your CookMitra account</p>
           </div>
 
           {next && (
@@ -153,14 +191,16 @@ const Login = () => {
           )}
 
           {error && (
-            <div className="error-alert-banner login-error">
+            <div className="error-alert-banner login-error" role="alert">
               <AlertCircle size={16} /> {error}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="login-form">
+          <form onSubmit={handleSubmit} className="login-form" noValidate>
             <div className="booking-form-group">
-              <label htmlFor="login-email">Email address</label>
+              <label htmlFor="login-email">
+                Email address <span className="login-required" aria-hidden="true">*</span>
+              </label>
               <div className="input-with-icon">
                 <Mail size={18} className="input-icon-prefix" />
                 <input
@@ -171,17 +211,37 @@ const Login = () => {
                   placeholder="name@example.com"
                   value={formData.email}
                   onChange={handleChange}
+                  onBlur={() =>
+                    setFieldErrors((p) => ({ ...p, email: validateEmail(formData.email) || "" }))
+                  }
                   autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  maxLength={254}
+                  aria-invalid={Boolean(fieldErrors.email)}
+                  aria-describedby={fieldErrors.email ? "login-email-error" : undefined}
                   required
                 />
               </div>
+              {fieldErrors.email && (
+                <div className="field-error" id="login-email-error" role="alert">
+                  {fieldErrors.email}
+                </div>
+              )}
             </div>
 
             <div className="booking-form-group">
               <div className="login-label-row">
-                <label htmlFor="login-password">Password</label>
+                <label htmlFor="login-password">
+                  Password <span className="login-required" aria-hidden="true">*</span>
+                </label>
                 <Link
-                  to={formData.email ? `/forgot-password?email=${encodeURIComponent(formData.email)}` : "/forgot-password"}
+                  to={
+                    formData.email
+                      ? `/forgot-password?email=${encodeURIComponent(normalizeEmail(formData.email))}`
+                      : "/forgot-password"
+                  }
                   className="login-link-btn"
                   tabIndex={-1}
                 >
@@ -199,6 +259,9 @@ const Login = () => {
                   value={formData.password}
                   onChange={handleChange}
                   autoComplete="current-password"
+                  maxLength={128}
+                  aria-invalid={Boolean(fieldErrors.password)}
+                  aria-describedby={fieldErrors.password ? "login-password-error" : undefined}
                   required
                 />
                 <button
@@ -210,17 +273,24 @@ const Login = () => {
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
+              {fieldErrors.password && (
+                <div className="field-error" id="login-password-error" role="alert">
+                  {fieldErrors.password}
+                </div>
+              )}
             </div>
 
-            <label className="login-remember">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-              />
-              <span className="login-checkbox" aria-hidden="true" />
-              Keep me signed in on this device
-            </label>
+            <div className="login-options-row">
+              <label className="login-remember">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                />
+                <span className="login-checkbox" aria-hidden="true" />
+                Keep me signed in on this device
+              </label>
+            </div>
 
             <button
               type="submit"
@@ -229,7 +299,7 @@ const Login = () => {
             >
               {loading ? (
                 <>
-                  <Loader2 size={19} className="spin" /> Signing in...
+                  <Loader2 size={19} className="spin" /> Signing in…
                 </>
               ) : (
                 <>
@@ -237,9 +307,14 @@ const Login = () => {
                 </>
               )}
             </button>
+
+            <p className="login-terms">
+              By signing in you agree to our <Link to="/terms">Terms</Link> and{" "}
+              <Link to="/privacy">Privacy Policy</Link>.
+            </p>
           </form>
 
-          <div className="auth-divider">
+          {/* <div className="auth-divider">
             <span>or</span>
           </div>
 
@@ -251,7 +326,7 @@ const Login = () => {
 
           <div className="auth-google-role-note">
             New here? Join with Google — account type will be set during setup.
-          </div>
+          </div> */}
 
           <div className="auth-footer-prompt">
             Don&apos;t have an account yet? <Link to={registerTo}>Create an account</Link>

@@ -23,9 +23,13 @@ body {
 *::-webkit-scrollbar-track { background: #faf5ed; }
 *::-webkit-scrollbar-thumb { background: linear-gradient(180deg,#fdba74,#ea580c); border-radius: 99px; border: 2px solid #faf5ed; }
 .main-content { animation: pageIn 0.45s var(--ease-out) both; }
-@keyframes pageIn { from { opacity: 0; transform: translateY(14px); filter: blur(4px);} to { opacity: 1; transform: none; filter: blur(0);} }
+/* NOTE: the TO frame must end at filter: none (NOT blur(0)). Any other filter
+   value — even blur(0) — keeps a permanent stacking context on .main-content
+   (and .bf-card/.ondemand-hero/.page-header-banner below), which traps every
+   position:fixed dialog inside it so the sticky navbar paints OVER dialogs. */
+@keyframes pageIn { from { opacity: 0; transform: translateY(14px); filter: blur(4px);} to { opacity: 1; transform: none; filter: none;} }
 .reveal { opacity: 0; transform: translateY(var(--reveal-y,26px)) scale(0.99); filter: blur(6px); transition: opacity 0.7s var(--ease-out), transform 0.7s var(--ease-out), filter 0.7s var(--ease-out); will-change: opacity, transform; }
-.reveal.is-visible, .reveal.visible { opacity: 1; transform: none; filter: blur(0); }
+.reveal.is-visible, .reveal.visible { opacity: 1; transform: none; filter: none; }
 .stagger-1 { transition-delay: 0.08s; } .stagger-2 { transition-delay: 0.16s; }
 .stagger-3 { transition-delay: 0.24s; } .stagger-4 { transition-delay: 0.32s; }
 .gradient-text { background: var(--gradient-text); -webkit-background-clip: text; background-clip: text; color: transparent; }
@@ -64,7 +68,7 @@ body {
 .hero-v2-glow-2 { animation-delay: -3s; } .hero-v2-glow-3 { animation-delay: -6s; }
 @keyframes glowDrift { from { transform: translate(0,0) scale(1); opacity: 0.9;} to { transform: translate(30px,-24px) scale(1.12); opacity: 1;} }
 .hero-v2-title { text-wrap: balance; animation: titleUp 0.7s var(--ease-out) both; }
-@keyframes titleUp { from { opacity: 0; transform: translateY(26px); filter: blur(6px);} to { opacity: 1; transform: none; filter: blur(0);} }
+@keyframes titleUp { from { opacity: 0; transform: translateY(26px); filter: blur(6px);} to { opacity: 1; transform: none; filter: none;} }
 .hero-v2-accent { background: none; -webkit-background-clip: unset; background-clip: unset; color: #F97316; }
 .hero-v2-cook-wrap { transition: transform 0.4s var(--ease-out), box-shadow 0.4s ease; animation: heroFloat 6s ease-in-out infinite; }
 @keyframes heroFloat { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-10px);} }
@@ -98,7 +102,7 @@ body {
 .field-error { animation: shake 0.35s ease; }
 @keyframes shake { 0%,100% { transform: translateX(0);} 25% { transform: translateX(-5px);} 50% { transform: translateX(5px);} 75% { transform: translateX(-3px);} }
 .toast-item { animation: toastSlide 0.38s var(--ease-spring) both; box-shadow: var(--shadow-float); }
-@keyframes toastSlide { from { opacity: 0; transform: translateX(60px) scale(0.96);} to { opacity: 1; transform: none;} }
+@keyframes toastSlide { from { opacity: 0; transform: translateY(-18px) scale(0.97);} to { opacity: 1; transform: none;} }
 .login-modal, .add-cook-modal { animation: modalPop 0.32s var(--ease-spring) both; }
 @keyframes modalPop { from { opacity: 0; transform: scale(0.92) translateY(16px);} to { opacity: 1; transform: none;} }
 .login-modal-overlay { animation: overlayFade 0.25s ease both; }
@@ -120,6 +124,9 @@ body {
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid rgba(232,89,12,0.45); outline-offset: 2px; border-radius: 8px; }
 @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; filter: none; transition: none; } .main-content, .navbar, .mobile-menu, .toast-item, .login-modal, .add-cook-modal, .hero-v2-cook-wrap, .hero-v2-float, .dish-marquee-track, .cta-banner::before, .footer-modern::before { animation: none !important; } html { scroll-behavior: auto; } }
 @media (max-width: 640px) { .reveal { --reveal-y: 16px; } .to-top-fab { right: 1rem; bottom: 5.5rem; } }
+/* Very small phones: sticky action bars often wrap to two rows (~120px
+   tall), so lift the back-to-top button clear of them and shrink it. */
+@media (max-width: 480px) { .to-top-fab { bottom: 7.5rem; width: 44px; height: 44px; } }
 /* part 4: scrolled navbar + stagger */
 .navbar.is-scrolled { background: rgba(255,255,255,0.88); box-shadow: 0 12px 34px -12px rgba(124,45,18,0.35); }
 .services-grid-modern .service-card-modern:nth-child(2) { transition-delay: 0.06s; }

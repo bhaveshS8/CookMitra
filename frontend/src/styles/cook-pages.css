@@ -47,12 +47,27 @@
   flex-shrink: 0;
   aspect-ratio: 1 / 1;
 }
+/* The hero avatar links to the cook's profile page — no link styling, and
+   a subtle zoom hint that it is clickable. */
+.cook-modern-avatar-link {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.cook-modern-avatar-link .cook-modern-avatar,
+.cook-modern-avatar-link .cook-modern-avatar-fallback {
+  transition: transform 0.15s ease;
+}
+.cook-modern-avatar-link:hover .cook-modern-avatar,
+.cook-modern-avatar-link:hover .cook-modern-avatar-fallback {
+  transform: scale(1.04);
+}
 .cook-modern-avatar {
   width: 100%;
   height: 100%;
   border-radius: 50%;
   object-fit: cover;
-  object-position: top center;
+  object-position: center;
   border: 3px solid rgba(255, 255, 255, 0.6);
   box-shadow: var(--shadow-brand);
   display: block;
@@ -469,7 +484,8 @@
   padding: 0.3rem 0.75rem;
 }
 
-/* Specialty tags on match card */
+/* Specialty tags on match card — long values clamp with an ellipsis so
+   they can never push past the card edge on narrow phones. */
 .match-card .tags {
   display: flex;
   flex-wrap: wrap;
@@ -477,6 +493,100 @@
   padding: 0;
   background: transparent;
   border-radius: 0;
+  min-width: 0;
+}
+.match-card .tags .tag {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Cards size to their content only: an empty specialties row must not
+   reserve a gap row. In the ≥768px step-3 grid each card also hugs its
+   own height instead of stretching to the tallest sibling. Phones keep
+   full-width column stretch (height there is already content-driven). */
+.match-card .tags:empty {
+  display: none;
+}
+@media (min-width: 768px) {
+  .ondemand-page .match-card {
+    height: auto;
+    align-self: start;
+  }
+}
+
+/* Compact step-3 cook cards on small screens: tighter padding/gaps, a
+   smaller avatar and rate pill, specialties clipped to one line, and the
+   book box turned into a single row (slot details left, Book button right)
+   instead of the roomy stacked desktop layout. Covers phones and
+   portrait tablets, where the full-size card dominated the viewport. */
+@media (max-width: 768px) {
+  .ondemand-page .match-card {
+    gap: 0.45rem;
+    padding: 0.7rem 0.75rem;
+    border-radius: 14px;
+  }
+  .ondemand-page .match-card-top { gap: 0.55rem; }
+  .ondemand-page .match-avatar {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+  }
+  .ondemand-page .match-id h3 {
+    font-size: 0.9rem;
+    margin-bottom: 0.1rem;
+  }
+  .ondemand-page .match-meta {
+    font-size: 0.74rem;
+    line-height: 1.35;
+  }
+  .ondemand-page .match-rate {
+    font-size: 0.82rem;
+    padding: 0.18rem 0.5rem;
+  }
+  .ondemand-page .match-card .tags {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    gap: 0.28rem;
+    padding-bottom: 0.1rem;
+  }
+  .ondemand-page .match-card .tags .tag {
+    flex: 0 0 auto;
+    font-size: 0.68rem;
+    padding: 0.14rem 0.45rem;
+  }
+  .ondemand-page .od-bookbox {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.45rem;
+    border-radius: 12px;
+  }
+  .ondemand-page .od-bookslot {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.72rem;
+    gap: 0.25rem 0.45rem;
+  }
+  .ondemand-page .od-bookslot-time svg {
+    width: 12px;
+    height: 12px;
+  }
+  .ondemand-page .od-bookfee { font-size: 0.78rem; }
+  .ondemand-page .od-bookbtn {
+    flex: 0 0 auto;
+    width: auto;
+    min-height: 40px;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+  }
+  .ondemand-page .od-bookbtn svg { width: 14px; height: 14px; }
+  .ondemand-page .match-card .field-hint {
+    font-size: 0.72rem;
+    margin: 0;
+  }
 }
 
 /* Bookable slot chips — comfortable tap targets */
@@ -929,6 +1039,36 @@
 .booking-item-card.cook-booking-card.st-rejected,
 .booking-item-card.cook-booking-card.st-cancelled,
 .booking-item-card.cook-booking-card.st-expired { border-left-color: var(--slate-300); }
+.booking-item-card.cook-booking-card.st-unattended {
+  border-left-color: #dc2626;
+  border-color: #fecaca;
+  background: linear-gradient(180deg, #fff 0%, #fef2f2 100%);
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15), var(--shadow-sm);
+}
+.booking-item-card.cook-booking-card.st-unattended:hover {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.25), var(--shadow-md);
+}
+
+/* New-request cards: warm highlight so they stand out in every tab, with
+   direct Accept / Ignore buttons sized for thumbs on every screen. On
+   phones the shared .booking-actions-row rule stacks them full-width. */
+.booking-item-card.cook-booking-card.st-requested {
+  border-color: #fcd9a8;
+  background: linear-gradient(180deg, #fffdf6 0%, #fff9ef 100%);
+  box-shadow: 0 8px 24px -12px rgba(217, 119, 6, 0.35);
+}
+.cook-request-actions { align-items: stretch; }
+.cook-request-actions .btn {
+  flex: 1 1 150px;
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  font-size: 0.95rem;
+}
+.cook-request-actions .btn:disabled { opacity: 0.65; cursor: wait; transform: none; }
 
 /* Customer row inside a cook booking card */
 .cook-card-customer {
@@ -1038,4 +1178,387 @@
   .cook-modern-avatar-wrap { width: 68px; height: 68px; min-width: 68px; min-height: 68px; }
   .cook-modern-hero-copy h1 { font-size: 1.25rem; }
   .cook-card-customer h3 { white-space: normal; }
+}
+
+/* ==========================================================================
+   Modern cook booking cards (all tabs: today / tomorrow / upcoming / past /
+   needs-action / reports). Card list becomes a responsive grid on wide
+   screens; each card is a header + meta grid + actions stack that collapses
+   cleanly to one column on phones.
+   ========================================================================== */
+
+/* Responsive grid: single card per row on every screen. Phones stack
+   full-width; tablet/laptop keep one roomy row card capped + centered so
+   lines stay readable on wide screens. */
+.bookings-list-modern.cook-bookings-grid {
+  width: 100%;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.9rem;
+  align-items: stretch;
+}
+.booking-item-card.cook-booking-card.cb-card {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  /* Tablet: one card per row at 70% width, centered */
+  .bookings-list-modern.cook-bookings-grid {
+    grid-template-columns: 1fr;
+    gap: 0.9rem;
+    max-width: 70%;
+    margin-inline: auto;
+  }
+  .booking-item-card.cook-booking-card.cb-card { padding: 1rem 1.1rem; border-radius: 18px; }
+  /* Directions pill gets its own row below the address so long venue
+     text can never overlap or squeeze it. */
+  .cb-meta-item .cook-addr-directions.cb-directions {
+    display: flex;
+    width: fit-content;
+    max-width: 100%;
+    margin-top: 0.6rem;
+    margin-left: auto;
+    padding-left: 1.75rem;
+  }
+}
+@media (min-width: 1024px) {
+  /* Laptop: one card per row at 70% width, centered */
+  .bookings-list-modern.cook-bookings-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    max-width: 70%;
+    margin-inline: auto;
+  }
+  .booking-item-card.cook-booking-card.cb-card { padding: 1.1rem 1.25rem; }
+  /* Directions pill gets its own row below the address so long venue
+     text can never overlap or squeeze it. */
+  .cb-meta-item .cook-addr-directions.cb-directions {
+    display: flex;
+    width: fit-content;
+    max-width: 100%;
+    margin-top: 0.6rem;
+    margin-left: auto;
+    padding-left: 1.75rem;
+  }
+}
+@media (min-width: 1280px) {
+  .bookings-list-modern.cook-bookings-grid { gap: 1.1rem; max-width: 70%; margin-inline: auto; }
+  .booking-item-card.cook-booking-card.cb-card { padding: 1.15rem 1.3rem; }
+}
+
+/* Card shell — modern gradient, soft shadow, status accent bar. */
+.booking-item-card.cook-booking-card.cb-card {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(255, 176, 32, 0.08) 0%, rgba(255, 176, 32, 0) 55%),
+    linear-gradient(180deg, #ffffff 0%, #fffdf9 100%);
+  border: 1px solid var(--border-subtle, #f1e8dc);
+  border-left: 5px solid var(--slate-200, #e2e8f0);
+  border-radius: 20px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 2px 0 rgba(226, 232, 240, 0.6),
+    0 12px 26px -18px rgba(15, 23, 42, 0.35);
+  padding: 1rem 1.1rem 1rem;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.booking-item-card.cook-booking-card.cb-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.9), rgba(255,237,213,0.7), rgba(255,255,255,0));
+  pointer-events: none;
+}
+.booking-item-card.cook-booking-card.cb-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 3px 0 rgba(226, 232, 240, 0.65),
+    0 18px 32px -18px rgba(15, 23, 42, 0.4);
+  border-color: #fed7aa;
+}
+/* Status accents (kept in sync with the st-* classes set in JSX). */
+.booking-item-card.cook-booking-card.cb-card.st-requested { border-left-color: var(--accent-amber, #f59e0b); }
+.booking-item-card.cook-booking-card.cb-card.st-accepted,
+.booking-item-card.cook-booking-card.cb-card.st-confirmed { border-left-color: var(--accent-blue, #3b82f6); }
+.booking-item-card.cook-booking-card.cb-card.st-in_progress { border-left-color: var(--accent-purple, #8b5cf6); }
+.booking-item-card.cook-booking-card.cb-card.st-completed { border-left-color: var(--accent-emerald, #10b981); }
+.booking-item-card.cook-booking-card.cb-card.st-rejected,
+.booking-item-card.cook-booking-card.cb-card.st-cancelled,
+.booking-item-card.cook-booking-card.cb-card.st-expired { border-left-color: var(--slate-300, #cbd5e1); }
+.booking-item-card.cook-booking-card.cb-card.st-unattended { border-left-color: #dc2626; }
+
+/* Header: customer identity + status badges. */
+.cb-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px dashed var(--slate-200, #e2e8f0);
+}
+.cb-id { display: flex; align-items: center; gap: 0.7rem; min-width: 0; flex: 1 1 auto; }
+.cook-avatar.cb-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  font-size: 1.05rem;
+  flex-shrink: 0;
+}
+.cb-id-text { min-width: 0; flex: 1 1 auto; }
+.cb-name-row { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; min-width: 0; }
+.cb-name-row h3 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--slate-900, #0f172a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.cb-name-row .cook-day-tag { margin: 0; }
+.cb-sub { margin: 0.25rem 0 0; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; font-size: 0.78rem; font-weight: 700; color: var(--slate-500, #64748b); }
+.cb-sub-item { display: inline-flex; align-items: center; gap: 0.3rem; text-transform: capitalize; min-width: 0; }
+.cb-sub-item svg { flex-shrink: 0; color: var(--primary, #e8590c); }
+.cb-badges { display: flex; gap: 0.35rem; flex-wrap: wrap; justify-content: flex-end; align-items: center; flex-shrink: 0; }
+.cb-badges .badge { font-size: 0.68rem; padding: 0.28rem 0.65rem; }
+.cb-badges .badge svg { width: 12px; height: 12px; }
+
+/* Meta grid: When / Where / Amount. */
+.cb-meta {
+  display: grid;
+  /* Auto-collapse: 2 cols when the card is wide, 1 col in narrow tablet
+     cards or phones — never forces a squeeze. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+  background: var(--slate-50, #f8fafc);
+  border: 1px solid var(--slate-100, #f1f5f9);
+  border-radius: 14px;
+  padding: 0.7rem 0.8rem;
+}
+.cb-meta-item { display: flex; gap: 0.6rem; align-items: flex-start; min-width: 0; }
+.cb-meta-ico {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid var(--slate-100, #f1f5f9);
+  color: var(--primary, #e8590c);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cb-meta-item > div { min-width: 0; flex: 1 1 auto; }
+.cb-meta-label {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--slate-400, #94a3b8);
+  margin-bottom: 0.1rem;
+}
+.cb-meta-value {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--slate-700, #334155);
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.cb-meta-item .cook-pay-pill { margin-top: 0.25rem; }
+
+/* Highlighted customer-location block: full-width row with a warm wash,
+   stronger border and bolder address text so the venue stands out. */
+.cb-meta-item.cb-meta-where {
+  grid-column: 1 / -1;
+  background: linear-gradient(180deg, #fffdf4 0%, #fef6e7 100%);
+  border: 1.5px solid #f5cf8f;
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+}
+.cb-meta-item.cb-meta-where .cb-meta-label { color: #b45309; }
+.cb-meta-item.cb-meta-where .cb-where-text {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--slate-900, #0f172a);
+  line-height: 1.45;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.cb-meta-item.cb-meta-where .cb-where-icon {
+  color: #b45309;
+  flex-shrink: 0;
+  display: inline-flex;
+}
+
+/* Big, thumb-friendly Directions button inside the highlighted block. */
+
+/* Big, thumb-friendly Directions button inside the highlighted block. */
+.cb-meta-item .cook-addr-directions.cb-directions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+  min-height: 44px;
+  padding: 0.55rem 1.15rem;
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #fff;
+  background: var(--primary-gradient, linear-gradient(135deg, #f2762e, #e8590c));
+  border: 1px solid transparent;
+  border-radius: 99px;
+  box-shadow: var(--shadow-brand, 0 4px 12px rgba(232, 89, 12, 0.35));
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+.cb-meta-item .cook-addr-directions.cb-directions:hover {
+  filter: brightness(1.07);
+  box-shadow: 0 8px 18px -8px rgba(232, 89, 12, 0.55);
+  background: var(--primary-gradient, linear-gradient(135deg, #f2762e, #e8590c));
+  border-color: transparent;
+  color: #fff;
+}
+.cb-meta-item .cook-addr-directions.cb-directions:active { transform: scale(0.98); }
+.cb-meta-item .cook-addr-directions.cb-directions:focus-visible {
+  outline: 3px solid var(--primary-glow, #ffedd5);
+  outline-offset: 2px;
+}
+.cb-meta-item .cook-addr-directions.cb-directions svg { flex-shrink: 0; }
+
+/* Note + hours-done banners. */
+.cb-note {
+  margin: 0.7rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--slate-600, #475569);
+  background: linear-gradient(180deg, #fffdf5, #fffbeb);
+  border: 1px solid #fde9c8;
+  border-left: 3px solid #fdba74;
+  border-radius: 0 12px 12px 0;
+  padding: 0.55rem 0.8rem;
+  overflow-wrap: break-word;
+}
+.cb-note-label {
+  display: inline-block;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 99px;
+  padding: 0.1rem 0.5rem;
+  margin-right: 0.4rem;
+  vertical-align: 1px;
+}
+.cb-hours-done {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 12px;
+  padding: 0.6rem 0.8rem;
+  margin-top: 0.7rem;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #92400e;
+}
+.cb-hours-done svg { color: #b45309; flex-shrink: 0; }
+
+/* Actions. */
+.cb-actions { margin-top: 0.85rem; }
+.cb-actions .btn { border-radius: 99px; font-weight: 800; min-height: 42px; }
+/* New-request Accept / Ignore stay the tallest, fullest buttons on the card
+   (this outranks .cb-actions .btn above and the older .cook-request-actions
+   rule so the 5-minute decision is always the most tappable thing). */
+.cb-actions.cook-request-actions .btn {
+  flex: 1 1 160px;
+  min-height: 48px;
+  font-size: 0.95rem;
+}
+.booking-item-card.cook-booking-card.cb-card.st-requested {
+   border-color: #fcd9a8;
+   background:
+     radial-gradient(120% 90% at 100% 0%, rgba(245, 158, 11, 0.1) 0%, rgba(245, 158, 11, 0) 55%),
+     linear-gradient(180deg, #fffdf6 0%, #fff9ef 100%);
+   box-shadow:
+     0 1px 0 rgba(255, 255, 255, 0.9) inset,
+     0 8px 24px -12px rgba(217, 119, 6, 0.35);
+}
+.booking-item-card.cook-booking-card.cb-card.st-unattended {
+   border-color: #fecaca;
+   background:
+     radial-gradient(120% 90% at 100% 0%, rgba(220, 38, 38, 0.10) 0%, rgba(220, 38, 38, 0) 55%),
+     linear-gradient(180deg, #fff 0%, #fef2f2 100%);
+   box-shadow:
+     0 0 0 2px rgba(220, 38, 38, 0.12),
+     0 8px 24px -12px rgba(220, 38, 38, 0.3);
+}
+.booking-item-card.cook-booking-card.cb-card.st-unattended:hover {
+   border-color: #dc2626;
+   box-shadow:
+     0 0 0 2px rgba(220, 38, 38, 0.2),
+     0 12px 32px -12px rgba(220, 38, 38, 0.35);
+}
+
+/* Tabs: keep scrollable + thumb-friendly on small screens.
+   Cards: single column on phones/tablets, 2-col grid on desktop (above).
+   The location block + Directions button get full width on small screens. */
+@media (max-width: 480px) {
+  .cook-tabs { gap: 0.25rem; padding: 0.22rem; border-radius: 12px; }
+  .cook-tab { font-size: 0.78rem; padding: 0.42rem 0.65rem; min-height: 42px; gap: 0.3rem; }
+  .cook-tab-count { min-width: 20px; height: 20px; font-size: 0.66rem; }
+  .booking-item-card.cook-booking-card.cb-card { padding: 0.85rem 0.8rem 0.8rem; border-radius: 16px; }
+  .cb-top { flex-wrap: wrap; gap: 0.55rem; padding-bottom: 0.65rem; }
+  .cook-avatar.cb-avatar { width: 40px; height: 40px; border-radius: 13px; font-size: 0.95rem; }
+  .cb-name-row h3 { font-size: 0.95rem; white-space: normal; }
+  .cb-badges { width: 100%; justify-content: flex-start; }
+  .cb-meta { grid-template-columns: 1fr; padding: 0.55rem 0.6rem; gap: 0.5rem; }
+  .cb-meta-item.cb-meta-where { padding: 0.6rem 0.65rem; }
+  .cb-meta-item .cook-addr-directions.cb-directions { width: 100%; min-height: 46px; font-size: 0.9rem; }
+  .cb-actions .btn { width: 100%; justify-content: center; min-height: 44px; }
+}
+@media (min-width: 481px) and (max-width: 640px) {
+  .cook-tabs { gap: 0.3rem; padding: 0.25rem; border-radius: 12px; }
+  .cook-tab { font-size: 0.82rem; padding: 0.45rem 0.75rem; min-height: 42px; gap: 0.35rem; }
+  .cook-tab-count { min-width: 20px; height: 20px; font-size: 0.68rem; }
+  .booking-item-card.cook-booking-card.cb-card { padding: 0.9rem 0.9rem 0.85rem; border-radius: 18px; }
+  .cb-top { flex-wrap: wrap; gap: 0.6rem; padding-bottom: 0.7rem; }
+  .cb-badges { width: 100%; justify-content: flex-start; }
+  .cb-meta { grid-template-columns: 1fr; padding: 0.6rem 0.65rem; }
+  .cb-meta-item .cook-addr-directions.cb-directions { width: 100%; min-height: 44px; }
+  .cb-actions .btn { width: 100%; justify-content: center; min-height: 44px; }
+  .cb-name-row h3 { white-space: normal; }
+}
+@media (min-width: 641px) and (max-width: 767px) {
+  .cb-actions .btn { flex: 1 1 150px; justify-content: center; }
+}
+@media (min-width: 768px) and (max-width: 1023px) {
+  /* Tablet cards are ~340px wide: actions share the row when they fit,
+     otherwise they wrap — never squeezed. */
+  .cb-actions { display: flex; flex-wrap: wrap; }
+  .cb-actions .btn { flex: 1 1 150px; justify-content: center; }
+  .cb-actions.cook-request-actions .btn { flex: 1 1 160px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .booking-item-card.cook-booking-card.cb-card,
+  .cb-meta-item .cook-addr-directions.cb-directions { transition: none; }
+  .booking-item-card.cook-booking-card.cb-card:hover { transform: none; }
+  .cb-meta-item .cook-addr-directions.cb-directions:active { transform: none; }
 }

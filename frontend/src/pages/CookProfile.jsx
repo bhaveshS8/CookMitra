@@ -2,7 +2,7 @@ import React from "react";
 import { Link, useParams } from "react-router-dom";
 import { useFetch } from "../hooks/useFetch";
 import BookingForm from "../components/BookingForm";
-import { resolveFileUrl } from "../components/CookDocUploads";
+import CookAvatar from "../components/CookAvatar";
 import { useShowToast } from "../store/hooks";
 import { formatCurrency, SERVICE_DETAILS } from "../utils/constants";
 import {
@@ -68,11 +68,7 @@ const CookProfile = () => {
       {/* Hero Banner Card */}
       <div className="cook-profile-hero">
         <div className="cook-profile-avatar-large">
-          {cook?.photoUrl ? (
-            <img src={resolveFileUrl(cook.photoUrl)} alt={cook?.user?.name || "Cook"} />
-          ) : (
-            cook?.user?.name?.[0]?.toUpperCase() || "C"
-          )}
+          <CookAvatar photoUrl={cook?.photoUrl} name={cook?.user?.name} />
         </div>
 
         <div className="cook-profile-hero-content" style={{ flex: 1 }}>
@@ -210,6 +206,7 @@ const CookProfile = () => {
             cookUserId={cook?.user?._id}
             cookPhone={cook?.user?.phone}
             cookName={cook?.user?.name}
+            cookPhotoUrl={cook?.photoUrl}
             onSubmit={handleBookingSubmit}
           />
         </div>

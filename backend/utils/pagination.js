@@ -27,7 +27,18 @@ const applyPagination = (query, pg) =>
   pg.has ? query.skip(pg.skip).limit(pg.limit) : query;
 
 const sendList = async (res, rows, pg, countFnOrTotal) => {
-  const list = Array.isArray(rows) ? rows : [];
+  // Paged callers pass the (thenable) Mongoose query from applyPagination —
+  // resolve it here. Without this await every ?page=/ ?limit= request answered
+  // { data: [] } while the unpaged path worked, a silent data-loss bug.
+  let list = Array.isArray(rows) ? rows : [];
+  if (!Array.isArray(rows) && rows && typeof rows.then === "function") {
+    try {
+      const resolved = await rows;
+      list = Array.isArray(resolved) ? resolved : [];
+    } catch {
+      list = [];
+    }
+  }
   if (!pg.has) {
     return res.json(list.length > HARD_CAP ? list.slice(0, HARD_CAP) : list);
   }

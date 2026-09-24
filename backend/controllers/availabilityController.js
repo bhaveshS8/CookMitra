@@ -1,7 +1,7 @@
 const Availability = require("../models/Availability");
 const Booking = require("../models/Booking");
 const CookProfile = require("../models/CookProfile");
-const { getDayWindows, getDayBookings, computeStartOptions, suggestDurations, parseDay, resolveCookAvailability, timeToMinutes, findContainingWindow, findOverlapBooking, dayBounds, activeSlotMatch } = require("../utils/slots");
+const { getDayWindows, getDayBookings, computeStartOptions, suggestDurations, parseDay, resolveCookAvailability, timeToMinutes, findContainingWindow, findOverlapBooking, dayBounds, activeSlotMatch, resolveCookWindows } = require("../utils/slots");
 
 // Batched slot search — ONE request replaces the N+1 per-cook fan-out
 // (1 × GET /cooks + N × GET /availability/:cookId) the booking flow used
@@ -15,10 +15,22 @@ const { getDayWindows, getDayBookings, computeStartOptions, suggestDurations, pa
 exports.searchAvailability = async (req, res, next) => {
   try {
     const { date, durationHours } = req.query;
-    const start = parseDay(date);
-    if (!start || Number.isNaN(start.getTime())) {
-      return res.status(400).json({ message: "Valid date is required" });
+    const strictDay = (() => {
+      try {
+        const { parseDayStrict } = require("../utils/time");
+        return parseDayStrict(date);
+      } catch {
+        return null;
+      }
+    })();
+    if (!strictDay) {
+      return res.status(400).json({ message: "Valid date (YYYY-MM-DD) is required" });
     }
+    const { istDayString } = require("../utils/time");
+    if (istDayString(strictDay) < istDayString()) {
+      return res.status(400).json({ message: "That date already passed — please pick today or a future date." });
+    }
+    const start = strictDay;
     const dur = Number(durationHours);
     if (!Number.isFinite(dur) || dur < 0.5 || dur > 12) {
       return res.status(400).json({ message: "durationHours must be between 0.5 and 12" });
@@ -26,8 +38,11 @@ exports.searchAvailability = async (req, res, next) => {
 
     // Same discovery set as GET /cooks for guests: approved profiles whose
     // account is live and who are currently marked available.
+    // Contact PII: the slot search needs names + suspension flags only —
+    // cook phones are shared post-accept via booking payloads, never in
+    // bulk discovery (this endpoint has no auth).
     let cooks = await CookProfile.find({ approvalStatus: "approved" })
-      .populate("user", "name phone status")
+      .populate("user", "name status")
       .sort({ createdAt: -1 })
       .limit(500)
       .lean();
@@ -41,8 +56,10 @@ exports.searchAvailability = async (req, res, next) => {
     cooks = cooks.filter((_, i) => flags[i]);
 
     // One bookings lookup for every cook on that day (indexed
-    // {cook,date,…}), then pure in-memory derivation per cook.
-    const windows = await getDayWindows(null, date);
+    // {cook,date,…}), then pure in-memory derivation per cook. Each cook's
+    // own published working hours are applied in memory (resolveCookWindows)
+    // so the batched search costs no extra queries while still respecting the
+    // schedule a cook actually agreed to.
     const { start: dayStart, end: dayEnd } = dayBounds(date);
     const cookUserIds = cooks.map((c) => c.user?._id || c.user);
     const allBookings = await Booking.find({
@@ -62,7 +79,11 @@ exports.searchAvailability = async (req, res, next) => {
     const withSlots = cooks.map((cook) => {
       try {
         const id = String(cook.user?._id || cook.user);
-        const options = computeStartOptions(windows, byCook.get(id) || [], dur);
+        const options = computeStartOptions(
+          resolveCookWindows(cook, date),
+          byCook.get(id) || [],
+          dur
+        );
         return {
           ...cook,
           slots: options.map((o) => ({ _id: `${o.startTime}-${o.endTime}`, ...o, derived: true })),
@@ -82,7 +103,11 @@ exports.searchAvailability = async (req, res, next) => {
       const set = new Set();
       for (const cook of withSlots) {
         const id = String(cook.user?._id || cook.user);
-        for (const h of suggestDurations(windows, byCook.get(id) || [], dur)) {
+        for (const h of suggestDurations(
+          resolveCookWindows(cook, date),
+          byCook.get(id) || [],
+          dur
+        )) {
           if (Number.isFinite(Number(h))) set.add(Number(h));
         }
         if (set.size >= 3) break;
@@ -107,7 +132,7 @@ exports.getAvailability = async (req, res, next) => {
     let profile = null;
     try {
       profile = await CookProfile.findById(cookId).select(
-        "user availabilityStatus unavailableDate"
+        "user availabilityStatus unavailableDate approvalStatus"
       );
       if (profile?.user) cookId = profile.user.toString();
     } catch {
@@ -115,7 +140,7 @@ exports.getAvailability = async (req, res, next) => {
     }
     if (!profile) {
       profile = await CookProfile.findOne({ user: cookId }).select(
-        "availabilityStatus unavailableDate"
+        "availabilityStatus unavailableDate approvalStatus"
       );
     }
     // A cook who has toggled "unavailable" exposes no slots until they flip
@@ -123,19 +148,37 @@ exports.getAvailability = async (req, res, next) => {
     if (profile && !(await resolveCookAvailability(profile))) {
       return res.json([]);
     }
+    // Mirror getAvailableSlots: unapproved / suspended cooks expose no
+    // public slots (the cook themself and admins still see the raw list).
+    // Without this, per-cook probes answer for cooks the listing hides.
+    {
+      const viewerAdmin = req.user && String(req.user.role).toUpperCase() === "ADMIN";
+      const viewerSelf = req.user?.id != null && String(req.user.id) === String(cookId);
+      if (profile && !viewerAdmin && !viewerSelf) {
+        let suspended = false;
+        try {
+          const User = require("../models/User");
+          const cookUser = await User.findById(cookId).select("status");
+          suspended = !cookUser || cookUser.status === "suspended";
+        } catch {
+          // fail-closed below only when we know the profile is unapproved;
+          // an unreadable account record must not block a valid cook.
+          suspended = false;
+        }
+        if (profile.approvalStatus !== "approved" || suspended) {
+          return res.json([]);
+        }
+      }
+    }
 
     const filter = { cook: cookId, status: "available" };
     if (date) {
-      // parseDay normalizes "YYYY-MM-DD" to LOCAL midnight, matching how
-      // slots are stored (new Date("YYYY-MM-DD") alone is UTC midnight and
-      // lands on the wrong local day on non-UTC servers).
-      const start = parseDay(date);
-      if (!start || Number.isNaN(start.getTime())) {
+      // IST business-day range (F-08) — matches how slots are stored.
+      const bounds = dayBounds(date);
+      if (!bounds) {
         return res.status(400).json({ message: "Invalid date" });
       }
-      const end = new Date(start);
-      end.setHours(23, 59, 59, 999);
-      filter.date = { $gte: start, $lte: end };
+      filter.date = { $gte: bounds.start, $lte: bounds.end };
     }
 
     const slots = await Availability.find(filter).sort({ date: 1, startTime: 1 });
@@ -212,13 +255,11 @@ exports.setAvailability = async (req, res, next) => {
     // Overlap check, not exact-match: a stored 09:00–12:00 window must also
     // block a new 10:00–11:00 window (and vice versa), not just an identical
     // start time.
-    const dayStart = new Date(day);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(day);
-    dayEnd.setHours(23, 59, 59, 999);
+    // IST business-day range (F-08) — matches stored slot dates.
+    const bounds = dayBounds(day);
     const sameDay = await Availability.find({
       cook: req.user.id,
-      date: { $gte: dayStart, $lte: dayEnd },
+      date: { $gte: bounds.start, $lte: bounds.end },
     }).select("startTime endTime");
     const clash = (sameDay || []).some((s) => {
       const rs = timeToMinutes(s.startTime);

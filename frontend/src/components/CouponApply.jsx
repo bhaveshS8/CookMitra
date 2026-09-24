@@ -5,15 +5,18 @@ import { formatCurrency } from "../utils/constants";
 import { AnalyticsEvents, track } from "../utils/analytics";
 
 // "Have a Coupon Code?" — enter → Apply → instant discount + final amount.
-// Props: amount (pre-discount fee), serviceType, onApplied(result|null).
+// Props: amount (pre-discount fee), serviceType, onApplied(result|null),
+// initialCode (a previously applied code restored after login/retry —
+// re-validated once against the live fee, never trusted blindly).
 // The server re-validates everything at booking time; this is a preview.
-const CouponApply = ({ amount, serviceType, onApplied }) => {
+const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
   const [code, setCode] = useState("");
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState("");
   const [applied, setApplied] = useState(null);
   const lastAmount = useRef(amount);
   const lastService = useRef(serviceType);
+  const initialTried = useRef(null);
 
   // The preview belongs to a specific fee + service — a changed total
   // (e.g. different hours) forces a fresh apply instead of showing stale math.
@@ -29,8 +32,20 @@ const CouponApply = ({ amount, serviceType, onApplied }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amount, serviceType]);
 
-  const apply = async () => {
-    const c = code.trim().toUpperCase();
+  // Restore a code carried across the login wall / retry: re-validate it
+  // against the live fee exactly once (a stale/invalid code just surfaces
+  // the server error instead of silently discounting).
+  useEffect(() => {
+    const c = String(initialCode || "").trim().toUpperCase();
+    if (!c || applying || applied || initialTried.current === `${c}|${amount}|${serviceType}`) return;
+    initialTried.current = `${c}|${amount}|${serviceType}`;
+    setCode(c);
+    apply(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialCode, amount, serviceType]);
+
+  const apply = async (override) => {
+    const c = String(override ?? code).trim().toUpperCase();
     if (!c || applying) return;
     setApplying(true);
     setError("");

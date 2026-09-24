@@ -141,3 +141,13 @@
   animation: riseIn 0.55s ease forwards;
   animation-delay: var(--d, 0s);
 }
+
+/* Phones (single-column hero, no side gap): keep the floating badges inside
+   the photo card — the rating pill off the edge, the live pill off the focal
+   centre and down near the base, and the diyas clear of the stats strip. */
+@media (max-width: 640px) {
+  .hero-v2-float-rating { top: -12px; right: 8px; }
+  .hero-v2-float-live { top: auto; bottom: 54px; left: 8px; max-width: calc(100% - 16px); }
+  .hero-diyas { bottom: -14px; font-size: 1.2rem; }
+  .hero-diyas .hero-diya-big { font-size: 1.6rem; }
+}

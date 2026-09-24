@@ -3,23 +3,39 @@ import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
 import { ShieldAlert, CheckCircle2, AlertCircle, Send } from "lucide-react";
 
-// Cook reports an issue about a customer. Filed against a booking (the
-// customer is derived server-side from the cook's own booking) so the cook
-// never types ids by hand.
-// Props: bookingId (required), customerName (optional, shown in the title),
+// Either side reports an issue about the other, filed against one of their
+// own bookings (the counterparty is derived server-side so nobody types ids
+// by hand).
+// Props: bookingId (required), filedBy ("cook" | "customer", default "cook"),
+// counterpartyName (optional, shown in the title),
 // onSubmitted(complaint) — optional callback after a successful filing.
-const CATEGORIES = [
-  { value: "behaviour", label: "Rude / uncooperative behaviour" },
-  { value: "payment", label: "Payment issue" },
-  { value: "address", label: "Wrong / unreachable address" },
-  { value: "no_show", label: "Customer not available" },
-  { value: "safety", label: "Safety concern" },
-  { value: "other", label: "Something else" },
-];
+const CATEGORIES = {
+  cook: [
+    { value: "behaviour", label: "Rude / uncooperative behaviour" },
+    { value: "payment", label: "Payment issue" },
+    { value: "address", label: "Wrong / unreachable address" },
+    { value: "no_show", label: "Customer not available" },
+    { value: "safety", label: "Safety concern" },
+    { value: "other", label: "Something else" },
+  ],
+  customer: [
+    { value: "quality", label: "Food quality / taste issues" },
+    { value: "hygiene", label: "Cleanliness / hygiene concerns" },
+    { value: "behaviour", label: "Unprofessional behaviour" },
+    { value: "no_show", label: "Cook did not arrive" },
+    { value: "safety", label: "Safety concern" },
+    { value: "other", label: "Something else" },
+  ],
+};
 
-const ComplaintForm = ({ bookingId, customerName, onSubmitted }) => {
+const ComplaintForm = ({
+  bookingId,
+  filedBy = "cook",
+  counterpartyName,
+  onSubmitted,
+}) => {
   const showToast = useShowToast();
-  const [category, setCategory] = useState("behaviour");
+  const [category, setCategory] = useState(CATEGORIES[filedBy][0].value);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -60,7 +76,7 @@ const ComplaintForm = ({ bookingId, customerName, onSubmitted }) => {
       <div className="bd-banner ok" style={{ marginBottom: 0 }}>
         <CheckCircle2 size={18} />
         <span>
-          Complaint filed{customerName ? ` about ${customerName}` : ""} — our team will review it and get back to you.
+          Complaint filed{counterpartyName ? ` about ${counterpartyName}` : ""} — our team will review it and get back to you.
         </span>
       </div>
     );
@@ -77,7 +93,7 @@ const ComplaintForm = ({ bookingId, customerName, onSubmitted }) => {
           onChange={(e) => setCategory(e.target.value)}
           disabled={saving}
         >
-          {CATEGORIES.map((c) => (
+          {CATEGORIES[filedBy].map((c) => (
             <option key={c.value} value={c.value}>
               {c.label}
             </option>
@@ -86,7 +102,7 @@ const ComplaintForm = ({ bookingId, customerName, onSubmitted }) => {
       </div>
       <div className="cook-field">
         <label htmlFor="complaint-message">
-          Describe the issue{customerName ? ` with ${customerName}` : ""}
+          Describe the issue{counterpartyName ? ` with ${counterpartyName}` : ""}
         </label>
         <textarea
           id="complaint-message"
@@ -112,7 +128,7 @@ const ComplaintForm = ({ bookingId, customerName, onSubmitted }) => {
       </button>
       <p className="bd-mini-note" style={{ marginTop: "0.5rem" }}>
         <ShieldAlert size={13} style={{ display: "inline", verticalAlign: "-2px" }} /> Only our admin
-        team sees this — never the customer.
+        team sees this — never the {filedBy === "cook" ? "customer" : "cook"}.
       </p>
     </form>
   );

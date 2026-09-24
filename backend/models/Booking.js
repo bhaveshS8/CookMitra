@@ -95,9 +95,54 @@ const bookingSchema = new mongoose.Schema(
     // Platform 25% of the final amount; the cook earns the rest (75%).
     commission: { type: Number, default: 0 },
     cookPayout: { type: Number, default: 0 },
+    // Idempotency key for booking creation (client-generated UUID per
+    // attempt). Unique + sparse so retries with the same key return the
+    // existing hold instead of double-booking; bookings without a key are
+    // unaffected.
+    clientKey: { type: String, default: "", trim: true },
+    // Legacy: self-serve reschedule was removed, so nothing increments this
+    // any more. Kept so historical bookings (and their audit trail) stay
+    // readable; new bookings always carry 0.
+    rescheduleCount: { type: Number, default: 0, min: 0 },
+    // Coupon release idempotency: set once the held coupon is freed, so
+    // concurrent cancel/expire paths cannot double-decrement usedCount.
+    couponReleased: { type: Boolean, default: false },
+    // Who ended the booking ("customer" | "cook" | "admin" | ""), recorded so
+    // cook-side reliability can be tracked instead of only the status flip.
+    cancelledBy: { type: String, default: "" },
+    // Payout ledger for the cook's 75%: "pending" until an admin settles it
+    // (reference = UPI/bank transfer id). Without this the cook's money had
+    // nowhere to live — commission was recorded but never disbursed.
+    payout: {
+      status: {
+        type: String,
+        enum: ["pending", "settled", "not_applicable"],
+        default: "pending",
+      },
+      settledAt: { type: Date },
+      reference: { type: String, default: "", trim: true },
+      amount: { type: Number, default: 0 },
+      // Frozen recipient snapshot taken at settlement: later edits to the
+      // cook's payout details can never rewrite who a settled payout
+      // claims to have paid. Read history/statements from here first.
+      recipient: {
+        method: { type: String, default: "", trim: true },
+        upiId: { type: String, default: "", trim: true },
+        holderName: { type: String, default: "", trim: true },
+        bankName: { type: String, default: "", trim: true },
+        accountLast4: { type: String, default: "", trim: true },
+        ifsc: { type: String, default: "", trim: true },
+      },
+      // Admin who recorded the settlement — accountability for offline money.
+      settledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    },
     // Prepaid fee via Razorpay — collected BEFORE booking is created.
     payment: {
       razorpayOrderId: { type: String, default: "" },
+      // Every gateway order ever minted for this booking (createOrder may be
+      // retried). The webhook matches against both the latest id and this
+      // history so an overwritten order can never orphan captured money.
+      razorpayOrderIds: { type: [String], default: [] },
       razorpayPaymentId: { type: String, default: "" },
       razorpaySignature: { type: String, default: "" },
       status: {
@@ -107,14 +152,19 @@ const bookingSchema = new mongoose.Schema(
       },
       paidAmount: { type: Number, default: 0 },
       paidAt: { type: Date },
-      // Refund tracking for cancelled paid bookings. `refundStatus`:
-      // "none" (default) → "pending" (sent to gateway) → "processed", or
-      // "failed" (gateway rejected — contact support), or "manual" (test
-      // payment / gateway unconfigured — settled outside Razorpay).
+      // Refund tracking for paid bookings that end without service. Money is
+      // never moved automatically — a cancel/reject/expiry queues "pending"
+      // for an admin to approve or reject in the Payouts tab. `refundStatus`:
+      // "none" (default) → "pending" (awaiting admin decision) →
+      // "processing" (claimed by exactly one approver; concurrent approves
+      // lose here instead of double-charging the gateway) → "processed"
+      // (money returned), or "failed" (gateway rejected — contact support),
+      // or "manual" (gateway unconfigured — settled outside Razorpay), or
+      // "rejected" (admin declined the refund).
       refundId: { type: String, default: "" },
       refundStatus: {
         type: String,
-        enum: ["none", "pending", "processed", "failed", "manual"],
+        enum: ["none", "pending", "processing", "processed", "failed", "manual", "rejected"],
         default: "none",
       },
       refundAmount: { type: Number, default: 0 },
@@ -147,6 +197,7 @@ const bookingSchema = new mongoose.Schema(
         "completed",
         "cancelled",
         "expired",
+        "unattended",
       ],
       default: "requested",
     },
@@ -167,5 +218,53 @@ bookingSchema.index({ cook: 1, date: 1, startTime: 1, endTime: 1 });
 // Hot read paths: "today's bookings" scans and status-sorted dashboards.
 bookingSchema.index({ date: 1, status: 1 });
 bookingSchema.index({ status: 1, createdAt: -1 });
+
+// A (orderId, paymentId, signature) triple is valid for exactly ONE booking.
+// Unique on the payment id — sparse partial index so unpaid/test bookings
+// (empty or missing ids) never collide — blocks replaying one captured
+// payment onto multiple bookings, which the confirm endpoint otherwise can't
+// detect (it only re-verifies the HMAC and the order amount).
+bookingSchema.index(
+  { "payment.razorpayPaymentId": 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      "payment.razorpayPaymentId": { $exists: true, $ne: "" },
+    },
+    name: "uniq_payment_razorpayPaymentId",
+  }
+);
+// Webhook lookup by gateway order id (exact + history). Sparse so unpaid
+// bookings never enter the index.
+bookingSchema.index(
+  { "payment.razorpayOrderId": 1 },
+  {
+    sparse: true,
+    name: "idx_payment_razorpayOrderId",
+  }
+);
+// Idempotency-key lookup for booking-creation retries. Unique + sparse +
+// partial so only non-empty keys are constrained.
+bookingSchema.index(
+  { clientKey: 1 },
+  {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: { clientKey: { $exists: true, $ne: "" } },
+    name: "uniq_booking_clientKey",
+  }
+);
+// Offline payout references are admin-typed: the same reference settling two
+// bookings is one transfer recorded twice (or a double-click). Unique +
+// sparse + partial so empty references never collide.
+bookingSchema.index(
+  { "payout.reference": 1 },
+  {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: { "payout.reference": { $exists: true, $ne: "" } },
+    name: "uniq_payout_reference",
+  }
+);
 
 module.exports = mongoose.model("Booking", bookingSchema);

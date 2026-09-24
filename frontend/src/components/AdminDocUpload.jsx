@@ -21,6 +21,12 @@ const AdminDocUpload = ({ cookId, current = {}, onUploaded }) => {
 
   const upload = async (field, file) => {
     if (!file || !cookId) return;
+    // Must match backend/middleware/upload.js multer fileSize limit — instant
+    // client-side error instead of a wasted upload round-trip.
+    if (file.size > 2 * 1024 * 1024) {
+      showToast("File too large — each file must be 2MB or less", "error");
+      return;
+    }
     setUploading(field);
     try {
       const fd = new FormData();
@@ -32,7 +38,7 @@ const AdminDocUpload = ({ cookId, current = {}, onUploaded }) => {
       onUploaded?.(res.data);
     } catch (err) {
       showToast(
-        err.response?.data?.message || "Upload failed (JPG/PNG/WEBP/PDF, max 5MB)",
+        err.response?.data?.message || "Upload failed (JPG/PNG/WEBP/PDF, max 2MB)",
         "error"
       );
     } finally {

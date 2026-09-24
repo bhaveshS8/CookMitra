@@ -10,31 +10,42 @@ pipeline {
 
         stage('Setup Environment') {
             steps {
-                // Ensure production .env is present with all required variables
+                // Production .env must come from the server or Jenkins credentials —
+                // NEVER from hardcoded values in this file (a committed secret
+                // compromises every session it ever signed). Values are validated
+                // below; nothing secret is ever echoed to the build log.
                 sh '''
+                set -eu
                 if [ ! -f .env ]; then
                     if [ -f /home/ubuntu/CookMitra/.env ]; then
                         cp /home/ubuntu/CookMitra/.env .env
                     elif [ -f /etc/cookmitra/.env ]; then
                         cp /etc/cookmitra/.env .env
                     else
-                        echo "Creating production .env with required keys..."
-                        cat << 'EOF' > .env
-NODE_ENV=production
-PORT=5000
-MONGODB_URI=mongodb://db:27017/festivecook
-JWT_SECRET=1b30c4959bd46de8851dc3de1bae301ad5cdbca32c4bc7ea86d6f210c8f87fb513f0f8949d052951e0e472aa8dff3a55
-GOOGLE_CLIENT_ID=340655287478-iekv29j414nukq16vq04c8v38aou78qd.apps.googleusercontent.com
-REACT_APP_GOOGLE_CLIENT_ID=340655287478-iekv29j414nukq16vq04c8v38aou78qd.apps.googleusercontent.com
-ALLOW_TEST_PAYMENTS=true
-RAZORPAY_KEY_ID=rzp_test_sampleKey123
-RAZORPAY_KEY_SECRET=sampleSecretKey123
-REACT_APP_RAZORPAY_KEY_ID=rzp_test_sampleKey123
-RAZORPAY_CURRENCY=INR
-REACT_APP_API_URL=/api
-EOF
+                        echo "ERROR: no .env found. Place a production .env on the server"
+                        echo "(/home/ubuntu/CookMitra/.env or /etc/cookmitra/.env), created from"
+                        echo "backend/.env.example with REAL secrets (JWT_SECRET, MONGODB_URI,"
+                        echo "RAZORPAY_KEY_ID/SECRET, RAZORPAY_WEBHOOK_SECRET, SMTP_*)."
+                        echo "CI will never fabricate secrets — refusing to deploy." >&2
+                        exit 1
                     fi
                 fi
+                # Fail fast on missing/weak secrets (length only — values stay hidden).
+                JWT_LEN=$(grep -E '^JWT_SECRET=' .env | head -n 1 | cut -d '=' -f2- | wc -m)
+                if [ "$JWT_LEN" -lt 33 ]; then
+                    echo "ERROR: JWT_SECRET missing or shorter than 32 chars in .env." >&2
+                    echo "Generate one with: node backend/scripts/rotate-secrets.js" >&2
+                    exit 1
+                fi
+                if grep -Eq '^JWT_SECRET=(your_|changeme|example|REPLACE_ME)' .env; then
+                    echo "ERROR: JWT_SECRET is still a placeholder. Rotate it before deploying." >&2
+                    exit 1
+                fi
+                if ! grep -Eq '^MONGODB_URI=.+' .env; then
+                    echo "ERROR: MONGODB_URI is missing in .env." >&2
+                    exit 1
+                fi
+                echo "Secrets present (values hidden from log)."
 
                 # Ensure MONGODB_URI exists in .env if missing
                 if ! grep -q "MONGODB_URI" .env; then

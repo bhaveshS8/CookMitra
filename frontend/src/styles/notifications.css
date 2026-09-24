@@ -1,17 +1,28 @@
 /* ==========================================================================
-   Notifications page â€” scoped under .notif-page so it never affects the
+   Notifications page — scoped under .notif-page so it never affects the
    shared dashboard/bookings classes it reuses.
-   Desktop matches the old inline styles; phones rebuild the card so the
-   icon, message, and "Mark read" button all stay readable and thumb-friendly,
-   and the Mark-read button is a full-width tap target under the content.
+   Desktop: compact row (icon · body · chevron · mark-read).
+   Phones: stacked card — content on top, full-width Mark read under it.
    ========================================================================== */
 
+.notif-page .back-link-bar {
+  align-self: flex-start;
+}
+
 .notif-page .notif-item {
-  padding: 0.6rem 0.9rem;
+  padding: 0.7rem 0.9rem;
   border-radius: 14px;
   border: 1px solid var(--border-subtle);
   background: #fff;
   transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+/* No hover lift here: the shared .booking-item-card:hover lifts the card 2px,
+   and a pointer resting on the card's top edge then straddles in and out of
+   the hover zone — hover on, lift, hover off, drop, repeat — so the card
+   vibrates up and down in place forever. Border/shadow + icon feedback below
+   carry the hover affordance without moving the card. */
+.notif-page .notif-item:hover {
+  transform: none;
 }
 .notif-page .notif-item.is-read {
   background: #fff;
@@ -39,6 +50,7 @@
   letter-spacing: 0.02em;
   text-transform: uppercase;
   line-height: 1.4;
+  max-width: 100%;
   transition: transform 0.12s ease;
 }
 .notif-page .notif-item:hover .notif-meta-row .badge {
@@ -54,6 +66,7 @@
   color: var(--accent-amber-dark, #92400e);
   border: 1px solid var(--accent-amber-border, #fcd34d);
 }
+
 .notif-page .notif-item-row {
   display: flex;
   gap: 0.7rem;
@@ -93,8 +106,9 @@
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   margin: 0;
+  min-width: 0;
 }
 .notif-page .notif-ago {
   font-size: 0.7rem;
@@ -102,6 +116,8 @@
   font-weight: 600;
   letter-spacing: 0.01em;
   margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .notif-page .notif-message {
   margin: 0;
@@ -118,67 +134,51 @@
   font-size: 0.66rem;
   color: var(--slate-400);
   margin-top: 0.05rem;
-  min-width: 100%;
   letter-spacing: 0.01em;
 }
 
-/* When the timestamp is omitted (new notifications), the body column still
-   gets a stable min-width so the message text keeps a comfortable line length. */
+/* Mark-read is the button itself (class on the same element as .btn). */
 .notif-page .notif-mark-read {
   flex: 0 0 auto;
   align-self: flex-start;
   margin-top: 0.15rem;
-}
-.notif-page .notif-mark-read .btn {
-  min-height: 32px;
-  padding: 0.2rem 0.7rem;
-  font-size: 0.72rem;
+  min-height: 34px;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.74rem;
   font-weight: 700;
   border-radius: 99px;
   background: transparent;
-  color: var(--slate-400);
+  color: var(--slate-500);
   border: 1px solid var(--border-subtle);
+  box-shadow: none;
   transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, transform 0.12s ease;
 }
-.notif-page .notif-mark-read .btn:hover {
+.notif-page .notif-mark-read:hover {
   background: var(--primary-soft, #fff1e0);
   color: var(--primary-700, #b45309);
   border-color: var(--primary-soft-border, #ffc89a);
+  transform: none;
+  box-shadow: none;
 }
-.notif-page .notif-mark-read .btn:active {
+.notif-page .notif-mark-read:active {
   transform: scale(0.97);
 }
-.notif-page .notif-mark-read .btn:focus-visible {
+.notif-page .notif-mark-read:focus-visible {
   outline: 3px solid var(--primary-glow, #ffedd5);
   outline-offset: 2px;
 }
-.notif-page .notif-mark-read .btn svg {
+.notif-page .notif-mark-read svg {
   width: 13px;
   height: 13px;
   margin-right: 0.3rem;
   flex: 0 0 auto;
 }
-.notif-page .notif-item.is-unread .notif-mark-read .btn {
+.notif-page .notif-item.is-unread .notif-mark-read {
   color: var(--primary-700, #b45309);
   border-color: var(--primary-soft-border, #ffd2a8);
 }
-.notif-page .notif-item.is-unread .notif-mark-read .btn:hover {
+.notif-page .notif-item.is-unread .notif-mark-read:hover {
   background: var(--primary-soft, #fff1e0);
-}
-
-.notif-page .dashboard-header-row h1 { font-size: 1.7rem; }
-
-.notif-page .tabs-navigation-bar {
-  justify-content: center;
-  gap: 0.4rem;
-}
-.notif-page .tab-btn {
-  text-align: center;
-  justify-content: center;
-  align-items: center;
-  white-space: nowrap;
-  font-weight: 700;
-  letter-spacing: 0.01em;
 }
 
 .notif-page .notif-header {
@@ -192,100 +192,28 @@
   color: var(--slate-900);
   letter-spacing: -0.01em;
 }
+.notif-page .dashboard-header-row h1 { font-size: 1.7rem; }
 
-/* ---- Phones (â‰¤560px): keep the modern compact card, just tighten it ---- */
-@media (max-width: 560px) {
-  .notif-page {
-    --notif-icon-size: 36px;
-    --notif-body-gap: 0.55rem;
-  }
-
-  .notif-page .dashboard-header-row {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.7rem;
-  }
-  .notif-page .dashboard-header-row .btn { justify-content: center; }
-
-  .notif-page .tabs-navigation-bar {
-    margin-bottom: 0.9rem;
-    justify-content: center;
-    gap: 0.35rem;
-  }
-  .notif-page .tab-btn {
-    flex: 1 1 0;
-    text-align: center;
-    padding: 0.4rem 0.7rem;
-    min-height: 36px;
-    font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 0.01em;
-    white-space: nowrap;
-    justify-content: center;
-    align-items: center;
-  }
-
-  .notif-page .notif-item {
-    padding: 0.55rem 0.75rem;
-    border-radius: 12px;
-  }
-  .notif-page .notif-item-row {
-    gap: var(--notif-body-gap);
-    align-items: flex-start;
-  }
-  .notif-page .notif-icon {
-    width: var(--notif-icon-size);
-    height: var(--notif-icon-size);
-    min-width: var(--notif-icon-size);
-  }
-  .notif-page .notif-icon svg {
-    width: 18px;
-    height: 18px;
-  }
-  .notif-page .notif-body {
-    gap: 0.14rem;
-    min-width: 0;
-  }
-  .notif-page .notif-meta-row {
-    gap: 0.3rem;
-    flex-wrap: wrap;
-  }
-  .notif-page .notif-ago {
-    font-size: 0.66rem;
-    margin-left: auto;
-  }
-  .notif-page .notif-message {
-    font-size: 0.84rem;
-    line-height: 1.35;
-  }
-  .notif-page .notif-timestamp {
-    font-size: 0.62rem;
-  }
-  .notif-page .notif-meta-row .badge {
-    font-size: 0.62rem;
-    padding: 0.12rem 0.45rem;
-  }
-
-  .notif-page .notif-mark-read {
-    margin-top: 0.1rem;
-  }
-  .notif-page .notif-mark-read .btn {
-    padding: 0.18rem 0.6rem;
-    min-height: 28px;
-    font-size: 0.68rem;
-  }
-  .notif-page .notif-mark-read .btn svg {
-    width: 12px;
-    height: 12px;
-    margin-right: 0.25rem;
-  }
+.notif-page .tabs-navigation-bar {
+  justify-content: center;
+  gap: 0.4rem;
+}
+.notif-page .tab-btn {
+  display: inline-flex;
+  text-align: center;
+  justify-content: center;
+  align-items: center;
+  white-space: nowrap;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
-/* Subtle divider so the stack reads as a clean modern list without heavy borders or extra spacing. */
+/* List rhythm — full-width cards, light divider, no odd nested borders */
+.notif-page .bookings-list-modern { gap: 0.55rem; }
 .notif-page .notif-item:not(:last-child) {
-  margin-bottom: 0.35rem;
-  border-bottom: 1px solid #eef2f6;
-  padding-bottom: 0.45rem;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--slate-100);
+  padding-bottom: 0.7rem;
 }
 .notif-page .notif-item:last-child {
   margin-bottom: 0;
@@ -293,11 +221,338 @@
 .notif-page .notif-item-row > .notif-icon {
   margin-top: 0.04rem;
 }
+.notif-page .notif-go {
+  color: var(--slate-400, #94a3b8);
+  flex-shrink: 0;
+  align-self: center;
+}
+.notif-page .notif-item.is-unread .notif-go {
+  color: var(--primary, #e8590c);
+}
 
-/* ---- Small phones ---- */
+/* ==========================================================================
+   Phones (≤560px) — proper mobile chrome + stacked card actions
+   ========================================================================== */
+@media (max-width: 560px) {
+  .notif-page .back-link-bar {
+    width: 100%;
+    min-height: 44px;
+    justify-content: flex-start;
+    margin-bottom: 0.15rem;
+    font-size: 0.88rem;
+  }
+
+  .notif-page .dashboard-header-row,
+  .notif-page .notif-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .notif-page .notif-page-title,
+  .notif-page .dashboard-header-row h1 {
+    font-size: 1.35rem;
+  }
+  .notif-page .notif-header .btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+    font-size: 0.88rem;
+  }
+
+  .notif-page .tabs-navigation-bar {
+    margin-bottom: 0.9rem;
+    justify-content: stretch;
+    gap: 0.3rem;
+    padding: 0.28rem;
+  }
+  .notif-page .tab-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0.4rem 0.45rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .notif-page .notif-item {
+    padding: 0.85rem 0.9rem;
+    border-radius: 14px;
+  }
+  .notif-page .notif-item:not(:last-child) {
+    padding-bottom: 0.85rem;
+    border-bottom: 1px solid var(--slate-100);
+    margin-bottom: 0;
+  }
+
+  /* Content row; second action row only when Mark read exists */
+  .notif-page .notif-item-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "icon body go";
+    gap: 0.65rem 0.6rem;
+    align-items: start;
+  }
+  .notif-page .notif-item-row:has(.notif-mark-read) {
+    grid-template-areas:
+      "icon body go"
+      "action action action";
+  }
+  .notif-page .notif-item-row:not(:has(.notif-go)) {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .notif-page .notif-item-row:not(:has(.notif-go)):has(.notif-mark-read) {
+    grid-template-areas:
+      "icon body"
+      "action action";
+  }
+  .notif-page .notif-icon {
+    grid-area: icon;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    border-radius: 12px;
+  }
+  .notif-page .notif-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+  .notif-page .notif-body {
+    grid-area: body;
+    gap: 0.28rem;
+    min-width: 0;
+  }
+  .notif-page .notif-go {
+    grid-area: go;
+    align-self: center;
+    justify-self: end;
+    width: 36px;
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--slate-50);
+    border: 1px solid var(--slate-100);
+  }
+  .notif-page .notif-go svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .notif-page .notif-meta-row {
+    gap: 0.3rem;
+    flex-wrap: wrap;
+  }
+  /* Type label can wrap; keep time on the first visual line when possible */
+  .notif-page .notif-meta-row .badge {
+    font-size: 0.62rem;
+    padding: 0.16rem 0.48rem;
+    white-space: normal;
+    text-align: left;
+    line-height: 1.3;
+  }
+  .notif-page .notif-ago {
+    font-size: 0.68rem;
+    margin-left: auto;
+  }
+  /* Unread already has accent border/icon — drop the extra "New" pill on phones
+     to free width for the type label + timestamp. */
+  .notif-page .notif-meta-row .badge-amber {
+    display: none;
+  }
+  .notif-page .notif-message {
+    font-size: 0.9rem;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    overflow: hidden;
+  }
+  .notif-page .notif-timestamp {
+    font-size: 0.68rem;
+    margin-top: 0.1rem;
+  }
+
+  /* Full-width, thumb-friendly Mark read under the message */
+  .notif-page .notif-mark-read {
+    grid-area: action;
+    width: 100%;
+    margin-top: 0;
+    min-height: 44px;
+    padding: 0.55rem 1rem;
+    font-size: 0.84rem;
+    font-weight: 700;
+    justify-content: center;
+    border-radius: 12px;
+  }
+  .notif-page .notif-mark-read svg {
+    width: 15px;
+    height: 15px;
+    margin-right: 0.4rem;
+  }
+
+  .notif-page .empty-state-card {
+    padding: 2rem 1.1rem;
+    gap: 0.85rem;
+  }
+  .notif-page .empty-state-card .btn {
+    width: 100%;
+    min-height: 46px;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.3;
+    padding: 0.7rem 1rem;
+  }
+  .notif-page .empty-state-card p {
+    font-size: 0.9rem !important;
+    margin-bottom: 0.25rem !important;
+  }
+}
+
+/* Very small phones */
 @media (max-width: 380px) {
-  .notif-page .notif-meta-row { gap: 0.25rem; }
-  .notif-page .notif-ago { margin-left: 0; flex-basis: 100%; margin-top: 0.25rem; }
-  .notif-page .notif-item-row { flex-wrap: wrap; }
-  .notif-page .notif-message { font-size: 0.88rem; }
+  .notif-page .notif-item { padding: 0.75rem 0.75rem; }
+  .notif-page .notif-item-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "icon body";
+    gap: 0.55rem;
+  }
+  .notif-page .notif-item-row:has(.notif-mark-read) {
+    grid-template-areas:
+      "icon body"
+      "action action";
+  }
+  /* Chevron sits with the meta row when space is tight */
+  .notif-page .notif-go {
+    display: none;
+  }
+  .notif-page .notif-page-title,
+  .notif-page .dashboard-header-row h1 { font-size: 1.2rem; }
+  .notif-page .tab-btn { font-size: 0.74rem; padding: 0.4rem 0.3rem; }
+  .notif-page .notif-meta-row .badge { font-size: 0.58rem; }
+}
+
+/* ==========================================================================
+   New-notification popup stack — fixed bottom-right cards shown by
+   <NotificationPopup /> whenever a fresh unread notification arrives.
+   ========================================================================== */
+.notif-popup-stack {
+  position: fixed;
+  top: calc(64px + 2px + 0.9rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  width: max-content;
+  max-width: min(380px, calc(100vw - 2rem));
+}
+.notif-popup-card {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid var(--slate-200, #e2e8f0);
+  border-left: 4px solid var(--primary, #e8590c);
+  border-radius: 14px;
+  padding: 0.8rem 0.9rem;
+  box-shadow: 0 18px 45px -18px rgba(15, 23, 42, 0.35);
+  cursor: pointer;
+  animation: notifPopupIn 0.3s ease both;
+}
+.notif-popup-card:hover {
+  border-color: var(--primary-soft-border, #ffd2a8);
+}
+.notif-popup-card:focus-visible {
+  outline: 3px solid var(--primary-glow, #ffedd5);
+  outline-offset: 2px;
+}
+.notif-popup-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-light, #fff7ed);
+  color: var(--primary, #e8590c);
+  border: 1px solid var(--primary-soft, #ffe6d4);
+}
+.notif-popup-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.notif-popup-title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--primary-700, #b45309);
+}
+.notif-popup-message {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--slate-800, #1e293b);
+  line-height: 1.4;
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notif-popup-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: var(--primary, #e8590c);
+}
+.notif-popup-close {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--slate-400, #94a3b8);
+  padding: 0.25rem;
+  border-radius: 8px;
+  line-height: 1;
+}
+.notif-popup-close:hover {
+  color: var(--slate-700, #334155);
+  background: var(--slate-100, #f1f5f9);
+}
+@keyframes notifPopupIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (max-width: 560px) {
+  .notif-popup-stack {
+    left: 1rem;
+    right: 1rem;
+    top: calc(62px + 2px + 0.75rem);
+    bottom: auto;
+    transform: none;
+    width: auto;
+    max-width: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notif-popup-card { animation: none; }
+  .notif-page .notif-mark-read,
+  .notif-page .notif-meta-row .badge,
+  .notif-page .notif-icon { transition: none; }
+  .notif-page .notif-item:hover .notif-icon { transform: none; }
+  .notif-page .notif-item:hover .notif-meta-row .badge { transform: none; }
 }

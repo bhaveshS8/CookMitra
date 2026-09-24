@@ -106,21 +106,17 @@ exports.createReview = async (req, res, next) => {
     if (["requested", "rejected", "cancelled", "expired"].includes(booking.status)) {
       return res.status(400).json({ message: "You can rate your cook once the service is complete" });
     }
+    // Paid service only: an unpaid hold that merely aged past its slot is
+    // not a rendered service and cannot be rated.
+    if (booking.payment?.status !== "paid") {
+      return res.status(400).json({ message: "You can rate your cook once the service is complete" });
+    }
     // Rateable once service hours are over: completed status, the
     // hours-complete flag, or the session end time has passed (covers legacy
     // bookings without the OTP clock and cooks who forgot to tap complete).
-    const sessionEnd = (() => {
-      if (booking.serviceEndsAt) {
-        const d = new Date(booking.serviceEndsAt);
-        return Number.isNaN(d.getTime()) ? null : d;
-      }
-      if (!booking.date || !booking.endTime) return null;
-      const m = String(booking.endTime).match(/^(\d{1,2}):(\d{2})/);
-      if (!m) return null;
-      const d = new Date(booking.date);
-      d.setHours(Number(m[1]), Number(m[2]), 0, 0);
-      return d;
-    })();
+    // Shared IST-anchored helper (F-08) — one definition for the cutoff.
+    const { sessionEndDate } = require("./bookingController");
+    const sessionEnd = sessionEndDate(booking);
     const serviceHoursEnded =
       booking.status === "completed" ||
       booking.hoursCompleted === true ||
@@ -135,13 +131,17 @@ exports.createReview = async (req, res, next) => {
     }
 
     let review;
+    const cleanRating = normalizeRating(rating);
+    if (cleanRating === null) {
+      return res.status(400).json({ message: "Rating must be between 1 and 5" });
+    }
     try {
       review = await Review.create({
         booking: bookingId,
         customer: req.user.id,
         cook: booking.cook,
-        rating,
-        comment,
+        rating: cleanRating,
+        comment: String(comment || "").trim().slice(0, 2000),
       });
     } catch (error) {
       // Review.booking is uniquely indexed — that index, not the findOne above,
@@ -156,7 +156,7 @@ exports.createReview = async (req, res, next) => {
 
     // Counters are incremented atomically and the average is derived from them
     // server-side, so two reviews landing together cannot clobber each other.
-    await syncCookRating(booking.cook, rating);
+    await syncCookRating(booking.cook, cleanRating);
 
     res.status(201).json(review);
   } catch (error) {

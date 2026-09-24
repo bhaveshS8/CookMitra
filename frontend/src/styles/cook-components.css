@@ -178,6 +178,7 @@
   font-weight: 650;
   font-size: 0.89rem;
   padding: 0.5rem 1rem;
+  min-height: 44px;
   border-radius: 11px;
   white-space: nowrap;
   display: inline-flex;
@@ -257,10 +258,92 @@
   white-space: nowrap;
 }
 .cook-customer-meta { min-width: 0; }
-.cook-when { margin: 0.2rem 0 0; font-size: 0.85rem; color: var(--cook-ink-soft); display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
-.cook-when svg { flex-shrink: 0; }
-.cook-addr { margin: 0.2rem 0 0; font-size: 0.82rem; color: var(--cook-ink-faint); display: flex; align-items: flex-start; gap: 0.35rem; }
-.cook-addr svg { flex-shrink: 0; margin-top: 2px; }
+/* WHEN chip — booking date + time highlighted so a cook spots it at a
+   glance (soft brand wash, bold ink, brand-coloured icon). */
+.cook-when {
+  margin: 0.45rem 0 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--slate-800);
+  background: var(--cook-brand-wash, #fff4ec);
+  border: 1px solid rgba(232, 89, 12, 0.18);
+  border-radius: 10px;
+  padding: 0.32rem 0.65rem;
+}
+.cook-when svg { flex-shrink: 0; color: var(--primary); }
+/* WHERE chip — customer address highlighted in a neutral strip so it reads
+   as the venue, with word-wrap for long addresses. */
+.cook-addr {
+  margin: 0.4rem 0 0;
+  font-size: 0.83rem;
+  font-weight: 600;
+  color: var(--slate-700);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  background: var(--slate-50, #f8fafc);
+  border: 1px solid var(--slate-200);
+  border-radius: 10px;
+  padding: 0.42rem 0.65rem;
+  overflow-wrap: anywhere;
+}
+.cook-addr svg { flex-shrink: 0; margin-top: 2px; color: var(--primary); }
+/* One-tap Google Maps link on a booking card: GPS pin when the customer
+   pinned the venue, address search otherwise (mapsNavigateUrl). */
+.cook-addr-directions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0.4rem 0 0;
+  width: fit-content;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--primary);
+  text-decoration: none;
+  border: 1px solid rgba(232, 89, 12, 0.35);
+  border-radius: 99px;
+  padding: 0.18rem 0.65rem;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.cook-addr-directions:hover { background: rgba(232, 89, 12, 0.08); border-color: var(--primary); }
+.cook-addr-directions svg { flex-shrink: 0; }
+
+/* TODAY / TOMORROW badge — special tag for imminent bookings so the cook
+   can spot them without reading the date. Green for today, amber for
+   tomorrow (same palette as the paid/unpaid pills). */
+.cook-day-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0.4rem 0 0;
+  width: fit-content;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.16rem 0.6rem;
+  border-radius: 99px;
+  border: 1px solid transparent;
+}
+.cook-day-tag.is-today {
+  background: var(--accent-emerald-light, #d1fae5);
+  color: #065f46;
+  border-color: rgba(5, 150, 105, 0.28);
+}
+.cook-day-tag.is-tomorrow {
+  background: var(--accent-amber-light, #fef3c7);
+  color: #92400e;
+  border-color: rgba(180, 83, 9, 0.28);
+}
+/* On the booking-details page the badge sits inside the bd-hero-facts chip
+   row — kill the card-only top margin so it aligns with the other chips. */
+.bd-fact-chip.cook-day-tag { margin: 0; }
 
 /* Amount + paid pill row. */
 .cook-money { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; margin: 0.75rem 0 0; padding: 0.55rem 0.75rem; background: var(--slate-50); border: 1px dashed var(--slate-200); border-radius: 14px; }

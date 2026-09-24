@@ -29,6 +29,9 @@ RUN if echo "$REACT_APP_API_URL" | grep -qiE "localhost|127\.0\.0\.1"; then echo
 FROM node:20-alpine
 WORKDIR /app/backend
 ENV NODE_ENV=production
+# Business clock (F-08): booking math is IST-anchored in code; the pinned TZ
+# keeps every other Date call consistent with it.
+ENV TZ=Asia/Kolkata
 COPY backend/package*.json ./
 RUN npm ci --omit=dev
 COPY backend/ ./

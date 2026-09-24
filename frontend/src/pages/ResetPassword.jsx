@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
-import { Lock, AlertCircle, ArrowLeft, Loader2, CheckCircle2 } from "lucide-react";
+import { Lock, AlertCircle, Loader2, CheckCircle2, Eye, EyeOff } from "lucide-react";
 import cookMitraLogo from "../assets/logo.png";
 
 // Reset password: consumes ?token= with a new password via
@@ -12,6 +12,8 @@ const ResetPassword = () => {
   const [token] = useState(searchParams.get("token") || "");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
@@ -23,8 +25,8 @@ const ResetPassword = () => {
       setError("Passwords do not match");
       return;
     }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters long");
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters long");
       return;
     }
     setLoading(true);
@@ -76,36 +78,52 @@ const ResetPassword = () => {
           <form onSubmit={handleSubmit}>
             <div className="booking-form-group">
               <label htmlFor="rp-password">New password</label>
-              <div className="input-with-icon">
+              <div className="input-with-icon password-input-wrapper">
                 <Lock size={18} className="input-icon-prefix" />
                 <input
                   id="rp-password"
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   className="form-control"
-                  placeholder="At least 6 characters"
+                  placeholder="At least 8 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="new-password"
                   required
-                  minLength={6}
+                  minLength={8}
                 />
+                <button
+                  type="button"
+                  className="password-toggle-btn"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
             </div>
             <div className="booking-form-group">
               <label htmlFor="rp-confirm">Confirm new password</label>
-              <div className="input-with-icon">
+              <div className="input-with-icon password-input-wrapper">
                 <Lock size={18} className="input-icon-prefix" />
                 <input
                   id="rp-confirm"
-                  type="password"
+                  type={showConfirmPassword ? "text" : "password"}
                   className="form-control"
                   placeholder="Repeat the new password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   autoComplete="new-password"
                   required
-                  minLength={6}
+                  minLength={8}
                 />
+                <button
+                  type="button"
+                  className="password-toggle-btn"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                >
+                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
             </div>
             <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={loading}>

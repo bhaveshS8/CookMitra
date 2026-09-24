@@ -156,6 +156,18 @@
 .booking-card-modern[data-status="rejected"]       { border-left-color: var(--accent-rose); }
 .booking-card-modern[data-status="expired"]        { border-left-color: var(--slate-300); }
 .booking-card-modern[data-status="cancelled"]      { border-left-color: var(--slate-300); }
+.booking-card-modern[data-status="unattended"]     { border-left-color: #dc2626; }
+.booking-card-modern[data-status="unattended"] {
+  background:
+    radial-gradient(110% 80% at 100% 0%, rgba(220, 38, 38, 0.10) 0%, rgba(220, 38, 38, 0) 55%),
+    linear-gradient(180deg, #ffffff 0%, #fef2f2 100%);
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12), var(--shadow-sm);
+  border-color: #fecaca;
+}
+.booking-card-modern[data-status="unattended"]:hover {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.2), var(--shadow-md);
+}
 
 /* Subtle wash on completed / cancelled so the eye separates them from active */
 .booking-card-modern[data-status="completed"] {
@@ -340,21 +352,22 @@
   display: grid;
   grid-template-columns: 1fr;
   gap: 0.8rem;
-  align-items: stretch;
+  align-items: start;
 }
 .my-booking-card {
   cursor: pointer;
+  position: relative;
   padding: 1rem 1.05rem;
   border-radius: 20px;
   border: 1px solid #f0e7d8;
   border-left-width: 4px;
   width: 100%;
   min-width: 0;
-  height: 100%;
+  height: auto;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 0.15rem;
+  justify-content: flex-start;
+  gap: 0;
   background: linear-gradient(165deg, #ffffff 0%, #fffdf8 55%, #fff7ed 100%);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.9) inset,
@@ -431,61 +444,284 @@
 .my-booking-time { display: inline-flex; align-items: center; gap: 0.28rem; white-space: nowrap; }
 .my-booking-date svg, .my-booking-time svg { width: 12px; height: 12px; color: var(--primary); flex-shrink: 0; }
 .my-booking-ref { color: var(--slate-400); font-weight: 700; font-size: 0.7rem; font-family: var(--font-mono); }
-.my-booking-chips { display: flex; flex-wrap: wrap; gap: 0.38rem; margin-top: 0.55rem; }
+.my-booking-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.38rem;
+  margin-top: 0.5rem;
+  max-width: 100%;
+}
 .my-chip {
-  display: inline-flex; align-items: center; gap: 0.3rem;
-  font-size: 0.72rem; font-weight: 700; color: var(--slate-600);
-  background: var(--slate-50); border: 1px solid var(--slate-100);
-  padding: 0.26rem 0.62rem; border-radius: 99px; line-height: 1.4;
-  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--slate-600);
+  background: var(--slate-50);
+  border: 1px solid var(--slate-100);
+  padding: 0.26rem 0.62rem;
+  border-radius: 99px;
+  line-height: 1.4;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .my-chip svg { width: 12px; height: 12px; flex-shrink: 0; color: var(--slate-400); }
 .my-chip-dish { background: #fffbeb; border-color: #fde9c8; color: #92400e; }
 .my-chip-more { background: #fff; color: var(--slate-500); border-style: dashed; }
 /* Friendly note strip — full-width quote under the chips so it always wraps */
 .my-booking-note {
-  margin: 0.55rem 0 0;
-  padding: 0.5rem 0.7rem;
-  font-size: 0.78rem; line-height: 1.45; font-style: italic;
+  margin: 0.5rem 0 0;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  font-style: italic;
   color: var(--slate-600);
   background: #fffdf5;
   border-left: 3px solid #fdba74;
   border-radius: 0 12px 12px 0;
   overflow-wrap: break-word;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box;
+  line-clamp: 2;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 /* Circular chevron affordance — big friendly tap target */
 .my-booking-side {
   flex-shrink: 0;
-  display: flex; align-items: flex-start; justify-content: center;
-  padding-left: 0.15rem; padding-top: 0.1rem;
-  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  margin-top: 0.1rem;
 }
 .my-booking-go {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 38px; height: 38px; border-radius: 50%;
-  background: #fff7ed; border: 1px solid #fed7aa; color: var(--primary-700);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: var(--primary-700);
   transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
   box-shadow: 0 1px 4px rgba(232, 89, 12, 0.12);
 }
 .my-booking-go svg { width: 18px; height: 18px; }
-.my-booking-card:hover .my-booking-go { background: var(--primary); border-color: var(--primary); color: #fff; transform: translateX(2px); }
-.my-booking-foot {
-  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
-  margin-top: 0.7rem; padding-top: 0.65rem; border-top: 1px dashed var(--slate-200);
+.my-booking-card:hover .my-booking-go {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  transform: translateX(2px);
 }
-.my-booking-foot-hint { font-size: 0.76rem; font-weight: 600; color: var(--slate-500); }
+.my-booking-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed var(--slate-200);
+}
+.my-booking-foot-hint {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--slate-500);
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .my-booking-review {
-  display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
-  font-size: 0.78rem; font-weight: 800; color: #065f46;
-  background: linear-gradient(180deg, #ecfdf5, #d1fae5); border: 1px solid #6ee7b7;
-  padding: 0.42rem 0.85rem; border-radius: 99px; min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #065f46;
+  background: linear-gradient(180deg, #ecfdf5, #d1fae5);
+  border: 1px solid #6ee7b7;
+  padding: 0.42rem 0.85rem;
+  border-radius: 99px;
+  min-height: 36px;
   box-shadow: 0 2px 8px rgba(5, 150, 105, 0.14);
   transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
   white-space: nowrap;
+  flex-shrink: 0;
 }
-.my-booking-review:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(5, 150, 105, 0.2); color: #064e3b; }
+.my-booking-review:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.2);
+  color: #064e3b;
+}
 .my-booking-review svg { width: 14px; height: 14px; }
+
+/* ---- My Bookings visual polish: completed card (attractive + modern) ----
+   Scoped to .my-bookings-page so the shared booking-card system is untouched.
+   Sizes/padding live in the responsive blocks below; this block is pure look. */
+.my-bookings-page .my-booking-card {
+  border-color: #ddf0e5;
+  border-radius: 22px;
+  background:
+    radial-gradient(130% 70% at 100% 0%, rgba(255, 176, 32, 0.12) 0%, rgba(255, 176, 32, 0) 55%),
+    radial-gradient(120% 90% at 0% 100%, rgba(5, 150, 105, 0.1) 0%, rgba(5, 150, 105, 0) 55%),
+    linear-gradient(165deg, #ffffff 0%, #fbfefc 55%, #ecf8f1 100%);
+  box-shadow:
+    var(--shadow-sm),
+    0 20px 44px -22px rgba(5, 150, 105, 0.35);
+}
+/* Per-status edge + accent tokens for unified cards (completed keeps emerald;
+   the rest mirror the shared booking-card accent system). These also feed the
+   attention line and the CTA glow via --accent. */
+.my-bookings-page .my-booking-card[data-status="completed"] { border-left-color: var(--accent-emerald); --accent: #059669; }
+.my-bookings-page .my-booking-card[data-status="requested"] { border-left-color: #d97706; --accent: #d97706; }
+.my-bookings-page .my-booking-card[data-status="accepted"] { border-left-color: #2563eb; --accent: #e8590c; }
+.my-bookings-page .my-booking-card[data-status="confirmed"] { border-left-color: #2563eb; --accent: #2563eb; }
+.my-bookings-page .my-booking-card[data-status="in_progress"] { border-left-color: #7c3aed; --accent: #7c3aed; }
+.my-bookings-page .my-booking-card[data-status="expired"] { border-left-color: #cbd5e1; --accent: #ef4444; }
+.my-bookings-page .my-booking-card[data-status="cancelled"] { border-left-color: #cbd5e1; --accent: #64748b; }
+.my-bookings-page .my-booking-card[data-status="rejected"] { border-left-color: #e11d48; --accent: #e11d48; }
+.my-bookings-page .my-booking-card[data-status="unattended"] {
+  border-color: #fecaca;
+  border-left-color: #dc2626;
+  --accent: #dc2626;
+  background:
+    radial-gradient(130% 70% at 100% 0%, rgba(220, 38, 38, 0.08) 0%, rgba(220, 38, 38, 0) 55%),
+    linear-gradient(180deg, #ffffff 0%, #fef2f2 100%);
+}
+/* Attention line — the active card's own message (kept from the old rows),
+   tinted by the card's status accent */
+.my-booking-action {
+  margin: 0.35rem 0 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--accent) 72%, #0f172a);
+  background: color-mix(in srgb, var(--accent) 8%, #ffffff);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, #ffffff);
+  border-radius: 12px;
+  padding: 0.35rem 0.6rem;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+.my-booking-action svg { width: 14px; height: 14px; flex-shrink: 0; color: var(--accent); }
+/* The green-yellow gradient beam across the top edge of every card was
+   removed per design request — cards keep their status edge + accents. */
+.my-bookings-page .my-booking-card::before {
+  content: none;
+}
+.my-bookings-page .my-booking-card::after {
+  top: -52px;
+  right: -52px;
+  width: 150px;
+  height: 150px;
+  background:
+    radial-gradient(circle, rgba(5, 150, 105, 0.14) 0%, rgba(5, 150, 105, 0) 65%),
+    radial-gradient(circle at 70% 70%, rgba(255, 176, 32, 0.12) 0%, rgba(255, 176, 32, 0) 60%);
+}
+.my-bookings-page .my-booking-card:hover {
+  border-color: #6ee7b7;
+  box-shadow:
+    var(--shadow-md),
+    0 0 0 3px rgba(5, 150, 105, 0.12),
+    0 24px 48px -18px rgba(5, 150, 105, 0.4);
+}
+.my-bookings-page .my-booking-avatar {
+  border: 2px solid #fff;
+  box-shadow:
+    0 0 0 2px rgba(5, 150, 105, 0.35),
+    0 8px 18px -8px rgba(15, 23, 42, 0.35);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.my-bookings-page .my-booking-card:hover .my-booking-avatar {
+  transform: scale(1.05);
+  box-shadow:
+    0 0 0 2px rgba(5, 150, 105, 0.55),
+    0 10px 22px -8px rgba(15, 23, 42, 0.4);
+}
+.my-bookings-page .my-booking-cook { font-size: 1.06rem; letter-spacing: -0.02em; }
+.my-bookings-page .my-booking-card[data-status="completed"] .my-booking-status {
+  background: linear-gradient(180deg, #10b981, #059669);
+  border: 1px solid #059669;
+  color: #fff;
+  text-transform: uppercase;
+  box-shadow: 0 3px 8px -2px rgba(5, 150, 105, 0.55);
+}
+.my-bookings-page .my-booking-service {
+  background: linear-gradient(180deg, #fff7ed, #ffedd5);
+  border-color: #fdba74;
+  box-shadow: 0 1px 3px rgba(232, 89, 12, 0.14);
+}
+.my-bookings-page .my-chip {
+  background: #fff;
+  border-color: var(--slate-200);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.07);
+}
+.my-bookings-page .my-chip-price {
+  background: linear-gradient(180deg, #fff7ed, #ffedd5);
+  border-color: #f59e0b;
+  color: #9a3412;
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 0.28rem 0.7rem;
+  box-shadow: 0 2px 6px -2px rgba(245, 158, 11, 0.5);
+}
+.my-bookings-page .my-chip-rating {
+  background: linear-gradient(180deg, #fefce8, #fef3c7);
+  border-color: #fcd34d;
+}
+.my-bookings-page .my-booking-note {
+  background: linear-gradient(180deg, #fffdf5, #fff8e8);
+  box-shadow: 0 1px 3px rgba(146, 64, 14, 0.08);
+}
+.my-bookings-page .my-booking-go {
+  background: linear-gradient(180deg, #ffffff, #fff7ed);
+  box-shadow: 0 2px 6px rgba(232, 89, 12, 0.16);
+}
+.my-bookings-page .my-booking-card:hover .my-booking-go {
+  background: var(--primary-gradient);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: var(--shadow-brand);
+}
+.my-bookings-page .my-booking-foot { border-top-color: #e0efe7; }
+.my-bookings-page .my-booking-review {
+  background: linear-gradient(180deg, #10b981, #059669);
+  border-color: #047857;
+  color: #fff;
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 16px -8px rgba(5, 150, 105, 0.65);
+}
+.my-bookings-page .my-booking-review:hover {
+  filter: brightness(1.08);
+  color: #fff;
+  box-shadow: 0 12px 22px -8px rgba(5, 150, 105, 0.65);
+}
+/* Gentle stagger-in for the card lists (killed under reduced-motion below) */
+.my-bookings-page .my-bookings-list > *,
+.my-bookings-page .my-active-list > * { animation: riseIn 0.45s ease both; }
+.my-bookings-page .my-bookings-list > *:nth-child(2),
+.my-bookings-page .my-active-list > *:nth-child(2) { animation-delay: 0.05s; }
+.my-bookings-page .my-bookings-list > *:nth-child(3),
+.my-bookings-page .my-active-list > *:nth-child(3) { animation-delay: 0.1s; }
+.my-bookings-page .my-bookings-list > *:nth-child(4),
+.my-bookings-page .my-active-list > *:nth-child(4) { animation-delay: 0.15s; }
+.my-bookings-page .my-bookings-list > *:nth-child(5),
+.my-bookings-page .my-active-list > *:nth-child(5) { animation-delay: 0.2s; }
+.my-bookings-page .my-bookings-list > *:nth-child(n+6),
+.my-bookings-page .my-active-list > *:nth-child(n+6) { animation-delay: 0.25s; }
+@media (prefers-reduced-motion: reduce) {
+  .my-bookings-page .my-bookings-list > *,
+  .my-bookings-page .my-active-list > * { animation: none; }
+  .my-bookings-page .my-booking-avatar { transition: none; }
+}
 
 /* ---- My Bookings responsive: 1 col phones → 2 col tablet/laptop ---- */
 @media (min-width: 768px) and (max-width: 1023px) {
@@ -497,8 +733,11 @@
   .my-booking-cook { font-size: 0.93rem; }
   .my-booking-sub { font-size: 0.75rem; gap: 0.25rem 0.4rem; }
   .my-booking-service { font-size: 0.68rem; }
+  .my-booking-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-bottom: 0.1rem; }
+  .my-booking-chips::-webkit-scrollbar { display: none; }
+  .my-booking-chips .my-chip { flex: 0 0 auto; }
   .my-chip { font-size: 0.69rem; padding: 0.22rem 0.55rem; }
-  .my-booking-note { font-size: 0.75rem; }
+  .my-booking-note { font-size: 0.75rem; -webkit-line-clamp: 2; line-clamp: 2; }
   .my-booking-go { width: 36px; height: 36px; }
 }
 @media (min-width: 1024px) {
@@ -511,40 +750,164 @@
   .my-booking-card { padding: 1.15rem 1.25rem; }
 }
 
-@media (max-width: 767px) {
-  .my-bookings-list { grid-template-columns: 1fr; gap: 0.75rem; }
-  .my-booking-card { padding: 0.9rem 0.9rem 0.85rem; border-radius: 18px; }
-  .my-booking-main { gap: 0.7rem; }
-  .my-booking-avatar { width: 48px; height: 48px; border-radius: 15px; font-size: 1.1rem; }
-  .my-booking-cook { font-size: 0.95rem; }
-  .my-booking-sub { font-size: 0.76rem; }
-  .my-booking-service { font-size: 0.7rem; }
-  .my-booking-go { width: 40px; height: 40px; }
-}
-
-/* Small phones: roomy stacked card, full-width friendly review CTA */
-@media (max-width: 480px) {
-  .my-bookings-page .od-hero { margin-bottom: 1rem; }
-  .my-booking-card { padding: 1rem 0.95rem; border-radius: 18px; }
-  .my-booking-main { gap: 0.65rem; }
-  .my-booking-avatar { width: 46px; height: 46px; border-radius: 14px; }
-  .my-booking-body { flex: 1 1 auto; min-width: 0; }
-  .my-booking-side { padding-left: 0; align-items: flex-start; }
-  .my-booking-go { width: 42px; height: 42px; }
-  .my-booking-sub { row-gap: 0.35rem; }
-  .my-booking-ref { flex-basis: 100%; }
-  .my-booking-chips { gap: 0.4rem; }
-  .my-chip { font-size: 0.74rem; padding: 0.3rem 0.65rem; }
-  .my-booking-note { font-size: 0.8rem; -webkit-line-clamp: 3; }
-  .my-booking-foot { flex-direction: column; align-items: stretch; gap: 0.5rem; }
-  .my-booking-foot-hint { text-align: center; }
-  .my-booking-review { width: 100%; min-height: 44px; font-size: 0.82rem; }
-}
-
-/* ---- My Bookings page: breathing room above the cards ---- */
+/* ---- My Bookings page: breathing room above the cards (base first,
+   phone overrides below always win at equal-or-higher specificity) ---- */
 .my-bookings-page .od-hero { margin-bottom: 1.5rem; }
 .my-bookings-page .bookings-list-modern { margin-top: 0.25rem; }
 .my-bookings-page .empty-state-card { margin-top: 0.25rem; }
+
+/* ---- My Bookings visual polish: hero + section titles ---- */
+.my-bookings-page .od-hero {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(420px 160px at 90% 0%, rgba(255, 255, 255, 0.65), transparent 60%),
+    linear-gradient(135deg, #fff7ed 0%, #ffedd5 55%, #fdba74 130%);
+  border-color: #fdba74;
+  box-shadow:
+    var(--shadow-sm),
+    0 14px 30px -18px rgba(232, 89, 12, 0.45);
+}
+.my-bookings-page .od-eyebrow {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(154, 52, 18, 0.12);
+}
+.my-bookings-page .my-section-title { letter-spacing: -0.01em; }
+.my-bookings-page .my-section-title::before {
+  content: "";
+  width: 4px;
+  height: 1.1em;
+  border-radius: 99px;
+  background: var(--primary-gradient);
+  flex-shrink: 0;
+}
+/* Count pill pinned to the right of each section title */
+.my-bookings-page .my-section-count {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--primary-700);
+  background: #fff;
+  border: 1px solid #fed7aa;
+  border-radius: 99px;
+  padding: 0.12rem 0.6rem;
+  box-shadow: 0 1px 3px rgba(154, 52, 18, 0.12);
+  flex-shrink: 0;
+}
+
+/* Phone base: single column, tighter chrome, content-driven height.
+   Scoped to .my-bookings-page (0,2,0) so the generic .booking-item-card /
+   .booking-card-modern rules in responsive.css (later file, ≤640px) and the
+   shared ≤480px block further below can never override the compact card. */
+@media (max-width: 767px) {
+  .my-bookings-list { grid-template-columns: 1fr; gap: 0.65rem; }
+  .my-bookings-page .my-booking-card {
+    padding: 0.8rem 0.8rem 0.75rem;
+    border-radius: 16px;
+    gap: 0;
+  }
+  .my-booking-main { gap: 0.6rem; align-items: flex-start; }
+  .my-booking-avatar { width: 42px; height: 42px; border-radius: 13px; font-size: 1rem; }
+  .my-booking-cook { font-size: 0.94rem; }
+  .my-booking-sub { font-size: 0.74rem; gap: 0.22rem 0.4rem; margin-top: 0.2rem; }
+  .my-booking-service { font-size: 0.68rem; padding: 0.08rem 0.48rem; }
+  .my-booking-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    gap: 0.32rem;
+    margin-top: 0.4rem;
+    padding-bottom: 0.05rem;
+  }
+  .my-booking-chips::-webkit-scrollbar { display: none; }
+  .my-booking-chips .my-chip { flex: 0 0 auto; }
+  .my-chip { font-size: 0.68rem; padding: 0.2rem 0.52rem; }
+  .my-booking-note {
+    margin-top: 0.4rem;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.74rem;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+  .my-booking-go { width: 34px; height: 34px; }
+  .my-booking-go svg { width: 16px; height: 16px; }
+  .my-booking-side { margin-top: 0; }
+  .my-booking-foot { margin-top: 0.45rem; padding-top: 0.45rem; gap: 0.45rem; }
+  .my-booking-foot-hint { font-size: 0.72rem; }
+  .my-booking-review { min-height: 38px; padding: 0.35rem 0.75rem; font-size: 0.75rem; }
+}
+
+/* Very small phones: only required height — no wasted chrome.
+   Hero/list spacing for these widths lives in the page-chrome blocks below. */
+@media (max-width: 480px) {
+  .my-bookings-page .bookings-list-modern { gap: 0.55rem; }
+  .my-bookings-page .my-booking-card { padding: 0.7rem 0.7rem 0.65rem; border-radius: 14px; border-left-width: 3px; }
+  .my-booking-main { gap: 0.5rem; }
+  .my-booking-avatar { width: 38px; height: 38px; border-radius: 12px; font-size: 0.95rem; }
+  .my-booking-body { flex: 1 1 auto; min-width: 0; }
+  .my-booking-title-row { gap: 0.35rem; }
+  .my-booking-cook { font-size: 0.9rem; }
+  .my-booking-status { font-size: 0.62rem; padding: 0.18rem 0.5rem; }
+  .my-booking-side { padding-left: 0; align-self: flex-start; }
+  .my-booking-go { width: 32px; height: 32px; border-radius: 10px; }
+  .my-booking-go svg { width: 15px; height: 15px; }
+  .my-booking-sub { row-gap: 0.28rem; font-size: 0.72rem; }
+  .my-booking-ref { font-size: 0.66rem; }
+  .my-booking-chips { gap: 0.28rem; margin-top: 0.35rem; }
+  .my-chip { font-size: 0.66rem; padding: 0.18rem 0.48rem; }
+  .my-booking-note {
+    margin-top: 0.35rem;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.72rem;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+  }
+  .my-booking-foot {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+    padding-top: 0.4rem;
+  }
+  .my-booking-foot-hint {
+    text-align: left;
+    font-size: 0.7rem;
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .my-booking-review {
+    width: auto;
+    min-height: 36px;
+    font-size: 0.74rem;
+    padding: 0.32rem 0.7rem;
+    flex-shrink: 0;
+  }
+}
+
+/* Phones: tighter page chrome so cards dominate without empty vertical space */
+@media (max-width: 767px) {
+  .my-bookings-page { padding-top: 1rem; padding-bottom: 1.25rem; }
+  .my-bookings-page .od-hero {
+    margin-bottom: 0.95rem;
+    padding: 0.75rem 0.85rem;
+    border-radius: 14px;
+  }
+  .my-bookings-page .od-title { font-size: 1.25rem; margin-top: 0.05rem; }
+  .my-bookings-page .od-eyebrow { font-size: 0.64rem; padding: 0.12rem 0.48rem; }
+  .my-bookings-page .od-sub { font-size: 0.72rem; }
+  .my-bookings-page .bookings-list-modern { margin-top: 0; }
+}
+@media (max-width: 400px) {
+  .my-bookings-page { padding-top: 0.85rem; padding-bottom: 1rem; }
+  .my-bookings-page .od-hero { margin-bottom: 0.75rem; padding: 0.65rem 0.7rem; }
+  .my-bookings-page .od-title { font-size: 1.15rem; }
+  .my-bookings-page .od-sub-text { font-size: 0.7rem; }
+  .my-bookings-page .empty-state-card { padding: 1.6rem 1rem; }
+}
 
 /* ---- Phone: roomy single-column card, full-width friendly actions ---- */
 @media (max-width: 480px) {
@@ -614,11 +977,7 @@
   }
 }
 
-/* ---- Full-width action on phones so it never squeezes beside the text. ---- */
-@media (max-width: 400px) {
-  /* Full-width action on phones so it never squeezes beside the text. */
-  .notif-mark-read { width: 100%; }
-}
+/* Full-width Mark-read on phones lives in styles/notifications.css */
 
 /* Icon-only delete for removable bookings — sits top-right of the card,
    next to the status badge. */
@@ -675,129 +1034,964 @@
 .cook-status-cancelled { border-left-color: var(--slate-400); }
 .cook-status-rejected { border-left-color: var(--accent-rose); }
 .cook-status-expired { border-left-color: var(--slate-400); }
+.cook-status-unattended {
+  border-left-color: #dc2626;
+  background:
+    radial-gradient(110% 80% at 100% 0%, rgba(220, 38, 38, 0.10) 0%, rgba(220, 38, 38, 0) 55%),
+    linear-gradient(180deg, #fff 0%, #fef2f2 100%);
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15), var(--shadow-sm);
+  border-color: #fecaca;
+}
+.cook-status-unattended:hover {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.25), var(--shadow-md);
+}
 
 /* Booking-party block on details */
 .booking-party-info { display: flex; flex-direction: column; gap: 0.15rem; }
+
+/* ==========================================================================
+   Admin — Platform booking cards (modern, friendly)
+   ========================================================================== */
+.admin-bookings-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.1rem;
+}
+.admin-bookings-title h2 { margin: 0; font-size: 1.35rem; letter-spacing: -0.01em; }
+.admin-bookings-title p { margin: 0.25rem 0 0; font-size: 0.85rem; color: var(--slate-500); font-weight: 600; }
+.admin-bookings-filters { display: flex; gap: 0.45rem; flex-wrap: wrap; align-items: center; }
+.admin-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--slate-200);
+  background: #fff;
+  color: var(--slate-600);
+  border-radius: 99px;
+  padding: 0.42rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.admin-filter-chip:hover { transform: translateY(-1px); border-color: #fed7aa; box-shadow: var(--shadow-sm); }
+.admin-filter-count {
+  min-width: 24px;
+  height: 22px;
+  padding: 0 0.45rem;
+  border-radius: 99px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.74rem;
+  font-weight: 800;
+  background: var(--slate-100);
+  color: var(--slate-600);
+  font-variant-numeric: tabular-nums;
+}
+.admin-filter-chip.is-active {
+  background: var(--primary-gradient);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: var(--shadow-brand);
+}
+.admin-filter-chip.is-active .admin-filter-count { background: rgba(255, 255, 255, 0.24); color: #fff; }
+
+.admin-booking-card {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(130% 80% at 100% 0%, rgba(255, 176, 32, 0.09) 0%, rgba(255, 176, 32, 0) 55%),
+    linear-gradient(180deg, #ffffff 0%, #fffdf8 100%);
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--primary);
+  border-radius: 20px;
+  box-shadow: var(--shadow-sm);
+  padding: 1rem 1.15rem 1.05rem;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+.admin-booking-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: #fed7aa; }
+.admin-booking-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.9), rgba(255,237,213,0.75), rgba(255,255,255,0));
+  pointer-events: none;
+}
+.admin-booking-card.st-requested { border-left-color: var(--accent-amber); }
+.admin-booking-card.st-accepted, .admin-booking-card.st-confirmed { border-left-color: var(--accent-blue); }
+.admin-booking-card.st-in_progress { border-left-color: var(--accent-purple); }
+.admin-booking-card.st-completed { border-left-color: var(--accent-emerald); }
+.admin-booking-card.st-rejected, .admin-booking-card.st-cancelled, .admin-booking-card.st-expired { border-left-color: var(--slate-300); }
+.admin-booking-card.st-unattended { border-left-color: #dc2626; }
+.abc-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.9rem; flex-wrap: wrap; }
+.abc-parties { display: flex; align-items: center; gap: 0.65rem; min-width: 0; flex: 1 1 320px; }
+.abc-ava { width: 46px; height: 46px; border-radius: 15px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.05rem; color: #fff; flex-shrink: 0; }
+.abc-ava-customer { background: linear-gradient(135deg, #334155 0%, #0f172a 100%); }
+.abc-ava-cook { background: var(--primary-gradient); box-shadow: var(--shadow-brand); }
+.abc-route { min-width: 0; }
+.abc-customer { margin: 0; font-weight: 800; font-size: 1.02rem; color: var(--slate-900); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.abc-cook { margin: 0.18rem 0 0; display: flex; align-items: center; gap: 0.32rem; font-size: 0.8rem; color: var(--slate-500); font-weight: 600; min-width: 0; flex-wrap: wrap; }
+.abc-cook svg { color: var(--slate-400); flex-shrink: 0; }
+.abc-cook span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.abc-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--slate-300); flex-shrink: 0; }
+.abc-route-arrow { color: var(--slate-300); flex-shrink: 0; }
+.abc-badges { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+.abc-badges .badge svg { width: 12px; height: 12px; }
+.abc-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.55rem; margin-top: 0.9rem; background: var(--slate-50); border: 1px solid var(--slate-100); border-radius: 14px; padding: 0.7rem 0.8rem; }
+.abc-meta-item { display: flex; gap: 0.6rem; align-items: flex-start; min-width: 0; }
+.abc-meta-ico { width: 32px; height: 32px; border-radius: 10px; background: #fff; border: 1px solid var(--slate-100); color: var(--primary); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.abc-meta-item div { min-width: 0; }
+.abc-meta-item label { display: block; font-size: 0.64rem; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; color: var(--slate-400); }
+.abc-meta-item span { display: block; font-size: 0.86rem; font-weight: 700; color: var(--slate-700); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.abc-meta-item span.abc-amount { color: var(--primary-700); font-weight: 800; font-variant-numeric: tabular-nums; }
+.abc-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem; }
+.abc-chip { display: inline-flex; align-items: center; gap: 0.32rem; background: #fff; border: 1px solid var(--slate-200); color: var(--slate-600); border-radius: 99px; padding: 0.28rem 0.65rem; font-size: 0.76rem; font-weight: 700; max-width: 100%; }
+.abc-chip svg { color: var(--slate-400); flex-shrink: 0; }
+.abc-chip-dish { background: var(--primary-light); border-color: transparent; color: var(--primary-700); }
+.abc-chip-more { background: var(--slate-100); border-color: transparent; color: var(--slate-500); }
+.abc-ref { position: absolute; right: 1rem; bottom: 0.85rem; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em; color: var(--slate-300); font-variant-numeric: tabular-nums; }
+.abc-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.85rem; padding-right: 4.5rem; }
+.abc-actions .abc-btn { border-radius: 99px; font-weight: 800; min-height: 40px; }
+.abc-actions .abc-btn svg { width: 15px; height: 15px; }
+.abc-btn-details { margin-left: auto; }
+.admin-bookings-empty { text-align: center; background: #fff; border: 1px dashed var(--slate-200); border-radius: 18px; padding: 2.2rem 1.5rem; }
+.admin-bookings-empty-ico { width: 52px; height: 52px; border-radius: 16px; background: var(--primary-light); color: var(--primary); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 0.8rem; }
+.admin-bookings-empty h3 { margin: 0 0 0.3rem; }
+.admin-bookings-empty p { margin: 0; color: var(--slate-500); font-size: 0.9rem; }
+/* Compact mobile booking card — keep one card short enough to scan in a list:
+   one-row parties+badges, 2×2 meta, scrollable chips, side-by-side actions. */
+@media (max-width: 720px) {
+  .admin-bookings-head { align-items: stretch; flex-direction: column; gap: 0.65rem; }
+  .admin-bookings-filters {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.15rem;
+    scrollbar-width: none;
+  }
+  .admin-bookings-filters::-webkit-scrollbar { display: none; }
+  .admin-bookings-filters .admin-filter-chip { flex: 0 0 auto; min-height: 40px; }
+  .admin-booking-card {
+    padding: 0.85rem 0.9rem 0.9rem;
+    border-radius: 16px;
+  }
+
+  /* Parties + status stay one row (badges shrink, never force a second row) */
+  .abc-top {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.55rem;
+  }
+  .abc-parties {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 0.5rem;
+  }
+  .abc-ava {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    font-size: 0.9rem;
+  }
+  .abc-ava-cook { display: none; } /* customer avatar + route text is enough on phones */
+  .abc-route-arrow { display: none; }
+  .abc-customer {
+    font-size: 0.92rem;
+    max-width: 42vw;
+  }
+  .abc-cook {
+    margin-top: 0.1rem;
+    font-size: 0.72rem;
+    flex-wrap: nowrap;
+    overflow: hidden;
+  }
+  .abc-cook span {
+    max-width: none;
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .abc-cook span:first-of-type { flex: 1 1 auto; }
+  .abc-badges {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 0.3rem;
+    max-width: 48%;
+  }
+  .abc-badges .badge {
+    font-size: 0.62rem;
+    padding: 0.24rem 0.5rem;
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Meta: compact 2×2 grid (not a tall single column) */
+  .abc-meta {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem;
+    margin-top: 0.65rem;
+    padding: 0.55rem 0.6rem;
+    border-radius: 12px;
+  }
+  .abc-meta-item {
+    gap: 0.45rem;
+    align-items: center;
+  }
+  .abc-meta-ico {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+  }
+  .abc-meta-ico svg { width: 12px; height: 12px; }
+  .abc-meta-item label {
+    font-size: 0.56rem;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.05rem;
+  }
+  .abc-meta-item span {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--slate-700);
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow-wrap: anywhere;
+  }
+  /* Venue + rating can wrap to 2 lines; schedule/amount stay one line */
+  .abc-meta-item span.abc-amount {
+    display: block;
+    white-space: nowrap;
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
+    color: var(--primary-700);
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Chips: one horizontal line */
+  .abc-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 0.35rem;
+    margin-top: 0.55rem;
+    padding-bottom: 0.1rem;
+    scrollbar-width: none;
+  }
+  .abc-chips::-webkit-scrollbar { display: none; }
+  .abc-chip {
+    flex: 0 0 auto;
+    font-size: 0.7rem;
+    padding: 0.24rem 0.55rem;
+    white-space: nowrap;
+    max-width: none;
+  }
+
+  /* Ref tucks beside actions instead of its own row */
+  .abc-ref {
+    position: static;
+    display: inline-block;
+    margin: 0.45rem 0 0;
+    font-size: 0.64rem;
+  }
+
+  /* Actions: side-by-side chips, not full-width stack */
+  .abc-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 0.4rem;
+    margin-top: 0.55rem;
+    padding-right: 0;
+    align-items: center;
+  }
+  .abc-actions .abc-btn,
+  .abc-btn-details {
+    width: auto;
+    margin-left: 0;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 40px;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.76rem;
+    justify-content: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .abc-actions .abc-btn svg { width: 13px; height: 13px; }
+  /* Single Details/View-details button can stay full-ish width when alone */
+  .abc-actions .abc-btn-details:only-child,
+  .abc-actions > .abc-btn-details:first-child:last-child {
+    flex: 1 1 100%;
+  }
+}
+
+@media (max-width: 400px) {
+  .admin-booking-card { padding: 0.75rem 0.8rem 0.8rem; border-radius: 14px; }
+  .abc-ava { width: 34px; height: 34px; border-radius: 10px; font-size: 0.82rem; }
+  .abc-customer { font-size: 0.88rem; max-width: 38vw; }
+  .abc-cook { font-size: 0.68rem; }
+  .abc-cook .abc-dot,
+  .abc-cook svg:last-of-type,
+  .abc-cook span:last-child { display: none; } /* drop service type when very tight */
+  .abc-badges { max-width: 46%; }
+  .abc-badges .badge { font-size: 0.58rem; padding: 0.2rem 0.42rem; }
+  .abc-meta { gap: 0.35rem; padding: 0.45rem 0.5rem; margin-top: 0.55rem; }
+  .abc-meta-item { gap: 0.35rem; }
+  .abc-meta-item span { font-size: 0.72rem; }
+  .abc-actions { flex-wrap: wrap; gap: 0.35rem; }
+  .abc-actions .abc-btn,
+  .abc-btn-details { flex: 1 1 calc(50% - 0.2rem); font-size: 0.72rem; min-height: 40px; }
+  .abc-actions .abc-btn-details:only-child { flex: 1 1 100%; }
+  .abc-actions .abc-btn-details:not(:only-child) { flex: 1 1 100%; } /* Details full-width under primary actions */
+  .abc-actions .abc-btn:not(.abc-btn-details) { flex: 1 1 calc(50% - 0.2rem); }
+  .admin-bookings-title h2 { font-size: 1.1rem; }
+  .admin-bookings-empty { padding: 1.5rem 1rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .admin-booking-card, .admin-filter-chip { transition: none; }
+  .admin-booking-card:hover, .admin-filter-chip:hover { transform: none; }
+}
 
 /* ==========================================================================
    Admin — Cook approval card (modern, friendly)
    Scoped to .admin-cook-card so booking pages keep their own card style.
    ========================================================================== */
 .admin-cook-card {
-  background: #fff;
-  border: 1px solid var(--slate-100);
-  border-radius: 18px;
-  padding: 1.1rem 1.25rem;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(130% 80% at 100% 0%, rgba(255, 176, 32, 0.07) 0%, rgba(255, 176, 32, 0) 55%),
+    linear-gradient(180deg, #ffffff 0%, #fffdf9 100%);
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid var(--primary);
+  border-radius: 20px;
+  padding: 1.15rem 1.25rem 1.1rem;
   box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.18s ease, transform 0.18s ease;
+  animation: riseIn 0.32s ease backwards;
+  transition: box-shadow 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
 }
+.admin-cook-card:nth-child(2) { animation-delay: 0.04s; }
+.admin-cook-card:nth-child(3) { animation-delay: 0.08s; }
+.admin-cook-card:nth-child(n+4) { animation-delay: 0.12s; }
 .admin-cook-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.admin-cook-card:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-glow), var(--shadow-md);
+}
+.admin-cook-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.9), rgba(255,237,213,0.75), rgba(255,255,255,0));
+  pointer-events: none;
+}
+
+/* Status wash + left accent (border-left carries the accent) */
+.admin-cook-card.acc-status-pending {
+  border-left-color: var(--accent-amber, #d97706);
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(217, 119, 6, 0.09) 0%, rgba(217, 119, 6, 0) 55%),
+    linear-gradient(180deg, #ffffff 0%, #fffdf5 100%);
+}
+.admin-cook-card.acc-status-approved {
+  border-left-color: var(--accent-emerald, #059669);
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(5, 150, 105, 0.08) 0%, rgba(5, 150, 105, 0) 55%),
+    linear-gradient(180deg, #ffffff 0%, #f3fdf7 100%);
+}
+.admin-cook-card.acc-status-rejected {
+  border-left-color: var(--accent-rose, #e11d48);
+  background:
+    radial-gradient(120% 80% at 100% 0%, rgba(225, 29, 72, 0.07) 0%, rgba(225, 29, 72, 0) 55%),
+    linear-gradient(180deg, #ffffff 0%, #fff7f8 100%);
+  opacity: 0.94;
+}
+.admin-cook-card.acc-status-pending:hover { border-color: #fde68a; border-left-color: var(--accent-amber); }
+.admin-cook-card.acc-status-approved:hover { border-color: #a7f3d0; border-left-color: var(--accent-emerald); }
+.admin-cook-card.acc-status-rejected:hover { border-color: #fecdd3; border-left-color: var(--accent-rose); }
 
 /* Header: avatar + identity + status */
-.acc-head { display: flex; align-items: center; gap: 0.85rem; }
+.acc-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+/* .acc-ava-wrap is applied together with .acc-ava: the avatar is the
+   positioning context for .acc-ava-dot, so it must NOT clip its overflow
+   (the dot sits half-outside the rounded square). The photo is rounded
+   individually instead. */
 .acc-ava {
   position: relative;
-  width: 54px;
-  height: 54px;
-  border-radius: 17px;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
   background: var(--primary-gradient);
-  color: #fff;
-  font-weight: 800;
-  font-size: 1.2rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
-  overflow: visible;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.85), 0 4px 10px -2px rgba(15,23,42,0.18);
 }
-.acc-ava img { width: 100%; height: 100%; object-fit: cover; border-radius: 17px; display: block; }
+.acc-ava img { width: 100%; height: 100%; object-fit: cover; border-radius: 16px; display: block; }
+.acc-ava-initial {
+  width: 100%; height: 100%;
+  color: #fff; font-weight: 800; font-size: 1.25rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  letter-spacing: -0.01em;
+}
 .acc-ava-dot {
-  position: absolute;
-  bottom: -2px;
-  right: -2px;
-  width: 15px;
-  height: 15px;
+  position: absolute; bottom: -1px; right: -1px;
+  width: 16px; height: 16px;
   border-radius: 50%;
   border: 2.5px solid #fff;
+  box-shadow: 0 2px 5px rgba(15,23,42,0.25);
+  z-index: 1;
 }
 .acc-dot-approved { background: var(--accent-emerald, #10b981); }
 .acc-dot-pending { background: var(--accent-amber, #f59e0b); }
 .acc-dot-rejected { background: var(--accent-rose, #ef4444); }
 .acc-id { min-width: 0; flex: 1; }
-.acc-id h3 { margin: 0; font-size: 1.05rem; font-weight: 800; color: var(--slate-900, #0f172a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.acc-id p {
-  margin: 0.2rem 0 0;
-  font-size: 0.78rem;
-  color: var(--slate-500);
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
+.acc-id h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--slate-900, #0f172a);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.acc-id p svg { flex-shrink: 0; }
+.acc-id-email {
+  margin: 0.2rem 0 0;
+  font-size: 0.8rem;
+  color: var(--slate-500);
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.acc-id-email svg { flex-shrink: 0; color: var(--slate-400); }
+
+/* Status badge — tinted pill per approval status */
 .acc-badge {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   border-radius: 99px;
-  padding: 0.32rem 0.75rem;
-  font-size: 0.7rem;
+  padding: 0.36rem 0.8rem;
+  font-size: 0.72rem;
   font-weight: 800;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.03em;
   flex-shrink: 0;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
 }
 .acc-badge svg { flex-shrink: 0; }
+.acc-badge-pending { background: var(--accent-amber-light, #fef3c7); color: #92400e; border-color: #fde68a; }
+.acc-badge-approved { background: var(--accent-emerald-light, #d1fae5); color: #065f46; border-color: #a7f3d0; }
+.acc-badge-rejected { background: var(--accent-rose-light, #ffe4e6); color: #9f1239; border-color: #fecdd3; }
 
-/* Fact chips: experience / rate / area / specialties */
-.acc-chips { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.9rem; }
-.acc-chip {
-  display: inline-flex;
+/* Fact tiles: experience / rate / area — equal-width scannable grid */
+.acc-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.55rem;
+  margin-top: 1rem;
+}
+.acc-stat {
+  display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.55rem;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid var(--slate-100);
+  border-radius: 14px;
+  padding: 0.55rem 0.7rem;
+}
+.acc-stat-ico {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
   background: var(--slate-50);
   border: 1px solid var(--slate-100);
-  color: var(--slate-600);
-  padding: 0.32rem 0.7rem;
-  border-radius: 99px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  max-width: 100%;
+  color: var(--slate-500);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
-.acc-chip svg { color: var(--slate-400); flex-shrink: 0; }
-.acc-chip-rate { background: var(--primary-light); border-color: transparent; color: var(--primary); font-weight: 800; }
-.acc-chip-rate svg { color: var(--primary); }
-.acc-chip-spec { background: #eff6ff; border-color: transparent; color: #2563eb; }
-.acc-chip-spec svg { color: #60a5fa; }
+.acc-stat-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.acc-stat-label {
+  color: var(--slate-400);
+  font-weight: 700;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.acc-stat-value {
+  color: var(--slate-800);
+  font-weight: 800;
+  font-size: 0.86rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.acc-stat-rate {
+  background: linear-gradient(180deg, #fff7ed, var(--primary-light, #fff0e1));
+  border-color: #fed7aa;
+}
+.acc-stat-rate .acc-stat-ico {
+  background: #fff;
+  border-color: #fed7aa;
+  color: var(--primary, #e8590c);
+}
+.acc-stat-rate .acc-stat-value { color: var(--primary-700, #c2410c); }
+.acc-stat-area .acc-stat-value { font-weight: 700; }
 
-/* Bio / skills quote strip */
-.acc-bio {
-  margin: 0.85rem 0 0;
-  font-size: 0.87rem;
+/* Generic content sections (specialties / about / docs) */
+.acc-section { margin-top: 0.95rem; }
+.acc-section-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--slate-500);
+  margin-bottom: 0.45rem;
+}
+.acc-section-label svg { color: var(--slate-400); flex-shrink: 0; }
+
+/* Specialties */
+.acc-specialties { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.acc-spec-chip {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe;
+  padding: 0.3rem 0.65rem; border-radius: 99px;
+  font-size: 0.76rem; font-weight: 700;
+}
+.acc-spec-chip svg { color: #3b82f6; flex-shrink: 0; }
+.acc-spec-more { background: var(--slate-100); color: var(--slate-600); border-color: var(--slate-200); }
+.acc-spec-more svg { display: none; }
+
+/* Bio / skills — quiet panel, no heavy left border */
+.acc-bio-text {
+  margin: 0;
+  font-size: 0.88rem;
   color: var(--slate-600);
-  line-height: 1.5;
-  background: var(--slate-50);
-  border-left: 3px solid var(--primary);
-  padding: 0.55rem 0.8rem;
-  border-radius: 0 10px 10px 0;
-  font-style: italic;
+  line-height: 1.55;
   overflow-wrap: break-word;
+  background: rgba(248, 250, 252, 0.9);
+  border: 1px solid var(--slate-100);
+  border-radius: 12px;
+  padding: 0.65rem 0.8rem;
 }
 
-/* Docs / upload / action zones inherit dashboard spacing; nudge first doc row */
+/* Verification documents */
+.acc-docs-section {
+  background: rgba(250, 250, 250, 0.75);
+  border: 1px dashed var(--slate-200);
+  border-radius: 14px;
+  padding: 0.75rem 0.85rem;
+}
+.acc-docs-section .acc-section-label { margin-bottom: 0.35rem; }
+.acc-docs-section .admin-doc-grid { margin: 0.35rem 0 0; }
+
+/* Collapsed "upload on behalf of cook" disclosure */
+.acc-upload-zone {
+  margin-top: 0.75rem;
+  border-top: 1px dashed var(--slate-200);
+  padding-top: 0.55rem;
+}
+.acc-upload-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  list-style: none;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--slate-500);
+  padding: 0.3rem 0.15rem;
+  border-radius: 8px;
+  transition: color 0.14s ease, background 0.14s ease;
+  min-height: 36px;
+}
+.acc-upload-head::-webkit-details-marker { display: none; }
+.acc-upload-head::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--slate-400);
+  border-bottom: 2px solid var(--slate-400);
+  transform: rotate(45deg);
+  margin-left: 0.2rem;
+  transition: transform 0.16s ease;
+  flex-shrink: 0;
+}
+.acc-upload-zone[open] .acc-upload-head::after { transform: rotate(-135deg); }
+.acc-upload-head:hover { color: var(--primary-700, #c2410c); background: var(--primary-light, #fff0e1); }
+.acc-upload-head:focus-visible {
+  outline: 3px solid var(--primary-glow);
+  outline-offset: 2px;
+}
+.acc-upload-head svg { color: var(--slate-400); flex-shrink: 0; }
+.acc-upload-head:hover svg { color: var(--primary, #e8590c); }
+.acc-upload-body { margin-top: 0.55rem; }
+
+/* Actions — single footer bar: primary decision left, dossier right */
+.acc-actions {
+  position: relative;
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--slate-100);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.acc-actions-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 0;
+}
+.acc-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 99px;
+  padding: 0.55rem 1.1rem;
+  min-height: 42px;
+  font-size: 0.84rem;
+  font-weight: 800;
+  border: none;
+  cursor: pointer;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, filter 0.14s ease, background 0.14s ease, border-color 0.14s ease;
+  line-height: 1;
+}
+.acc-btn svg { flex-shrink: 0; }
+.acc-btn:active { transform: scale(0.97); }
+.acc-btn:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
+.acc-btn-approve {
+  background: linear-gradient(180deg, #10b981, var(--accent-emerald, #059669));
+  color: #fff;
+  box-shadow: 0 2px 10px -2px rgba(5,150,105,0.55);
+}
+.acc-btn-approve:hover {
+  filter: brightness(1.06);
+  box-shadow: 0 6px 18px -4px rgba(5,150,105,0.55);
+  color: #fff;
+}
+.acc-btn-reject {
+  background: #fff;
+  color: var(--accent-rose, #e11d48);
+  border: 1px solid #fecdd3;
+  box-shadow: 0 2px 8px -2px rgba(225,29,72,0.12);
+}
+.acc-btn-reject:hover {
+  background: var(--accent-rose-light, #ffe4e6);
+  border-color: var(--accent-rose);
+  color: var(--accent-rose);
+}
+.acc-decision-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--slate-500);
+  padding: 0.35rem 0.15rem;
+}
+.acc-status-approved .acc-decision-note { color: #065f46; }
+.acc-status-rejected .acc-decision-note { color: #9f1239; }
+.acc-decision-note svg { flex-shrink: 0; }
+
+.acc-btn-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  background: transparent;
+  color: var(--primary-700, #c2410c);
+  font-weight: 800;
+  font-size: 0.82rem;
+  text-decoration: none;
+  padding: 0.5rem 0.85rem;
+  min-height: 40px;
+  border-radius: 99px;
+  border: 1px solid var(--slate-200);
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, transform 0.14s ease;
+}
+.acc-btn-link svg { flex-shrink: 0; color: var(--primary, #e8590c); transition: transform 0.14s ease; }
+.acc-btn-link:hover {
+  background: var(--primary-light, #fff0e1);
+  border-color: var(--primary);
+  color: var(--primary-700, #c2410c);
+  transform: translateY(-1px);
+}
+.acc-btn-link:hover svg { transform: translateX(2px); }
+.acc-btn-link:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
+
+/* First child inside card should not push spacing oddly */
 .admin-cook-card > :first-child { margin-top: 0; }
 
-@media (max-width: 560px) {
-  .admin-cook-card { padding: 0.9rem 0.85rem; border-radius: 15px; }
-  .acc-head { flex-wrap: wrap; }
-  .acc-badge { margin-left: auto; }
-  .acc-ava { width: 46px; height: 46px; border-radius: 14px; font-size: 1.05rem; }
-  .acc-ava img { border-radius: 14px; }
-  .acc-id { flex: 1 1 calc(100% - 70px); }
-  .acc-chips { gap: 0.35rem; margin-top: 0.75rem; }
-  .acc-chip { font-size: 0.74rem; padding: 0.28rem 0.6rem; }
+/* Compact mobile: keep one card ≈ one screen — single-row header/stats,
+   scrollable chips/docs, clamped bio, side-by-side actions (no 3-row stack). */
+@media (max-width: 768px) {
+  .admin-cook-card {
+    padding: 0.9rem 0.9rem 0.95rem;
+    border-radius: 16px;
+  }
+  /* Header stays one row: avatar | name/email | compact badge */
+  .acc-head {
+    flex-wrap: nowrap;
+    gap: 0.6rem;
+    align-items: center;
+  }
+  .acc-ava,
+  .acc-ava-wrap {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+  }
+  .acc-ava img { border-radius: 12px; }
+  .acc-ava-initial { font-size: 1rem; }
+  .acc-ava-dot { width: 13px; height: 13px; border-width: 2px; }
+  .acc-id { flex: 1 1 auto; min-width: 0; }
+  .acc-id h3 { font-size: 0.95rem; }
+  .acc-id-email { font-size: 0.72rem; margin-top: 0.1rem; }
+  .acc-badge {
+    margin-left: 0;
+    flex: 0 0 auto;
+    max-width: 42%;
+    padding: 0.3rem 0.55rem;
+    font-size: 0.64rem;
+    gap: 0.25rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .acc-badge svg { width: 12px; height: 12px; }
+
+  /* Three fact tiles in one row — no full-width area tile */
+  .acc-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.4rem;
+    margin-top: 0.7rem;
+  }
+  .acc-stat {
+    padding: 0.45rem 0.4rem;
+    gap: 0.35rem;
+    border-radius: 12px;
+  }
+  .acc-stat-area { grid-column: auto; }
+  .acc-stat-ico { width: 26px; height: 26px; border-radius: 8px; }
+  .acc-stat-ico svg { width: 12px; height: 12px; }
+  .acc-stat-label { font-size: 0.58rem; letter-spacing: 0.03em; }
+  .acc-stat-value { font-size: 0.76rem; }
+
+  .acc-section { margin-top: 0.65rem; }
+  .acc-section-label {
+    font-size: 0.62rem;
+    margin-bottom: 0.3rem;
+    letter-spacing: 0.05em;
+  }
+
+  /* Specialties: one horizontal line instead of multi-row wrap */
+  .acc-specialties {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.15rem;
+    scrollbar-width: none;
+    gap: 0.35rem;
+  }
+  .acc-specialties::-webkit-scrollbar { display: none; }
+  .acc-spec-chip {
+    flex: 0 0 auto;
+    font-size: 0.7rem;
+    padding: 0.24rem 0.55rem;
+    white-space: nowrap;
+  }
+
+  /* Bio: max ~3 lines so long bios don't dominate the list */
+  .acc-bio-text {
+    font-size: 0.8rem;
+    line-height: 1.45;
+    padding: 0.5rem 0.65rem;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    overflow: hidden;
+  }
+
+  /* Docs panel tighter; thumbs scroll horizontally (no tall wrap grid) */
+  .acc-docs-section {
+    padding: 0.55rem 0.6rem;
+    border-radius: 12px;
+  }
+  .acc-docs-section .admin-doc-grid {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 0.5rem;
+    margin: 0.3rem 0 0;
+    padding-bottom: 0.15rem;
+    scrollbar-width: none;
+  }
+  .acc-docs-section .admin-doc-grid::-webkit-scrollbar { display: none; }
+  .acc-docs-section .admin-doc-thumb {
+    flex: 0 0 auto;
+    min-width: 76px;
+    max-width: 88px;
+    padding: 0.4rem;
+    gap: 0.25rem;
+  }
+  .acc-docs-section .admin-doc-thumb img,
+  .acc-docs-section .admin-doc-pdf {
+    width: 56px;
+    height: 56px;
+    border-radius: 8px;
+  }
+  .acc-docs-section .admin-doc-pdf { font-size: 0.58rem; }
+  .acc-docs-section .admin-doc-pdf svg { width: 18px; height: 18px; }
+  .acc-docs-section .admin-doc-label {
+    font-size: 0.66rem;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .acc-docs-section .admin-doc-missing {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    white-space: nowrap;
+    padding: 0.35rem 0.5rem;
+    background: var(--slate-50);
+    border: 1px dashed var(--slate-200);
+    border-radius: 8px;
+  }
+
+  /* Upload disclosure: thin single row */
+  .acc-upload-zone {
+    margin-top: 0.55rem;
+    padding-top: 0.4rem;
+  }
+  .acc-upload-head {
+    min-height: 34px;
+    font-size: 0.74rem;
+    padding: 0.2rem 0.1rem;
+  }
+
+  /* Actions: Approve + Reject share one row; dossier is a compact third chip
+     beside them (or drops under only if extremely narrow). */
+  .acc-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.45rem;
+    margin-top: 0.7rem;
+    padding-top: 0.65rem;
+  }
+  .acc-actions-main {
+    flex: 1 1 auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 0.4rem;
+    min-width: 0;
+  }
+  .acc-btn {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    min-height: 42px;
+    padding: 0.45rem 0.55rem;
+    font-size: 0.78rem;
+    gap: 0.3rem;
+  }
+  .acc-btn svg { width: 14px; height: 14px; }
+  .acc-decision-note {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-height: 42px;
+    font-size: 0.76rem;
+    padding: 0.25rem 0.4rem;
+    text-align: center;
+  }
+  .acc-btn-link {
+    flex: 0 0 auto;
+    width: auto;
+    min-height: 42px;
+    padding: 0.45rem 0.75rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
 }
+
+@media (max-width: 400px) {
+  .admin-cook-card { padding: 0.8rem 0.75rem 0.85rem; border-radius: 14px; }
+  .acc-head { gap: 0.5rem; }
+  .acc-ava, .acc-ava-wrap { width: 38px; height: 38px; border-radius: 11px; }
+  .acc-ava img { border-radius: 11px; }
+  .acc-id h3 { font-size: 0.9rem; }
+  .acc-badge {
+    max-width: none;
+    padding: 0.26rem 0.45rem;
+    font-size: 0.6rem;
+  }
+  /* Badge can drop under name only when the row truly can't fit */
+  .acc-head { flex-wrap: wrap; }
+  .acc-id { flex: 1 1 calc(100% - 48px); }
+  .acc-badge { margin-left: auto; order: 3; }
+  .acc-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.35rem; margin-top: 0.55rem; }
+  .acc-stat { flex-direction: column; align-items: flex-start; gap: 0.2rem; padding: 0.4rem 0.45rem; }
+  .acc-stat-ico { display: none; }
+  .acc-stat-label { font-size: 0.55rem; }
+  .acc-stat-value { font-size: 0.74rem; white-space: normal; }
+  .acc-section { margin-top: 0.55rem; }
+  .acc-actions-main { flex-wrap: wrap; }
+  .acc-btn { flex: 1 1 calc(50% - 0.2rem); }
+  .acc-decision-note { flex: 1 1 100%; }
+  .acc-btn-link { flex: 1 1 100%; justify-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-cook-card { animation: none; }
+  .admin-cook-card, .acc-btn, .acc-btn-link, .acc-upload-head::after { transition: none; }
+  .admin-cook-card:hover, .acc-btn:hover, .acc-btn-link:hover { transform: none; }
+  .acc-btn-link:hover svg { transform: none; }
+}
+
+
+
 
 /* Admin "upload on behalf of the cook" panel: Aadhaar / PAN / Photo sit
    side-by-side on tablet+ (used only by AdminDocUpload — the cook's own
@@ -919,4 +2113,394 @@
   .anx-bar-label { font-size: 0.76rem; }
   .anx-bar-value { font-size: 0.72rem; }
   .anx-sec { padding: 0.85rem 0.9rem; }
+}
+
+/* ===== Payouts console + notification tap-through (shared admin bits) ===== */
+.admin-panel { display: block; }
+.admin-muted { color: var(--slate-500, #64748b); font-size: 0.88rem; }
+.admin-card {
+  background: #fff;
+  border: 1px solid var(--border-subtle, #eef2f6);
+  border-radius: 12px;
+}
+.notif-go { color: var(--slate-400, #94a3b8); flex-shrink: 0; align-self: center; }
+.notif-item.is-unread .notif-go { color: var(--primary, #16a34a); }
+
+/* Customer "Active & upcoming" rows (reuses .bd-banner base). */
+.bd-active-banner { flex-wrap: wrap; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+.bd-active-banner:hover,
+.bd-active-banner:focus-visible { border-color: var(--primary, #16a34a); box-shadow: 0 1px 6px rgba(22, 163, 74, 0.12); outline: none; }
+
+/* Cook weekly schedule editor rows. */
+.cook-schedule-list { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.25rem; }
+.cook-schedule-list .form-control { max-width: 7rem; display: inline-block; }
+
+/* Cook earnings stat grid (payout panel). */
+.cook-stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.75rem; margin: 0.5rem 0 0.75rem; }
+
+/* ============================================================
+   My Bookings — modern sections (title, active cards, chips)
+   ============================================================ */
+.my-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--slate-900, #0f172a);
+  margin: 0 0 0.7rem;
+}
+.my-section-title svg { color: var(--primary, #e8590c); flex-shrink: 0; }
+
+.my-active-section { margin-bottom: 1.35rem; }
+.my-active-list { gap: 0.8rem; }
+
+/* NOTE: the old compact .my-active-card row layout was retired — every section
+   now renders the unified .my-booking-card. Only the section chrome, the
+   footer CTA, and the live-dot below still use my-active-* classes. */
+.my-active-cta {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ---- My Bookings visual polish: unified-card footer CTA ----
+   The CTA inherits the card's status --accent for its glow + gradient. */
+.my-bookings-page .my-active-cta {
+  box-shadow: 0 8px 18px -8px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+/* CTA takes the card's own status colour — Pay now glows orange, retry glows red */
+.my-bookings-page .my-active-cta.btn-primary {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 72%, #ffffff), var(--accent));
+  border-color: transparent;
+}
+.my-bookings-page .my-active-cta.btn-primary:hover { filter: brightness(1.08); color: #fff; }
+
+/* ---- Quick-info strip on booking cards: OTP + call cook + dishes ---- */
+.my-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+.my-qpill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  padding: 0.3rem 0.62rem;
+  border-radius: 99px;
+  line-height: 1.3;
+  border: 1px solid var(--slate-200, #e2e8f0);
+  background: #fff;
+  color: var(--slate-600, #475569);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.07);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.my-qpill svg { width: 12px; height: 12px; flex-shrink: 0; }
+button.my-qpill { cursor: pointer; font-family: inherit; }
+button.my-qpill:hover { transform: translateY(-1px); }
+/* Tap-to-copy service-start OTP */
+.my-qotp {
+  border-style: dashed;
+  border-color: #f59e0b;
+  background: linear-gradient(180deg, #fffbeb, #fef3c7);
+  color: #92400e;
+}
+.my-qotp code {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 0.74rem;
+  letter-spacing: 0.18em;
+}
+.my-qotp svg:last-child { color: #b45309; }
+/* Call-cook pill (active cards) */
+.my-qcall {
+  background: linear-gradient(180deg, #ecfdf5, #d1fae5);
+  border-color: #6ee7b7;
+  color: #065f46;
+  text-decoration: none;
+}
+.my-qcall:hover { color: #064e3b; }
+.my-qdish { background: var(--slate-50, #f8fafc); }
+/* Call-cook pill in the completed-card footer */
+.my-bookings-page .my-booking-foot .my-booking-call {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #fff;
+  text-decoration: none;
+  background: linear-gradient(180deg, #fb923c, #e8590c);
+  border: 1px solid #c2410c;
+  padding: 0.42rem 0.85rem;
+  border-radius: 99px;
+  min-height: 36px;
+  box-shadow: 0 6px 14px -6px rgba(232, 89, 12, 0.55);
+  transition: filter 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.my-bookings-page .my-booking-foot .my-booking-call:hover {
+  filter: brightness(1.07);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.my-booking-call svg { width: 14px; height: 14px; }
+@media (max-width: 400px) {
+  .my-quick { gap: 0.3rem; margin-top: 0.35rem; }
+  .my-qpill { font-size: 0.66rem; padding: 0.24rem 0.55rem; }
+  .my-bookings-page .my-booking-foot .my-booking-call {
+    min-height: 36px;
+    font-size: 0.74rem;
+    padding: 0.32rem 0.7rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button.my-qpill:hover { transform: none; }
+  .my-bookings-page .my-booking-foot .my-booking-call,
+  .my-bookings-page .my-booking-foot .my-booking-call:hover { transform: none; }
+}
+/* Pulsing live dot on the in-progress card's attention line */
+.my-bookings-page .my-booking-card[data-status="in_progress"] .my-booking-action::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: pulseDot 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .my-bookings-page .my-booking-card[data-status="in_progress"] .my-booking-action::before { animation: none; }
+}
+
+/* Price + rating chips on completed cards. */
+.my-chip-price { background: #fff0e1; border-color: #ffd9b8; color: #9a3412; font-weight: 700; }
+.my-chip-price svg { color: #e8590c; }
+.my-chip-rating { background: #fefce8; border-color: #fde68a; color: #854d0e; font-weight: 700; }
+.my-chip-rating svg { color: #f59e0b; fill: #f59e0b; }
+
+/* --- Responsive: footer CTA goes full-width on phones (cards themselves
+   follow the shared completed-card breakpoints above). */
+@media (max-width: 720px) {
+  .my-active-list { gap: 0.65rem; }
+  .my-bookings-page .my-booking-foot .my-active-cta {
+    flex: 1 1 100%;
+    justify-content: center;
+    min-height: 44px;
+  }
+  .my-section-title { margin-bottom: 0.55rem; }
+  .my-active-section { margin-bottom: 1.1rem; }
+}
+
+/* --- Responsive: small phones — section rhythm matches the cards. */
+@media (max-width: 400px) {
+  .my-section-title { font-size: 0.98rem; margin-bottom: 0.45rem; gap: 0.4rem; }
+  .my-section-title svg { width: 15px; height: 15px; }
+  .my-active-list { gap: 0.55rem; }
+  .my-active-section { margin-bottom: 1rem; }
+  .my-booking-action { font-size: 0.76rem; padding: 0.3rem 0.55rem; }
+  .my-bookings-page .my-booking-foot .my-active-cta {
+    min-height: 44px;
+    font-size: 0.84rem;
+  }
+}
+
+/* ==========================================================================
+   Admin — shared section headers, scrollable tables, responsive chrome
+   (Coupons, User Directory, Cooks Approval, Platform Bookings)
+   ========================================================================== */
+
+/* Section header: title/sub left, filters + primary action right */
+.admin-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+.admin-section-head h2 {
+  margin: 0;
+  font-size: 1.4rem;
+  letter-spacing: -0.01em;
+}
+.admin-section-sub {
+  color: var(--slate-500);
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  max-width: 52ch;
+}
+.admin-section-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Horizontal-scroll table shell (desktop / tablet) */
+.admin-table-card {
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  box-shadow: var(--shadow-sm);
+}
+.admin-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.95rem;
+}
+.admin-table th {
+  padding: 1rem;
+  background: var(--slate-50);
+  border-bottom: 1px solid var(--slate-200);
+  white-space: nowrap;
+}
+.admin-table td {
+  padding: 1rem;
+  border-bottom: 1px solid var(--slate-100);
+  vertical-align: top;
+}
+.admin-table tbody tr:last-child td { border-bottom: none; }
+.admin-table tbody tr:hover td { background: rgba(248, 250, 252, 0.65); }
+.admin-table .admin-td-nowrap { white-space: nowrap; }
+.admin-table .admin-td-strong { font-weight: 700; }
+.admin-table .admin-td-muted { color: var(--slate-600); }
+.admin-table .admin-td-wrap { overflow-wrap: anywhere; max-width: 240px; }
+.admin-table .admin-td-protected { color: var(--slate-400); font-size: 0.85rem; }
+.admin-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Tabs: never squash labels while the bar scrolls */
+.tabs-navigation-bar .tab-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.tabs-navigation-bar .tab-btn svg { flex-shrink: 0; }
+
+/* Phone / small tablet: section headers + filter toolbars stack cleanly */
+@media (max-width: 560px) {
+  .admin-section-head {
+    flex-direction: column;
+    align-items: stretch;
+    margin-bottom: 1.15rem;
+  }
+  .admin-section-head h2 { font-size: 1.2rem; }
+  .admin-section-sub { font-size: 0.84rem; max-width: none; }
+  .admin-section-actions {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+  /* Chips scroll instead of wrapping into a tall stack */
+  .admin-section-actions .admin-bookings-filters {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 0.15rem;
+    scrollbar-width: none;
+  }
+  .admin-section-actions .admin-bookings-filters::-webkit-scrollbar { display: none; }
+  .admin-section-actions .admin-filter-chip {
+    flex: 0 0 auto;
+    min-height: 40px;
+    justify-content: center;
+  }
+  .admin-section-actions > .btn,
+  .admin-section-head > .btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+  .tabs-navigation-bar { margin-bottom: 1.15rem; }
+}
+
+/* Phones: admin tables become stacked cards with data-label captions */
+@media (max-width: 768px) {
+  .admin-table-card {
+    overflow: visible;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .admin-table {
+    display: block;
+    min-width: 0;
+    width: 100%;
+  }
+  .admin-table thead { display: none; }
+  .admin-table tbody { display: flex; flex-direction: column; gap: 0.75rem; }
+  .admin-table tr {
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    background: #fff;
+    border: 1px solid var(--border-subtle);
+    border-radius: 16px;
+    padding: 1rem;
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .admin-table tbody tr:hover td { background: transparent; }
+  .admin-table td {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.28rem;
+    padding: 0;
+    border: none;
+    min-width: 0;
+    max-width: none;
+    white-space: normal;
+  }
+  .admin-table td::before {
+    content: attr(data-label);
+    font-size: 0.66rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--slate-400);
+  }
+  .admin-table td[data-label=""]::before { display: none; }
+  .admin-table .admin-td-wrap { max-width: none; }
+  .admin-table .admin-actions {
+    width: 100%;
+    margin-top: 0.1rem;
+  }
+  .admin-table .admin-actions .btn {
+    flex: 1 1 auto;
+    min-height: 44px;
+    justify-content: center;
+  }
+  .admin-table .coupon-desc { max-width: none; }
+  .admin-table .coupon-code-chip { word-break: break-all; }
+}
+
+/* Very small phones: slightly tighter card padding + tab bar */
+@media (max-width: 400px) {
+  .admin-table tr { padding: 0.9rem 0.85rem; border-radius: 14px; }
+  .admin-section-head h2 { font-size: 1.12rem; }
+  .admin-filter-chip { font-size: 0.78rem; padding: 0.4rem 0.7rem; }
 }

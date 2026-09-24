@@ -56,8 +56,9 @@ export const TermsConditions = () => (
     <h3>4. Cancellation & refunds</h3>
     <p>
       Cancellations follow our <Link to="/refunds">Cancellation & Refund Policy</Link>:
-      paid bookings cancelled in time are refunded to the original payment method within
-      5–7 business days.
+      paid bookings cancelled in time are eligible for a refund to the original payment method
+      within 5–7 business days of approval. All refunds are reviewed and approved by our team —
+      nothing is refunded automatically.
     </p>
     <h3>5. Your responsibilities</h3>
     <ul>
@@ -197,36 +198,40 @@ export const RefundPolicy = () => (
     <h3>1. Free cancellation before acceptance</h3>
     <ul>
       <li>
-        You can cancel a request at any time <strong>before the cook accepts</strong> — there is
-        no charge and the slot is released immediately.
+        You can cancel a request at any time <strong>before the cook accepts</strong> (and up to{" "}
+        <strong>30 minutes before the service start time</strong>) — there is no charge and the
+        slot is released immediately.
       </li>
       <li>
         If the cook declines your request, or if the request expires unanswered, you are never
-        charged.
+        charged. If payment was already collected, a refund is raised for our team&apos;s approval.
       </li>
     </ul>
 
     <h3>2. Cancelling a paid booking</h3>
     <p>
       Once a booking is accepted and paid, you can still cancel — but refunds follow the rules
-      below. You can cancel from <strong>My Bookings</strong> or from the booking page.
+      below. You can cancel from <strong>My Bookings</strong> or from the booking page. No refund
+      is processed automatically: every request is <strong>reviewed and approved by our
+      team</strong> first.
     </p>
     <ul>
       <li>
-        Cancel <strong>before the session start time</strong> and you are eligible for a full
-        refund of the amount paid.
+        Cancel until 30 minutes before the session start time and you are eligible for a full
+        refund of the amount paid. Inside that 30-minute window the booking can no longer be
+        cancelled online — please contact support.
       </li>
       <li>
         Paid bookings are refunded to the <strong>original payment method</strong> (UPI, card,
         net-banking, or wallet).
       </li>
       <li>
-        Refunds typically reach your account within <strong>5–7 business days</strong>, depending
-        on your bank or payment provider.
+        Refunds typically reach your account within <strong>5–7 business days</strong> of approval,
+        depending on your bank or payment provider.
       </li>
       <li>
-        If an automatic refund fails, our team will settle it manually and notify you. Please
-        contact us with your booking ID and Razorpay payment ID.
+        If an approved refund needs follow-up, our team will settle it manually and notify you.
+        Please contact us with your booking ID and Razorpay payment ID.
       </li>
     </ul>
 
@@ -253,7 +258,7 @@ export const RefundPolicy = () => (
       If a session is interrupted or partially completed due to circumstances beyond our control
       (for example, severe weather, a public emergency, or illness that prevents the cook from
       attending), we will work with you to find a fair resolution — which may include a partial
-      refund, rescheduling, or a replacement cook where possible.
+      refund or a replacement cook where possible.
     </p>
 
     <h3>5. Payment-window expiry</h3>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import API from "../api/axios";
 import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
@@ -15,6 +15,7 @@ import {
   Clock,
   AlertCircle,
   ArrowLeft,
+  ChevronRight,
 } from "lucide-react";
 
 const TYPE_META = {
@@ -26,13 +27,31 @@ const TYPE_META = {
   booking_cancelled: { label: "Booking cancelled", icon: XCircle, color: "var(--slate-500)" },
   booking_expired: { label: "Booking expired", icon: Clock, color: "var(--slate-500)" },
   service_started: { label: "Service started", icon: ChefHat, color: "var(--accent-emerald)" },
-  booking_rescheduled: { label: "Booking rescheduled", icon: Calendar, color: "var(--accent-blue)" },
   cook_arrived: { label: "Cook arrived", icon: ChefHat, color: "var(--accent-emerald)" },
   cooking_hours_completed: { label: "Cooking hours complete", icon: Clock, color: "var(--accent-amber)" },
   review_received: { label: "New review", icon: Star, color: "var(--accent-amber)" },
   profile_approved: { label: "Profile approved", icon: ShieldCheck, color: "var(--accent-emerald)" },
   profile_rejected: { label: "Profile needs attention", icon: AlertCircle, color: "#dc2626" },
+  payout_settled: { label: "Payout sent", icon: CheckCircle2, color: "var(--accent-emerald)" },
+  refund_processed: { label: "Refund processed", icon: CheckCircle2, color: "var(--accent-emerald)" },
   general: { label: "Update", icon: Bell, color: "var(--primary)" },
+};
+
+// Where a notification taps through to. Every actionable notification gets a
+// destination — "pay within 5 minutes" with nowhere to go is a dead end.
+// Explicit `link` wins (e.g. admin consoles), else the linked booking's
+// details page, else nothing.
+const targetFor = (n) => {
+  // Only same-origin relative paths are tappable — never absolute URLs,
+  // protocol-relative links, or schemes (backend validates too; this is the
+  // render-side backstop so a bad stored link can never navigate off-site).
+  if (typeof n.link === "string" && /^\/(?!\/)/.test(n.link) && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(n.link)) {
+    return n.link;
+  }
+  if (n.booking?._id || typeof n.booking === "string") {
+    return `/bookings/${n.booking?._id || n.booking}`;
+  }
+  return null;
 };
 
 const showFullTimestamp = (iso) => {
@@ -62,6 +81,7 @@ const timeAgo = (iso) => {
 const Notifications = () => {
   const user = useSelector((s) => s.auth.user);
   const showToast = useShowToast();
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -102,11 +122,22 @@ const Notifications = () => {
     };
   }, []);
 
+  // Tell the navbar badge to refresh immediately (it no longer polls on its
+  // own — the popup + explicit nudges drive it, with a slow safety poll).
+  const nudgeBadge = () => {
+    try {
+      window.dispatchEvent(new CustomEvent("notifications-updated"));
+    } catch {
+      // non-fatal
+    }
+  };
+
   const handleMarkRead = async (id) => {
     setActioning(id);
     try {
       const { data } = await API.patch(`/notifications/${id}/read`);
       setNotifications((prev) => prev.map((n) => (n._id === id ? data : n)));
+      nudgeBadge();
     } catch (err) {
       showToast(err.response?.data?.message || "Could not mark as read", "error");
     } finally {
@@ -119,6 +150,7 @@ const Notifications = () => {
     try {
       await API.patch("/notifications/read-all");
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      nudgeBadge();
       showToast("All notifications marked as read", "success");
     } catch (err) {
       showToast(err.response?.data?.message || "Could not mark all as read", "error");
@@ -140,7 +172,7 @@ const Notifications = () => {
 
   return (
     <div className="dashboard-container notif-page">
-      <Link to={backTo} className="back-link-bar" style={{ alignSelf: "flex-start" }}>
+      <Link to={backTo} className="back-link-bar">
         <ArrowLeft size={16} /> {backLabel}
       </Link>
 
@@ -188,10 +220,31 @@ const Notifications = () => {
           {filtered.map((n) => {
             const meta = TYPE_META[n.type] || TYPE_META.general;
             const Icon = meta.icon;
+            const target = targetFor(n);
+            const open = () => {
+              if (!target) return;
+              // Opening the destination counts as reading it.
+              if (!n.read) handleMarkRead(n._id);
+              navigate(target);
+            };
             return (
               <div
                 key={n._id}
                 className={`booking-item-card notif-item ${n.read ? "is-read" : "is-unread"}`}
+                role={target ? "button" : undefined}
+                tabIndex={target ? 0 : undefined}
+                onClick={target ? open : undefined}
+                onKeyDown={
+                  target
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          open();
+                        }
+                      }
+                    : undefined
+                }
+                style={target ? { cursor: "pointer" } : undefined}
               >
                 <div className="notif-item-row">
                   <div className="stat-icon-wrapper notif-icon" style={{ color: meta.color }}>
@@ -217,10 +270,18 @@ const Notifications = () => {
                       </div>
                     )}
                   </div>
+                  {target && (
+                    <span className="my-booking-go notif-go" aria-hidden="true" title="Open">
+                      <ChevronRight size={18} />
+                    </span>
+                  )}
                   {!n.read && (
                     <button
                       className="btn btn-outline btn-sm notif-mark-read"
-                      onClick={() => handleMarkRead(n._id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMarkRead(n._id);
+                      }}
                       disabled={actioning === n._id}
                       title="Mark as read"
                     >

@@ -16,6 +16,19 @@ services:
         value: production
       - key: PORT
         value: 5000
+      # Business clock (F-08): booking math is IST-anchored in code; the
+      # pinned TZ keeps every other Date call consistent with it.
+      - key: TZ
+        value: Asia/Kolkata
+      # Persistent upload volume mount point (Render Disk → mount at /data,
+      # then UPLOAD_DIR=/data/cook-docs). Without this, verification docs are
+      # lost on redeploy (see docs/UPLOAD_STORAGE.md).
+      # - key: UPLOAD_DIR
+      #   value: /data/cook-docs
+      # Hard gate: refuse to boot without live Razorpay keys + webhook secret.
+      # Set "true" for any deployment that takes real payments.
+      # - key: REQUIRE_PAYMENTS
+      #   value: "true"
       # Mongo: create a free cluster at mongodb.com/atlas and paste the SRV URI,
       # or create a Render MongoDB add-on and reference its internal URI.
       - key: MONGODB_URI

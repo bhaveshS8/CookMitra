@@ -36,21 +36,22 @@ MERN monorepo: `backend/` (Express + MongoDB API, serves uploaded docs) and `fro
    sudo apt update && sudo apt install -y docker.io docker-compose-v2 git
    sudo usermod -aG docker ubuntu && newgrp docker
    ```
-3. Clone the repo and configure `.env`:
+3. Clone the repo and configure `.env` (NEVER commit this file — it holds
+   secrets; see `docs/SECRET_ROTATION.md`):
    ```bash
    git clone https://github.com/bhaveshS8/CookMitra.git
    cd CookMitra
-   cat << 'EOF' > .env
-   NODE_ENV=production
-   PORT=5000
-   JWT_SECRET=super_secret_production_jwt_key_here
-   ALLOW_TEST_PAYMENTS=true
-   RAZORPAY_KEY_ID=rzp_test_sampleKey123
-   RAZORPAY_KEY_SECRET=sampleSecretKey123
-   RAZORPAY_CURRENCY=INR
-   REACT_APP_API_URL=/api
-   EOF
+   cp backend/.env.example .env
+   # Generate a strong JWT secret (value is written into .env, never printed):
+   node backend/scripts/rotate-secrets.js --write .env
    ```
+   Then edit `.env`: set `NODE_ENV=production`, `MONGODB_URI` (Atlas SRV URI),
+   live `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` (from
+   https://dashboard.razorpay.com/app/keys), `RAZORPAY_WEBHOOK_SECRET`,
+   `GOOGLE_CLIENT_ID`, and `REACT_APP_API_URL=/api`. Leave
+   `ALLOW_TEST_PAYMENTS` unset/false — the server refuses to boot in
+   production while it is `true`. For real-money deploys also set
+   `REQUIRE_PAYMENTS=true` so boot fails fast when payment config is missing.
 4. Start the application:
    ```bash
    docker compose up --build -d

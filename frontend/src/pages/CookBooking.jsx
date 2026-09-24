@@ -31,7 +31,7 @@ import API from "../api/axios";
 import { formatCurrency, localTodayStr, localTomorrowStr, slabPriceForDuration, LAUNCH_SLAB_PRICES } from "../utils/constants";
 import CouponApply from "../components/CouponApply";
 import CustomCalendar from "../components/CustomCalendar";
-import { resolveFileUrl } from "../components/CookDocUploads";
+import CookAvatar from "../components/CookAvatar";
 import { useDispatch, useSelector } from "react-redux";
 import { updateUser } from "../store/authSlice";
 import { useShowToast, useSiteLocation } from "../store/hooks";
@@ -146,24 +146,6 @@ const SecTitle = ({ n, icon, children }) => (
   </h3>
 );
 
-// Compact recap of the step-1 choices with a one-tap way back to edit.
-const SummaryBar = ({ form, serviceLabel, onEdit }) => (
-  <div className="od-sumbar">
-    <div className="od-sumchips" aria-live="polite">
-      <span className="od-sumchip">{serviceLabel}</span>
-      <span className="od-sumchip">{dateLabel(form.date)}</span>
-      <span className="od-sumchip">{form.durationHours || "–"} hr</span>
-      <span className="od-sumchip">{form.guests || "–"} guests</span>
-      <span className={`od-sumchip ${form.city.trim() ? "" : "od-missing"}`}>
-        {form.city.trim() || "Area missing"}
-      </span>
-    </div>
-    <button type="button" className="btn btn-outline btn-sm" onClick={onEdit}>
-      Edit
-    </button>
-  </div>
-);
-
 const CookBooking = () => {
   const user = useSelector((s) => s.auth.user);
   const showToast = useShowToast();
@@ -176,7 +158,7 @@ const CookBooking = () => {
   // ?serviceType= — fall back to the default for anything unknown.
   const initialService = (() => {
     const q = searchParams.get("serviceType");
-    return SERVICE_OPTIONS.some((s) => s.id === q) ? q : "cook_with_me";
+    return SERVICE_OPTIONS.some((s) => s.id === q) ? q : "cook_for_me";
   })();
 
   const [step, setStep] = useState(1);
@@ -227,6 +209,9 @@ const CookBooking = () => {
   // "Show all N times" expander for the step-2 slot lists (collapse default).
   const [showAllSlots, setShowAllSlots] = useState(false);
   const [coupon, setCoupon] = useState(null);
+  // Coupon code carried across the login wall / dead-request retry —
+  // re-validated live by CouponApply on mount, never trusted blindly.
+  const [couponRestore, setCouponRestore] = useState(null);
   // Shorter session lengths the server confirmed free when the requested
   // hours fit nowhere — rendered as one-tap retry chips.
   const [slotSuggestions, setSlotSuggestions] = useState([]);
@@ -402,6 +387,7 @@ const CookBooking = () => {
     autoFilled.current = true;
     setForm((f) => ({ ...f, ...d.form }));
     if (d.coords?.lat != null) setCoords(d.coords);
+    if (d.couponCode) setCouponRestore(d.couponCode);
     setSearching(true);
     (async () => {
       try {
@@ -458,7 +444,16 @@ const CookBooking = () => {
   };
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setForm({ ...form, [name]: value });
+    // Clear this field's error as soon as the user fixes it.
+    if (fieldErrors[name]) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+    }
   };
 
   // Stepper helper for duration / guests: snaps to `step`, clamps to
@@ -494,13 +489,33 @@ const CookBooking = () => {
     return "";
   };
 
+  // Per-field venue errors: one message per invalid input so each error
+  // renders directly below its field. Empty object = valid.
   const validateVenue = () => {
-    if (!form.flatNo.trim()) return "Please enter your flat / house number";
-    if (!form.society.trim()) return "Please enter your society / building / street";
-    if (!form.city.trim()) return "Please enter your city / area";
+    const errs = {};
+    if (!form.flatNo.trim()) errs.flatNo = "Please enter your flat / house number";
+    if (!form.society.trim()) errs.society = "Please enter your society / building / street";
+    if (!form.city.trim()) errs.city = "Please enter your city / area";
     if (parseDishes().length === 0)
-      return "Please mention the dishes you need (comma separated)";
-    return "";
+      errs.customDishes = "Please mention the dishes you need (comma separated)";
+    return errs;
+  };
+  const [fieldErrors, setFieldErrors] = useState({});
+  const fieldRefs = useRef({});
+  // Show the first invalid field: expand the collapsed address editor when
+  // the locked profile summary is showing, then scroll to and focus it.
+  const focusFirstFieldError = (errs) => {
+    const order = ["flatNo", "society", "city", "customDishes"];
+    const first = order.find((k) => errs[k]);
+    if (!first) return;
+    setAddrEditing(true);
+    requestAnimationFrame(() => {
+      const el = fieldRefs.current[first];
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.focus({ preventScroll: true });
+      }
+    });
   };
 
   const buildAddress = () =>
@@ -694,6 +709,7 @@ const CookBooking = () => {
     autoFilled.current = true;
     setForm((f) => ({ ...f, ...retry.form }));
     if (retry.coords?.lat != null) setCoords(retry.coords);
+    if (retry.couponCode) setCouponRestore(retry.couponCode);
     setSearching(true);
     (async () => {
       try {
@@ -811,6 +827,24 @@ const CookBooking = () => {
       cook?.user?._id || (typeof cook?.user === "string" ? cook.user : null) || cook?._id || "";
     return `${cookId}_${slot?.startTime || ""}_${slot?.endTime || ""}`;
   };
+  // Idempotency keys per booking attempt: retries (double-click, network
+  // retry) reuse the same key so the server returns the original hold
+  // instead of minting a duplicate. A new slot/cook gets a fresh key.
+  const clientKeysRef = useRef(new Map());
+  const clientKeyFor = (key) => {
+    let k = clientKeysRef.current.get(key);
+    if (!k) {
+      try {
+        k = (typeof crypto !== "undefined" && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `ck_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      } catch {
+        k = `ck_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      }
+      clientKeysRef.current.set(key, k);
+    }
+    return k;
+  };
   const cooksForSlot = selectedSlot
     ? matches
         .map((c) => ({
@@ -827,8 +861,8 @@ const CookBooking = () => {
   const handleBook = async (cook, slot) => {
     if (!user) {
       // Remember the unfinished booking across the login wall — form,
-      // picked slot and pin all come back after sign-in.
-      saveBookingDraft({ kind: "on-demand", form, selectedSlot, coords });
+      // picked slot, pin and coupon code all come back after sign-in.
+      saveBookingDraft({ kind: "on-demand", form, selectedSlot, coords, couponCode: coupon?.code || "" });
       setShowLoginModal(true);
       return;
     }
@@ -836,12 +870,14 @@ const CookBooking = () => {
       showToast("Only customer accounts can make bookings", "error");
       return;
     }
-    const venueErr = validateVenue();
-    if (venueErr) {
-      setFormError(venueErr);
-      scrollToVenueError();
+    const venueErrs = validateVenue();
+    if (Object.keys(venueErrs).length > 0) {
+      setFieldErrors(venueErrs);
+      setFormError("");
+      focusFirstFieldError(venueErrs);
       return;
     }
+    setFieldErrors({});
     setFormError("");
     setBookingLoading(bookingKey(cook, slot));
     try {
@@ -924,7 +960,10 @@ const CookBooking = () => {
         amount: finalPayable,
       };
       if (coords) payload.location = coords;
+      payload.clientKey = clientKeyFor(`${form.date}_${slot.startTime}_${slot.endTime}_${payload.cook}`);
       const res = await API.post("/bookings", payload);
+      // Idempotent retry: the server returns the original hold with
+      // alreadyExists instead of a duplicate — treat it as success.
       clearBookingDraft();
       showToast("Booking request sent! Your slot is held for 5 minutes while the cook decides.", "success");
       // Live waiting screen while the cook decides (5-minute window).
@@ -1380,7 +1419,10 @@ const CookBooking = () => {
                   onChange={handleChange}
                   placeholder="e.g. Flat 402, Wing B"
                   required
+                  ref={(el) => { fieldRefs.current.flatNo = el; }}
+                  aria-invalid={Boolean(fieldErrors.flatNo)}
                 />
+                {fieldErrors.flatNo && <p className="field-error" role="alert">{fieldErrors.flatNo}</p>}
               </div>
               <div className="form-group">
                 <label>
@@ -1394,7 +1436,10 @@ const CookBooking = () => {
                   onChange={handleChange}
                   placeholder="e.g. Sunshine Society, MG Road"
                   required
+                  ref={(el) => { fieldRefs.current.society = el; }}
+                  aria-invalid={Boolean(fieldErrors.society)}
                 />
+                {fieldErrors.society && <p className="field-error" role="alert">{fieldErrors.society}</p>}
               </div>
             </div>
             <div className="form-row">
@@ -1423,7 +1468,10 @@ const CookBooking = () => {
                   onChange={handleChange}
                   placeholder="e.g. Pune"
                   required
+                  ref={(el) => { fieldRefs.current.city = el; }}
+                  aria-invalid={Boolean(fieldErrors.city)}
                 />
+                {fieldErrors.city && <p className="field-error" role="alert">{fieldErrors.city}</p>}
               </div>
             </div>
             </>
@@ -1432,16 +1480,19 @@ const CookBooking = () => {
             <SecTitle n="05" icon={<UtensilsCrossed size={15} />}>What dishes do you need? *</SecTitle>
             <div className="form-group">
               <label>Dishes <small>(comma separated)</small></label>
-              <input
-                type="text"
-                name="customDishes"
-                className="form-control"
-                value={form.customDishes}
-                onChange={handleChange}
-                placeholder="e.g. Puran Poli, Shankarpali, Modak"
-                required
-              />
-            </div>
+                <input
+                  type="text"
+                  name="customDishes"
+                  className="form-control"
+                  value={form.customDishes}
+                  onChange={handleChange}
+                  placeholder="e.g. Puran Poli, Shankarpali, Modak"
+                  required
+                  ref={(el) => { fieldRefs.current.customDishes = el; }}
+                  aria-invalid={Boolean(fieldErrors.customDishes)}
+                />
+                {fieldErrors.customDishes && <p className="field-error" role="alert">{fieldErrors.customDishes}</p>}
+              </div>
 
             <div className="form-group">
               <label>
@@ -1479,6 +1530,7 @@ const CookBooking = () => {
                 amount={slab}
                 serviceType={form.serviceType}
                 onApplied={setCoupon}
+                initialCode={couponRestore}
               />
             )}
 
@@ -1513,15 +1565,11 @@ const CookBooking = () => {
                 <div key={cook._id} className="match-card">
                   <div className="match-card-top">
                     <div className="match-avatar">
-                      {cook.photoUrl ? (
-                        <img
-                          src={resolveFileUrl(cook.photoUrl)}
-                          alt={cook.user?.name || "Cook"}
-                          loading="lazy"
-                        />
-                      ) : (
-                        cook.user?.name?.[0]?.toUpperCase() || "C"
-                      )}
+                      <CookAvatar
+                        photoUrl={cook.photoUrl}
+                        name={cook.user?.name}
+                        loading="lazy"
+                      />
                     </div>
                     <div className="match-id">
                       <h3>{cook.user?.name}</h3>
@@ -1573,7 +1621,7 @@ const CookBooking = () => {
       <LoginPromptModal
         open={showLoginModal}
         onClose={() => setShowLoginModal(false)}
-        returnTo={`/cook-on-demand${initialService !== "cook_with_me" ? `?serviceType=${initialService}` : ""}`}
+        returnTo={`/cook-on-demand${initialService !== "cook_for_me" ? `?serviceType=${initialService}` : ""}`}
       />
     </div>
   );
