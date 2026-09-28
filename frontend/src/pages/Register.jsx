@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { registerUser } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
+import { AnalyticsEvents, track } from "../utils/analytics";
 import { safeNextPath } from "../utils/bookingDraft";
 import {
   Mail,
@@ -61,12 +62,14 @@ const Register = () => {
 
     setLoading(true);
     setError("");
+    track(AnalyticsEvents.COOK_SIGNUP_START, { method: "email", role: formData.role });
 
     try {
       const { confirmPassword, ...data } = formData;
-      const user = await dispatch(registerUser(data)).unwrap();
+      const { user } = await dispatch(registerUser(data)).unwrap();
       showToast(`Welcome to Cook Mitra, ${user.name}!`, "success");
       if (user.role === "cook") {
+        track(AnalyticsEvents.COOK_SIGNUP_COMPLETE, { method: "email" });
         navigate("/dashboard/cook-bookings");
       } else if (next) {
         navigate(next);

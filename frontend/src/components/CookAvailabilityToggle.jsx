@@ -49,16 +49,10 @@ const CookAvailabilityToggle = ({ availabilityStatus, onChanged }) => {
       className={`cook-avail ${isAvailable ? "on" : "off"}`}
       onClick={handleToggle}
       disabled={busy}
+      aria-pressed={isAvailable}
+      aria-live="polite"
     >
-      <span
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          background: "#fff",
-          opacity: busy ? 0.5 : 1,
-        }}
-      />
+      <span className="cook-avail-dot" aria-hidden="true" />
       {busy ? "Saving..." : isAvailable ? "Available" : "Unavailable"}
     </button>
   );

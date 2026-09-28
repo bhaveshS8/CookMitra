@@ -1,92 +1,10 @@
 /* ==========================================================================
-   Festive offer billboard — clean modern minimal
-   Light neutral theme. Flat single accent (#c2410c). No glows, no gradients
-   on surfaces, no decorative motion.
-   No-scroll card: everything fits in 88vh. Width may grow, height must not.
+   Festive offer billboard — conversion-first popup
+   Visual hierarchy: DISCOUNT → code → urgency → CTA. Everything above the
+   fold on mobile; food row is supporting proof, not the hero.
+   Desktop: everything fits in 88vh. Mobile: card scrolls internally so no
+   content is clipped on short viewports.
    ========================================================================== */
-
-/* ---- Top billboard strip ---- */
-.festive-strip {
-  position: relative;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.45rem 2.5rem 0.45rem 1rem;
-  color: #1c1917;
-  overflow: hidden;
-  font-size: 0.85rem;
-  background: #ffffff;
-  border-bottom: 1px solid #e7e5e4;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-}
-.festive-strip-text {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  flex-wrap: wrap;
-  justify-content: center;
-  text-align: center;
-  position: relative;
-}
-.festive-strip-pop { color: #c2410c; }
-.festive-strip-sub { opacity: 0.75; font-weight: 500; }
-.festive-strip-code {
-  margin-left: 0.35rem;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  color: #9a3412;
-  border-radius: 8px;
-  padding: 0.1rem 0.55rem;
-  letter-spacing: 0.1em;
-  font-weight: 900;
-}
-.festive-strip-timer {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.76rem;
-  font-weight: 700;
-  background: #f5f5f4;
-  border: 1px solid #e7e5e4;
-  padding: 0.15rem 0.6rem;
-  border-radius: 99px;
-  color: #57534e;
-  font-variant-numeric: tabular-nums;
-}
-.festive-strip-cta {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: #c2410c;
-  color: #fff;
-  font-weight: 700;
-  border-radius: 99px;
-  padding: 0.28rem 0.95rem;
-  text-decoration: none;
-  transition: background 0.15s ease, transform 0.15s ease;
-}
-.festive-strip-cta:hover { background: #9a3412; transform: translateY(-1px); }
-.festive-strip-close {
-  position: absolute;
-  right: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  min-height: 40px;
-  border-radius: 50%;
-  border: 1px solid #e7e5e4;
-  background: #f5f5f4;
-  color: #57534e;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.festive-strip-close:hover { background: #e7e5e4; }
 
 /* ---- Entry popup overlay ---- */
 .festive-overlay {
@@ -104,7 +22,7 @@
 }
 @keyframes festiveFade { from { opacity: 0; } to { opacity: 1; } }
 
-/* ---- Card ---- */
+/* ---- Card: festive marigold band on top ---- */
 .festive-card {
   position: relative;
   width: min(96vw, 1040px);
@@ -116,7 +34,8 @@
   color: #1c1917;
   background: #ffffff;
   border: 1px solid #e7e5e4;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+  border-top: 6px solid #ea580c;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22);
   animation: festivePop 0.3s cubic-bezier(0.2, 1, 0.35, 1);
 }
 @keyframes festivePop {
@@ -180,7 +99,7 @@
   outline-offset: 2px;
 }
 
-/* Eyebrow badge */
+/* Eyebrow badge — urgency pill, reads like a deadline */
 .festive-eyebrow {
   display: inline-flex;
   align-items: center;
@@ -191,17 +110,17 @@
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #9a3412;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
+  color: #fff;
+  background: #c2410c;
+  border: 1px solid #c2410c;
   border-radius: 99px;
 }
 
-/* Title */
+/* Title — the offer IS the headline (biggest type on the card) */
 .festive-title {
   margin: 0 0 0.55rem;
-  font-size: 2rem;
-  line-height: 1.15;
+  font-size: 2.4rem;
+  line-height: 1.1;
   letter-spacing: -0.02em;
   text-wrap: balance;
   color: #1c1917;
@@ -209,13 +128,23 @@
 .festive-title-first { color: #1c1917; }
 .festive-title-gold { color: #c2410c; }
 
-/* Description */
+/* Description — states the deal plainly + repeats the code */
 .festive-desc {
   margin: 0 0 0.9rem;
-  font-size: 0.92rem;
+  font-size: 0.95rem;
   line-height: 1.55;
-  color: #57534e;
+  color: #44403c;
   max-width: 46ch;
+}
+.festive-desc strong { color: #1c1917; }
+.festive-desc-code {
+  display: inline-block;
+  background: #fff7ed;
+  border: 1px dashed #ea580c;
+  color: #9a3412;
+  border-radius: 6px;
+  padding: 0 0.4rem;
+  letter-spacing: 0.08em;
 }
 
 /* Offer + countdown side by side */
@@ -226,7 +155,7 @@
   align-items: stretch;
 }
 
-/* Hero discount lockup */
+/* Hero discount lockup — high-contrast offer block */
 .festive-mega {
   position: relative;
   display: flex;
@@ -235,56 +164,35 @@
   gap: 0.55rem;
   min-width: 0;
   height: 100%;
-  background: #fafaf9;
-  border: 1px solid #e7e5e4;
+  background: #1c1917;
+  border: 1px solid #1c1917;
   border-radius: 16px;
   padding: 0.55rem 0.75rem;
   overflow: hidden;
 }
-.festive-burst {
-  position: relative;
-  width: 46px;
-  height: 46px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: #c2410c;
-}
-.festive-burst svg { display: none; }
-.festive-burst span {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  font-size: 0.6rem;
-  font-weight: 900;
-  line-height: 1.1;
-  color: #fff;
-}
 .festive-mega-num { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; flex-shrink: 0; }
 .mega-20 {
-  font-size: 2.15rem;
+  font-size: 2.5rem;
   font-weight: 900;
   letter-spacing: -0.02em;
   line-height: 1;
-  color: #c2410c;
+  color: #ffd24d;
 }
 .mega-off {
   font-size: 0.85rem;
   font-weight: 900;
   letter-spacing: 0.14em;
-  color: #9a3412;
-  border: 1px solid #fed7aa;
+  color: #1c1917;
+  border: 1px solid #ffd24d;
   border-radius: 8px;
   padding: 0.12rem 0.42rem;
-  background: #fff7ed;
+  background: #ffd24d;
 }
-.festive-mega-side { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; font-size: 0.72rem; font-weight: 600; color: #57534e; text-align: left; min-width: 0; line-height: 1.3; }
+.festive-mega-side { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; font-size: 0.74rem; font-weight: 700; color: #e7e5e4; text-align: left; min-width: 0; line-height: 1.3; }
 .festive-mega-stars { display: flex; gap: 3px; }
-.festive-mega-stars svg { width: 12px; height: 12px; fill: #ea580c; color: #ea580c; }
+.festive-mega-stars svg { width: 12px; height: 12px; fill: #ffd24d; color: #ffd24d; }
 
-/* Countdown */
+/* Countdown — urgency block with marigold border */
 .festive-countdown {
   display: flex;
   flex-direction: column;
@@ -293,16 +201,16 @@
   gap: 0.4rem;
   min-width: 0;
   height: 100%;
-  background: #fafaf9;
-  border: 1px solid #e7e5e4;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
   border-radius: 16px;
   padding: 0.55rem 0.7rem;
   overflow: hidden;
 }
-.festive-count-flame { color: #ea580c; flex-shrink: 0; }
-.festive-count-flame svg, svg.festive-count-flame { width: 15px; height: 15px; }
+.festive-count-flame { color: #c2410c; flex-shrink: 0; }
+svg.festive-count-flame { width: 15px; height: 15px; }
 .festive-count-head { display: inline-flex; align-items: center; justify-content: center; gap: 0.35rem; min-width: 0; }
-.festive-count-label { font-size: 0.75rem; font-weight: 700; color: #57534e; white-space: nowrap; }
+.festive-count-label { font-size: 0.78rem; font-weight: 800; color: #9a3412; white-space: nowrap; }
 .festive-count-boxes { display: flex; gap: 0.35rem; justify-content: center; width: 100%; min-width: 0; }
 .festive-count-box {
   flex: 1 1 0;
@@ -321,7 +229,7 @@
 .festive-count-box strong { font-size: 0.95rem; color: #1c1917; line-height: 1.1; text-align: center; }
 .festive-count-box em { font-style: normal; font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.08em; color: #78716c; text-align: center; }
 
-/* Showcase — food imagery, 3×2 gallery, always fully visible, no wrap, no scroll */
+/* Showcase — supporting proof: 3 signature dishes, trust line below */
 .festive-foods {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -334,8 +242,12 @@
 .festive-food { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 0.35rem; min-width: 0; width: 100%; }
 .festive-food-ring {
   position: relative;
-  width: clamp(104px, 11.5vw, 128px);
-  height: clamp(104px, 11.5vw, 128px);
+  /* Equal share of the row: the ring fills its (equal 1fr) grid cell,
+     capped so it never grows past a tidy circle on wide screens.
+     aspect-ratio keeps every container a perfect, identical square. */
+  width: 100%;
+  max-width: 132px;
+  height: auto;
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   padding: 3px;
@@ -373,12 +285,12 @@
 .festive-showcase-note {
   margin: 0.6rem 0 0;
   font-size: 0.76rem;
-  font-weight: 500;
+  font-weight: 700;
   text-align: center;
-  color: #78716c;
+  color: #57534e;
 }
 
-/* Coupon */
+/* Coupon — dashed ticket with big tappable code */
 .festive-coupon {
   display: flex;
   align-items: center;
@@ -387,18 +299,22 @@
   flex-wrap: wrap;
   min-width: 0;
   height: 100%;
-  background: #fafaf9;
-  border: 1px dashed #d6d3d1;
+  background: #fff7ed;
+  border: 2px dashed #ea580c;
   border-radius: 14px;
   padding: 0.55rem 0.8rem;
   overflow: hidden;
 }
-.festive-coupon-label { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; color: #57534e; white-space: nowrap; }
+.festive-coupon-label { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.82rem; font-weight: 700; color: #9a3412; white-space: nowrap; }
 .festive-coupon-code {
-  font-size: 1.1rem;
+  font-size: 1.25rem;
   font-weight: 900;
   letter-spacing: 0.14em;
-  color: #9a3412;
+  color: #1c1917;
+  background: #fff;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  padding: 0.1rem 0.6rem;
 }
 .festive-copy-btn {
   display: inline-flex;
@@ -418,7 +334,7 @@
 }
 .festive-copy-btn:hover { background: #44403c; transform: scale(1.03); }
 
-/* Actions */
+/* Actions — CTA is the loudest element */
 .festive-actions { display: flex; flex-direction: column; justify-content: center; align-items: stretch; gap: 0.3rem; min-width: 0; height: 100%; }
 .festive-cta {
   display: inline-flex;
@@ -431,13 +347,13 @@
   text-align: center;
   white-space: nowrap;
   width: 100%;
-  min-height: 52px;
+  min-height: 56px;
   font-weight: 800;
   letter-spacing: 0.01em;
-  box-shadow: 0 8px 20px rgba(194, 65, 12, 0.28);
+  box-shadow: 0 10px 24px rgba(194, 65, 12, 0.35);
   transition: background 0.15s ease, transform 0.15s ease;
-  font-size: 1rem;
-  padding: 0.7rem 0.9rem;
+  font-size: 1.05rem;
+  padding: 0.75rem 0.9rem;
 }
 .festive-cta:hover { background: #9a3412; color: #fff; transform: translateY(-1px); }
 .festive-cta:active { transform: translateY(0) scale(0.98); }
@@ -450,12 +366,23 @@
   cursor: pointer;
   padding: 0.25rem;
   border-radius: 8px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .festive-maybe:hover { color: #44403c; }
+.festive-never { font-size: 0.76rem; text-decoration: none; opacity: 0.8; }
+.festive-never:hover { opacity: 1; }
 
-/* ---- Tablet / mobile: stack ---- */
+/* ---- Tablet: stack, allow card scroll ---- */
 @media (max-width: 860px) {
-  .festive-card { width: min(96vw, 640px); text-align: center; }
+  .festive-card {
+    width: min(96vw, 640px);
+    text-align: center;
+    max-height: 90vh;
+    max-height: 90dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
   .festive-body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
@@ -470,51 +397,80 @@
   .festive-desc { max-width: 52ch; }
   .festive-offer-row { width: 100%; }
   .festive-showcase { width: 100%; }
+  /* Stacked full-width showcase: rings fill their (wider) cells equally */
+  .festive-food-ring { max-width: 148px; }
   .festive-bottom-row { width: 100%; }
 }
 
-/* ---- Phones: compact, still no scroll ---- */
+/* ---- Phones: compact, scrollable card ---- */
 @media (max-width: 560px) {
-  .festive-card { width: calc(100vw - 1.5rem); border-radius: 20px; }
-  .festive-body { padding: 1rem 0.7rem 0.75rem; gap: 0.6rem; }
+  .festive-overlay {
+    place-items: start center;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.75rem 0.75rem 1.25rem;
+  }
+  .festive-card {
+    width: calc(100vw - 1.5rem);
+    max-width: 100%;
+    max-height: 90vh;
+    max-height: 90dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 20px;
+    margin: auto;
+    scrollbar-width: thin;
+  }
+  .festive-body {
+    padding: 1rem 0.85rem 0.9rem;
+    gap: 0.65rem;
+    overflow: visible;
+  }
   .festive-eyebrow { font-size: 0.62rem; padding: 0.25rem 0.65rem; margin-bottom: 0.4rem; }
-  .festive-title { font-size: 1.2rem; margin-bottom: 0.35rem; }
-  .festive-desc { font-size: 0.8rem; margin-bottom: 0.6rem; }
-  .festive-offer-row { gap: 0.4rem; }
-  .festive-mega { padding: 0.4rem 0.5rem; gap: 0.4rem; border-radius: 12px; }
-  .mega-20 { font-size: 1.6rem; }
+  .festive-title { font-size: clamp(1.5rem, 7vw, 1.8rem); margin-bottom: 0.35rem; line-height: 1.15; }
+  .festive-desc { font-size: 0.85rem; margin-bottom: 0.6rem; }
+  .festive-offer-row { gap: 0.5rem; }
+  .festive-mega { padding: 0.5rem 0.55rem; gap: 0.5rem; border-radius: 12px; }
+  .mega-20 { font-size: 1.9rem; }
   .mega-off { font-size: 0.68rem; padding: 0.08rem 0.3rem; }
-  .festive-mega-side { font-size: 0.62rem; }
+  .festive-mega-side { font-size: 0.68rem; }
   .festive-mega-stars svg { width: 10px; height: 10px; }
-  .festive-burst { width: 36px; height: 36px; }
-  .festive-burst span { font-size: 0.52rem; }
-  .festive-countdown { padding: 0.4rem 0.45rem; border-radius: 12px; }
-  .festive-count-boxes { gap: 0.22rem; }
-  .festive-count-box { padding: 0.2rem 0.12rem 0.16rem; min-height: 0; }
-  .festive-count-box strong { font-size: 0.78rem; }
-  .festive-count-box em { font-size: 0.5rem; }
+  .festive-countdown { padding: 0.5rem 0.55rem; border-radius: 12px; }
+  .festive-count-boxes { gap: 0.3rem; }
+  .festive-count-box { padding: 0.25rem 0.15rem 0.2rem; min-height: 0; }
+  .festive-count-box strong { font-size: 0.82rem; }
+  .festive-count-box em { font-size: 0.55rem; }
   .festive-count-label { font-size: 0.68rem; }
-  .festive-strip { font-size: 0.76rem; }
-  .festive-strip-timer { display: none; }
-  .festive-foods { gap: 0.45rem 0.3rem; }
-  .festive-food-ring { width: 100%; height: auto; min-width: 0; }
-  .festive-food figcaption { font-size: 0.62rem; }
-  .festive-food-tag { font-size: 0.52rem; padding: 0.1rem 0.35rem; bottom: -5px; }
-  .festive-showcase-note { font-size: 0.68rem; margin-top: 0.4rem; }
-  .festive-bottom-row { gap: 0.45rem; padding-top: 0.7rem; }
-  .festive-coupon { padding: 0.4rem 0.5rem; gap: 0.4rem; border-radius: 12px; }
+  .festive-foods { gap: 0.6rem 0.35rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .festive-food { gap: 0.3rem; }
+  /* Phones: 3 equal columns — each ring fills its cell, identical sizes */
+  .festive-food-ring { padding: 2px; max-width: 116px; }
+  .festive-food figcaption { font-size: 0.66rem; }
+  .festive-food-tag { font-size: 0.55rem; padding: 0.1rem 0.35rem; bottom: -6px; }
+  .festive-showcase-note { font-size: 0.7rem; margin-top: 0.45rem; }
+  .festive-bottom-row { gap: 0.55rem; padding-top: 0.75rem; }
+  .festive-coupon { padding: 0.5rem 0.55rem; gap: 0.45rem; border-radius: 12px; }
   .festive-coupon-label { font-size: 0.72rem; }
-  .festive-coupon-code { font-size: 0.9rem; letter-spacing: 0.08em; }
-  .festive-copy-btn { font-size: 0.72rem; padding: 0.35rem 0.65rem; min-height: 36px; }
-  .festive-cta { font-size: 0.85rem; padding: 0.6rem 0.5rem; min-height: 48px; border-radius: 12px; white-space: normal; text-wrap: balance; }
+  .festive-coupon-code { font-size: 0.92rem; letter-spacing: 0.08em; }
+  .festive-copy-btn { font-size: 0.74rem; padding: 0.4rem 0.7rem; min-height: 38px; }
+  .festive-cta { font-size: 0.9rem; padding: 0.65rem 0.6rem; min-height: 48px; border-radius: 12px; white-space: normal; text-wrap: balance; }
   .festive-cta svg { width: 16px; height: 16px; flex-shrink: 0; }
-  .festive-maybe { font-size: 0.74rem; }
+  .festive-maybe { font-size: 0.76rem; }
   .festive-offer-row { grid-template-columns: 1fr; }
   .festive-bottom-row { grid-template-columns: 1fr; }
+  .festive-close { top: 0.5rem; right: 0.5rem; width: 34px; height: 34px; min-width: 34px; min-height: 34px; }
 }
 
-/* Short viewports — compress vertically so everything still fits in 88vh */
-@media (max-height: 720px) {
+/* ---- Very small phones: 2 food columns so circles stay round & tappable ---- */
+@media (max-width: 380px) {
+  .festive-foods { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem 0.5rem; }
+  .festive-food-ring { max-width: 128px; }
+  .festive-count-label { white-space: normal; text-align: center; }
+}
+
+/* Short viewports — compress vertically on desktop so everything fits in 88vh.
+   Mobile keeps its own scrollable layout, so don't apply desktop compression. */
+@media (max-height: 720px) and (min-width: 861px) {
   .festive-body { padding: 1rem 1.6rem 0.85rem; gap: 0.7rem 1.25rem; }
   .festive-eyebrow { margin-bottom: 0.35rem; }
   .festive-title { font-size: 1.55rem; margin-bottom: 0.3rem; }
@@ -523,7 +479,7 @@
   .mega-20 { font-size: 1.8rem; }
   .festive-countdown { padding: 0.4rem 0.55rem; }
   .festive-count-box { min-height: 0; }
-  .festive-food-ring { width: clamp(72px, 10vh, 104px); height: clamp(72px, 10vh, 104px); }
+  .festive-food-ring { max-width: 104px; }
   .festive-showcase-note { margin-top: 0.35rem; }
   .festive-bottom-row { padding-top: 0.7rem; }
   .festive-cta { min-height: 48px; }

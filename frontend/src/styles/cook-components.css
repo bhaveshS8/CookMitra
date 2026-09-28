@@ -1,45 +1,576 @@
-/* Cook components — simple clean restyle. One soft card language everywhere. */
-.cook-dash-head,.cook-form-card,.cook-card,.cook-doc-card,.cook-review-summary,.cook-review-item,.cook-modal-card{background:#fff;border:1px solid #f0e8df;border-radius:16px;box-shadow:0 1px 3px rgba(15,23,42,.05)}
-.cook-dash-head{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1.1rem 1.25rem;margin-bottom:1rem}
-.cook-dash-head h1{margin:0;font-size:1.3rem}
-.cook-dash-head p{margin:.15rem 0 0;color:#64748b;font-size:.88rem}
-.cook-tabs{display:flex;gap:.35rem;background:#fff;border:1px solid #f0e8df;border-radius:14px;padding:.3rem;margin-bottom:1rem;overflow-x:auto}
-.cook-tab{border:0;background:transparent;color:#64748b;font-weight:700;font-size:.87rem;padding:.5rem .95rem;border-radius:10px;white-space:nowrap}
-.cook-tab:hover{background:#faf9f7;color:#1e293b}
-.cook-tab.active{background:#e8590c;color:#fff}
-.cook-card{padding:1.1rem 1.2rem;margin-bottom:.8rem}
-.cook-card-top{display:flex;justify-content:space-between;gap:.8rem;align-items:flex-start;margin-bottom:.5rem}
-.cook-card-top h3{margin:0;font-size:1rem}
-.cook-card-sub{margin:.2rem 0 0;font-size:.85rem;color:#64748b}
-.cook-amount{margin:0 0 .7rem;font-weight:800;font-size:1.02rem}
-.cook-note{font-size:.86rem;color:#64748b;background:#faf9f7;border-radius:10px;padding:.55rem .75rem;margin:0 0 .7rem}
-.cook-empty{text-align:center;padding:2rem 1rem;background:#fff;border:1px dashed #e2e8f0;border-radius:16px;color:#64748b}
-.cook-empty h3{margin:0 0 .3rem}.cook-empty p{margin:0;font-size:.88rem}
-.cook-link-btn{background:none;border:0;color:#e8590c;font-weight:700;cursor:pointer;padding:0;font-size:.88rem}
-.cook-avail{display:inline-flex;align-items:center;gap:.5rem;border:0;border-radius:999px;padding:.55rem 1.1rem;font-weight:700;font-size:.86rem;color:#fff;min-height:42px;cursor:pointer}
-.cook-avail.on{background:#059669}.cook-avail.off{background:#e11d48}
-.cook-avail:disabled{opacity:.65;cursor:default}
-.cook-status{display:inline-block;padding:.28rem .7rem;border-radius:999px;font-size:.74rem;font-weight:800;letter-spacing:.01em}
-.cook-status.requested{background:#fef3c7;color:#92400e}.cook-status.scheduled{background:#dbeafe;color:#1e40af}
-.cook-status.completed{background:#d1fae5;color:#065f46}.cook-status.declined{background:#ffe4e6;color:#9f1239}
-.cook-status.cancelled{background:#f1f5f9;color:#475569}
-.cook-form-card{padding:1.4rem;margin-bottom:1rem}
-.cook-form-card h2{margin:0 0 .2rem;font-size:1.2rem}
-.cook-form-sub{color:#64748b;font-size:.86rem;margin:0 0 1rem}
-.cook-2col{display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
-.cook-svc-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
-.cook-svc{border:1.5px solid #e2e8f0;background:#fff;border-radius:12px;padding:.75rem .9rem;font-weight:600;font-size:.88rem;display:flex;justify-content:space-between;align-items:center;cursor:pointer;color:#334155}
-.cook-svc.selected{border-color:#e8590c;background:#fff7ed;color:#c2410c}
-.cook-doc-card{border:1.5px dashed #e2e8f0;border-radius:12px;padding:.9rem 1rem;margin-bottom:.7rem;background:#faf9f7}
-.cook-doc-card strong{font-size:.9rem}
-.cook-doc-row{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-top:.5rem}
-.cook-review-summary{display:flex;align-items:center;gap:1rem;padding:1.1rem 1.25rem;margin-bottom:1rem}
-.cook-review-num{font-size:1.6rem;font-weight:800}
-.cook-review-item{padding:1rem 1.15rem;margin-bottom:.7rem}
-.cook-review-item h4{margin:0;font-size:.95rem}.cook-review-item p{margin:.35rem 0 0;font-size:.88rem;color:#475569}
-.cook-modal-card{position:relative;width:100%;max-width:480px;max-height:90vh;overflow-y:auto;padding:1.75rem 1.5rem;border-radius:20px}
-.cook-modal-head{text-align:center;margin-bottom:1.1rem}
-.cook-modal-head h3{margin:0 0 .3rem}.cook-modal-head p{margin:0;color:#64748b;font-size:.88rem}
-.cook-cred{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:12px;padding:.9rem 1rem;margin-bottom:1rem;display:flex;flex-direction:column;gap:.6rem}
-.cook-cred-row{display:flex;justify-content:space-between;align-items:center;gap:.6rem;background:#fff;border:1px solid #eef2f6;border-radius:10px;padding:.5rem .7rem}
-@media(max-width:640px){.cook-2col,.cook-svc-grid{grid-template-columns:1fr}.cook-form-card{padding:1.1rem}.cook-modal-card{padding:1.4rem 1.1rem}}
+/* ==========================================================================
+   Cook workspace design system — tokens, buttons, page head, hero support,
+   stats, tabs, cards, notices, empty states, forms, doc uploads, reviews,
+   modal. Warm festive-orange × deep slate, built on base.css tokens.
+   The hero banner itself lives in cook-pages.css; this file holds everything
+   around it so cook pages share one card/button/tab language.
+   ========================================================================== */
+
+/* ---- 1. Tokens (cook-scoped aliases over base tokens) ---- */
+:root {
+  --cook-card-bg: var(--bg-card);
+  --cook-card-border: var(--border-subtle);
+  --cook-ink: var(--slate-800);
+  --cook-ink-soft: var(--slate-600);
+  --cook-ink-faint: var(--slate-500);
+  --cook-line-soft: var(--slate-100);
+  --cook-wash: var(--slate-50);
+  --cook-brand: var(--primary);
+  --cook-brand-deep: var(--primary-700);
+  --cook-brand-wash: var(--primary-light);
+  --cook-hero-deep: #241006;
+  --cook-hero-mid: #4a1c0a;
+  --cook-hero-hot: #7a2d0c;
+  --cook-radius: var(--radius-lg);
+  --cook-radius-sm: var(--radius-md);
+}
+
+/* ---- 2. Buttons ---- */
+/* Text-only action link (used for "Review profile →", "See all reviews →"). */
+.cook-link-btn {
+  background: none;
+  border: 0;
+  color: var(--cook-brand);
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.88rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 6px;
+}
+.cook-link-btn:hover { color: var(--cook-brand-deep); text-decoration: underline; }
+.cook-link-btn:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
+
+/* Cook primary/secondary button shortcuts over the global .btn system. */
+.cook-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0.6rem 1.2rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  font-size: 0.92rem;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+.cook-btn:hover { transform: translateY(-1px); }
+.cook-btn:active { transform: translateY(0); }
+.cook-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+.cook-btn:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
+.cook-btn-primary { background: var(--primary-gradient); color: #fff; box-shadow: var(--shadow-brand); }
+.cook-btn-primary:hover { filter: brightness(1.06); color: #fff; }
+.cook-btn-ghost { background: #fff; border-color: var(--slate-200); color: var(--slate-700); box-shadow: var(--shadow-sm); }
+.cook-btn-ghost:hover { border-color: var(--cook-brand); color: var(--cook-brand); box-shadow: var(--shadow-md); }
+.cook-btn-sm { min-height: 40px; padding: 0.42rem 0.8rem; font-size: 0.84rem; border-radius: 10px; }
+
+/* Availability pill (hero + dashboard). Dot is a span, not inline styles. */
+.cook-avail {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.55rem 1.1rem;
+  font-weight: 700;
+  font-size: 0.86rem;
+  color: #fff;
+  min-height: 44px;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.cook-avail:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.cook-avail:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
+.cook-avail.on { background: var(--accent-emerald); }
+.cook-avail.off { background: var(--accent-rose); }
+.cook-avail:disabled { opacity: 0.65; cursor: default; transform: none; }
+.cook-avail-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; flex-shrink: 0; }
+.cook-avail:disabled .cook-avail-dot { opacity: 0.5; }
+
+/* ---- 3. Page head (title + sub + actions row) ---- */
+.cook-page-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.cook-page-head-title { display: flex; align-items: center; gap: 0.6rem; }
+.cook-page-head-title h1 { margin: 0; font-size: 1.7rem; }
+.cook-page-head-title svg { color: var(--cook-brand); flex-shrink: 0; }
+.cook-page-sub { margin: 0.25rem 0 0; color: var(--cook-ink-soft); font-size: 0.92rem; }
+.cook-page-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; align-items: center; }
+
+/* ---- 4. Hero support (banner itself: cook-pages.css .cook-modern-hero) ---- */
+.cook-dash { animation: riseIn 0.3s ease; }
+.cook-hero { margin-bottom: 1.25rem; }
+.cook-hero-title { color: #fff; font-size: 1.5rem; margin: 0 0 0.3rem; }
+.cook-hero-sub { color: rgba(255, 255, 255, 0.82); margin: 0; font-size: 0.92rem; }
+.cook-hero-badges { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.65rem; }
+.cook-hero-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; align-items: center; }
+
+/* ---- 5. Stats (clickable shortcut cards) ---- */
+.cook-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.cook-stat-card {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  background: var(--cook-card-bg);
+  border: 1px solid var(--cook-card-border);
+  border-radius: var(--cook-radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1.1rem 1.2rem;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+  width: 100%;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.cook-stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.cook-stat-card:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
+.cook-stat-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cook-stat-icon.amber { background: var(--accent-amber-light); color: var(--accent-amber); }
+.cook-stat-icon.blue { background: var(--accent-blue-light); color: var(--accent-blue); }
+.cook-stat-icon.emerald { background: var(--accent-emerald-light); color: var(--accent-emerald); }
+.cook-stat-icon.brand { background: var(--cook-brand-wash); color: var(--cook-brand); }
+.cook-spaced-top { margin-top: 1.25rem; }
+.cook-profile-wrap { max-width: 700px; }
+.cook-stat-num { font-size: 1.55rem; font-weight: 800; color: var(--slate-900); line-height: 1.1; }
+.cook-stat-num.small-amount { font-size: 1.25rem; }
+.cook-stat-label { font-size: 0.82rem; color: var(--cook-ink-faint); font-weight: 600; }
+/* Back-compat: dashboard stat buttons rode on .dashboard-stat-card. */
+.cook-stat-btn { font: inherit; text-align: left; cursor: pointer; width: 100%; color: inherit; text-decoration: none; }
+.cook-stat-btn:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
+
+/* ---- 6. Tabs ---- */
+.cook-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  overflow-x: auto;
+  background: #fff;
+  border: 1px solid var(--cook-card-border);
+  border-radius: 14px;
+  padding: 0.3rem;
+  margin-bottom: 1.25rem;
+  scrollbar-width: none;
+}
+.cook-tabs::-webkit-scrollbar { display: none; }
+.cook-tab {
+  border: 0;
+  background: transparent;
+  color: var(--cook-ink-faint);
+  font-weight: 650;
+  font-size: 0.89rem;
+  padding: 0.5rem 1rem;
+  border-radius: 11px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.cook-tab:hover { background: var(--cook-wash); color: var(--slate-700); }
+.cook-tab:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
+.cook-tab.active { background: var(--primary-gradient); color: #fff; box-shadow: var(--shadow-brand); }
+.cook-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 99px;
+  background: var(--cook-brand-wash);
+  color: var(--primary-700);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.cook-tab.active .cook-tab-count { background: rgba(255, 255, 255, 0.25); color: #fff; }
+/* Back-compat alias used across cook pages. */
+.tab-count-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 99px;
+  background: var(--cook-brand-wash);
+  color: var(--primary-700);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.tab-btn.active .tab-count-pill { background: rgba(255, 255, 255, 0.25); color: #fff; }
+
+/* ---- 7. Cards + booking rows ---- */
+.cook-card {
+  background: var(--cook-card-bg);
+  border: 1px solid var(--cook-card-border);
+  border-radius: var(--cook-radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1.1rem 1.25rem;
+  margin-bottom: 0.9rem;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+.cook-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.cook-card-top { display: flex; justify-content: space-between; gap: 0.8rem; align-items: flex-start; flex-wrap: wrap; margin-bottom: 0.8rem; }
+.cook-card-top h3 { margin: 0; font-size: 1.02rem; }
+.cook-card-sub { margin: 0.2rem 0 0; font-size: 0.85rem; color: var(--cook-ink-faint); }
+.cook-card-note {
+  font-size: 0.86rem;
+  line-height: 1.5;
+  font-style: italic;
+  color: var(--cook-ink-soft);
+  background: linear-gradient(180deg, #fffdf5, #fffbeb);
+  border: 1px solid #fde9c8;
+  border-left: 3px solid #fdba74;
+  border-radius: 0 12px 12px 0;
+  padding: 0.55rem 0.8rem;
+  margin: 0.7rem 0 0.75rem;
+  overflow-wrap: break-word;
+}
+.cook-amount { margin: 0 0 0.7rem; font-weight: 800; font-size: 1.02rem; color: var(--slate-900); }
+
+/* Customer identity row inside a booking card. */
+.cook-customer-row { display: flex; align-items: center; gap: 0.7rem; min-width: 0; }
+.cook-customer-row h3 {
+  margin: 0;
+  font-size: 1.02rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cook-customer-meta { min-width: 0; }
+.cook-when { margin: 0.2rem 0 0; font-size: 0.85rem; color: var(--cook-ink-soft); display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.cook-when svg { flex-shrink: 0; }
+.cook-addr { margin: 0.2rem 0 0; font-size: 0.82rem; color: var(--cook-ink-faint); display: flex; align-items: flex-start; gap: 0.35rem; }
+.cook-addr svg { flex-shrink: 0; margin-top: 2px; }
+
+/* Amount + paid pill row. */
+.cook-money { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; margin: 0.75rem 0 0; padding: 0.55rem 0.75rem; background: var(--slate-50); border: 1px dashed var(--slate-200); border-radius: 14px; }
+.cook-money-amount { font-weight: 800; font-size: 1.05rem; color: var(--slate-900); font-variant-numeric: tabular-nums; }
+.cook-pay-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.26rem 0.7rem;
+  border-radius: 99px;
+  white-space: nowrap;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+.cook-pay-pill.paid { background: var(--accent-emerald-light); color: #065f46; }
+.cook-pay-pill.unpaid { background: var(--accent-amber-light); color: #92400e; }
+
+/* Status pill for cook booking states. */
+.cook-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+.cook-status.requested { background: var(--accent-amber-light); color: #92400e; }
+.cook-status.scheduled { background: var(--accent-blue-light); color: #1e40af; }
+.cook-status.in-progress { background: var(--accent-purple-light); color: #5b21b6; }
+.cook-status.completed { background: var(--accent-emerald-light); color: #065f46; }
+.cook-status.declined { background: var(--accent-rose-light); color: #9f1239; }
+.cook-status.cancelled { background: var(--slate-100); color: var(--slate-600); }
+
+/* Customer avatar circle. */
+.cook-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: var(--primary-gradient);
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm), 0 0 0 3px #fff7ed;
+  border: 1px solid rgba(232, 89, 12, 0.18);
+}
+
+/* ---- 8. Notices + banners ---- */
+.cook-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: var(--radius-sm);
+  padding: 0.65rem 0.9rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.9rem;
+  flex-wrap: wrap;
+  background: var(--cook-card-bg);
+  border: 1px solid var(--cook-card-border);
+}
+.cook-notice svg { flex-shrink: 0; }
+.cook-notice-amber { border-left: 4px solid var(--accent-amber); }
+.cook-notice-amber svg { color: var(--accent-amber); }
+.cook-hours-done {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #92400e;
+}
+.cook-hours-done svg { color: #b45309; flex-shrink: 0; }
+
+/* ---- 9. Empty states ---- */
+.cook-empty {
+  text-align: center;
+  padding: 2.25rem 1.25rem;
+  background: var(--cook-card-bg);
+  border: 1.5px dashed var(--slate-300);
+  border-radius: var(--cook-radius);
+  color: var(--cook-ink-faint);
+}
+.cook-empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: var(--cook-brand-wash);
+  color: var(--cook-brand);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.75rem;
+}
+.cook-empty h3 { margin: 0 0 0.3rem; color: var(--slate-800); }
+.cook-empty p { margin: 0 auto; font-size: 0.88rem; max-width: 44ch; }
+
+/* ---- 10. Forms (profile / setup) ---- */
+.cook-form-card {
+  background: var(--cook-card-bg);
+  border: 1px solid var(--cook-card-border);
+  border-radius: var(--cook-radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1.4rem;
+  margin-bottom: 1rem;
+}
+.cook-form-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
+.cook-form-head h1, .cook-form-head h2 { margin: 0; font-size: 1.3rem; }
+.cook-form-head svg { color: var(--cook-brand); flex-shrink: 0; }
+.cook-form-sub { color: var(--cook-ink-faint); font-size: 0.86rem; margin: 0 0 1rem; }
+.cook-field { margin-bottom: 1rem; }
+.cook-field > label { display: block; font-weight: 700; font-size: 0.88rem; margin-bottom: 0.4rem; color: var(--slate-700); }
+.cook-field .form-control { width: 100%; }
+.cook-required { color: var(--accent-rose); }
+.cook-optional { color: var(--slate-400); font-weight: 500; }
+.cook-2col { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.cook-verify-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.cook-verify-label { font-size: 0.9rem; color: var(--slate-500); margin-right: 0.5rem; }
+.cook-form-submit { margin-top: 1.5rem; }
+
+/* Setup intro card (CookSetup page head). */
+.cook-back-row { margin-bottom: 1rem; }
+.cook-intro-badge { margin-bottom: 0.5rem; }
+.cook-setup-intro-card {
+  background: linear-gradient(150deg, #fff 0%, #fff7ef 100%);
+  border: 1px solid var(--cook-card-border);
+  border-radius: var(--cook-radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem 1.35rem;
+  margin-bottom: 1.25rem;
+}
+.cook-setup-intro-card h1 { margin: 0.25rem 0 0.35rem; font-size: 1.6rem; }
+.cook-setup-intro-sub { margin: 0; color: var(--cook-ink-soft); font-size: 0.92rem; }
+.cook-setup-steps { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.8rem 0 0; padding: 0; list-style: none; }
+.cook-setup-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--slate-600);
+  background: #fff;
+  border: 1px solid var(--cook-card-border);
+  border-radius: 99px;
+  padding: 0.32rem 0.75rem;
+}
+
+/* Service toggle tiles. */
+.cook-svc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.cook-svc {
+  border: 1.5px solid var(--slate-200);
+  background: #fff;
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  color: var(--slate-700);
+  min-height: 52px;
+  text-align: left;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.cook-svc:hover { border-color: var(--slate-300); transform: translateY(-1px); }
+.cook-svc:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
+.cook-svc.selected { border-color: var(--cook-brand); background: var(--cook-brand-wash); color: var(--primary-700); }
+
+/* Doc rows inside the profile form. */
+.cook-doc-grid { display: grid; grid-template-columns: 1fr 2fr auto; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center; }
+
+/* ---- 11. Doc uploads (Aadhaar / PAN / photo) ---- */
+.cook-doc-card {
+  border: 1.5px dashed var(--slate-300);
+  border-radius: var(--cook-radius-sm);
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  background: var(--cook-wash);
+  transition: border-color 0.16s ease, background 0.16s ease;
+}
+.cook-doc-card:last-of-type { margin-bottom: 0; }
+.cook-doc-card:hover { border-color: var(--cook-brand); background: #fff; }
+.cook-doc-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.cook-doc-head strong { font-size: 0.92rem; }
+.cook-doc-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.cook-doc-link { color: var(--cook-brand); font-weight: 600; font-size: 0.88rem; }
+.cook-doc-link:hover { color: var(--cook-brand-deep); }
+.cook-doc-photo { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 2px solid var(--slate-200); flex-shrink: 0; }
+.cook-doc-hint { font-size: 0.8rem; color: var(--cook-ink-faint); margin-top: 0.5rem; }
+.cook-doc-group-label { display: block; margin-bottom: 0.75rem; font-weight: 700; font-size: 0.88rem; color: var(--slate-700); }
+.cook-file-btn { cursor: pointer; }
+
+/* ---- 12. Reviews ---- */
+.cook-review-summary {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--cook-card-bg);
+  border: 1px solid var(--cook-card-border);
+  border-radius: var(--cook-radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1.1rem 1.25rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.cook-review-num { font-size: 1.6rem; font-weight: 800; color: var(--slate-900); }
+.cook-review-item {
+  background: var(--cook-card-bg);
+  border: 1px solid var(--cook-card-border);
+  border-radius: var(--cook-radius);
+  box-shadow: var(--shadow-sm);
+  padding: 1rem 1.15rem;
+  margin-bottom: 0.7rem;
+}
+.cook-review-item h4 { margin: 0; font-size: 0.95rem; }
+.cook-review-item p { margin: 0.35rem 0 0; font-size: 0.88rem; color: var(--slate-600); }
+.cook-review-top { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.6rem; }
+.cook-review-who { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cook-review-who h3, .cook-review-who h4 { margin: 0; font-size: 1.02rem; }
+.cook-review-date { font-size: 0.8rem; color: var(--cook-ink-faint); }
+.cook-stars { display: inline-flex; align-items: center; gap: 2px; }
+.cook-review-comment { margin: 0; font-size: 0.95rem; color: var(--slate-700); font-style: italic; }
+.cook-review-nocomment { margin: 0; font-size: 0.85rem; color: var(--slate-400); }
+.cook-rating-hero-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fbbf24;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+.cook-rating-hero-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; position: relative; z-index: 1; }
+.cook-rating-hero-stars { display: flex; align-items: center; gap: 0.2rem; margin: 0.15rem 0; }
+.cook-rating-hero .stat-metric-number { font-size: 1.75rem; }
+.cook-review-stars { margin-bottom: 0.5rem; }
+
+/* Recent-reviews teaser keeps cook-pages.css rows; head title reset lives here. */
+.cook-recent-head h3 { margin: 0; }
+
+/* ---- 13. Modal + credentials ---- */
+.cook-modal-card {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.75rem 1.5rem;
+  border-radius: 20px;
+  background: #fff;
+  border: 1px solid var(--cook-card-border);
+  box-shadow: var(--shadow-lg);
+}
+.cook-modal-head { text-align: center; margin-bottom: 1.1rem; }
+.cook-modal-head h3 { margin: 0 0 0.3rem; }
+.cook-modal-head p { margin: 0; color: var(--cook-ink-faint); font-size: 0.88rem; }
+.cook-cred {
+  background: var(--cook-wash);
+  border: 1px dashed var(--slate-300);
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.cook-cred-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  background: #fff;
+  border: 1px solid var(--slate-100);
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+}
+
+/* ---- 14. Loading text ---- */
+.cook-loading-text { color: var(--cook-ink-faint); font-weight: 600; }
+
+/* ---- 15. Responsive + reduced motion ---- */
+@media (max-width: 640px) {
+  .cook-2col, .cook-svc-grid, .cook-doc-grid { grid-template-columns: 1fr; }
+  .cook-form-card { padding: 1.1rem; }
+  .cook-modal-card { padding: 1.4rem 1.1rem; }
+  .cook-customer-row h3 { white-space: normal; }
+  .cook-page-head-title h1 { font-size: 1.4rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cook-dash, .cook-stat-card, .cook-card { animation: none; }
+  .cook-btn, .cook-avail, .cook-stat-card, .cook-card, .cook-svc, .cook-tab { transition: none; }
+  .cook-btn:hover, .cook-avail:hover, .cook-stat-card:hover, .cook-card:hover, .cook-svc:hover { transform: none; }
+}

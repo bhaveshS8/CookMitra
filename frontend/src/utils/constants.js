@@ -41,7 +41,7 @@ export const formatCurrency = (amount) => {
 // server recomputes every amount, this is display + preview only).
 // Whole-hour 1–4 sessions, one flat price for every cook and service.
 export const LAUNCH_SLAB_PRICES = { 1: 199, 2: 349, 3: 499, 4: 649 };
-export const COMMISSION_RATE = 0.1;
+export const COMMISSION_RATE = 0.25;
 
 export const slabPriceForDuration = (hours) => {
   const h = Number(hours);
@@ -101,18 +101,13 @@ export const normalizeIndianMobile = (phone) => {
   return null;
 };
 
-// Build a wa.me deep link that sends the order details + the cook's live
-// location to the USER's own WhatsApp. Returns null when the user has no
-// valid number. After cook ACCEPTS, this is the booked confirmation with
-// cook name, cook number, live tracking link + cook live location.
-export const bookingCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone, cookLocation, booking, trackingUrl }) => {
+// Build a wa.me deep link that sends the order details to the USER's own
+// WhatsApp. Returns null when the user has no valid number. After cook
+// ACCEPTS, this is the booked confirmation with cook name + cook number.
+// (Cook live-location tracking was removed — no live pins or tracking links.)
+export const bookingCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone, booking }) => {
   const mobile = normalizeIndianMobile(customerPhone);
   if (!mobile) return null;
-
-  const cookMapsLink =
-    cookLocation?.lat != null && cookLocation?.lng != null
-      ? `https://www.google.com/maps?q=${cookLocation.lat},${cookLocation.lng}`
-      : null;
 
   const venueMapsLink =
     booking?.location?.lat != null && booking?.location?.lng != null
@@ -126,11 +121,6 @@ export const bookingCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone,
     : isConfirmed
       ? "Cook Mitra Booking Confirmed – Cook Accepted 🎉"
       : "Cook Mitra Booking Confirmation";
-  const trackLink =
-    trackingUrl ||
-    (booking?._id && typeof window !== "undefined"
-      ? `${window.location.origin}/track/${booking._id}`
-      : null);
 
   const lines = [
     header,
@@ -141,13 +131,7 @@ export const bookingCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone,
     `Service hours: ${booking?.startTime || ""} - ${booking?.endTime || ""}${booking?.durationHours ? ` (${booking.durationHours} hrs)` : ""}`,
     `Venue: ${booking?.address || ""}`,
   ];
-  if (trackLink) lines.push(`Live tracking link: ${trackLink}`);
   if (venueMapsLink) lines.push(`Your venue pin: ${venueMapsLink}`);
-  if (cookMapsLink) {
-    lines.push(`Cook's live location: ${cookMapsLink}`);
-  } else {
-    lines.push("Cook's live location: will be shared here once the cook is on the way.");
-  }
   if (booking?.guests) lines.push(`Guests: ${booking.guests}`);
   if (booking?.durationHours) lines.push(`Duration: ${booking.durationHours} hrs`);
   if (booking?.selectedItems?.length) lines.push(`Dishes: ${booking.selectedItems.join(", ")}`);
@@ -183,23 +167,47 @@ export const bookingReviewWhatsAppUrl = ({ customerPhone, cookName, booking, rev
   return `https://wa.me/91${mobile}?text=${encodeURIComponent(lines.join("\n"))}`;
 };
 
-// Google Maps link for a cook's live location (or null when not shared yet)
-export const cookLiveMapsUrl = (cookLocation) => {
-  if (cookLocation?.lat == null || cookLocation?.lng == null) return null;
-  return `https://www.google.com/maps?q=${cookLocation.lat},${cookLocation.lng}`;
+// Effective service window: once the cook verifies the OTP the scheduled
+// start/end are redefined from the actual clock (serviceStartedAt →
+// serviceEndsAt = start + booked duration). Prefers the live clock so legacy
+// bookings (stored endTime not yet redefined) still display real times.
+const clockHM = (d) => {
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return null;
+  return `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+};
+
+export const effectiveServiceWindow = (obj) => {
+  const start = obj?.serviceStartedAt ? clockHM(obj.serviceStartedAt) : obj?.startTime || null;
+  const end = obj?.serviceEndsAt
+    ? clockHM(obj.serviceEndsAt)
+    : obj?.serviceStartedAt && obj?.durationHours
+      ? (() => {
+          const s = new Date(obj.serviceStartedAt);
+          if (Number.isNaN(s.getTime())) return obj?.endTime || null;
+          return clockHM(new Date(s.getTime() + Math.round(Number(obj.durationHours) * 60) * 60 * 1000));
+        })()
+      : obj?.endTime || null;
+  return { startTime: start, endTime: end };
 };
 
 // Session end datetime. Prefers the live service clock (serviceEndsAt, set
-// when the cook verifies the OTP) over the static schedule, so countdowns
-// and alarms count real cooking time. Accepts a booking or live payload.
+// when the cook verifies the OTP), then the server-resolved `sessionEnd`
+// (returned by the booking endpoints, computed by the backend from its own
+// live clock), and only then the static date + endTime slot. `sessionEnd` is
+// a fixed instant so it never goes stale — honoring it keeps every screen on
+// the identical countdown. Accepts a booking payload.
 export const sessionEndDate = (obj) => {
   if (obj?.serviceEndsAt) {
     const live = new Date(obj.serviceEndsAt);
     if (!Number.isNaN(live.getTime())) return live;
   }
-  const date = obj?.sessionEnd || obj?.date;
+  if (obj?.sessionEnd) {
+    const resolved = new Date(obj.sessionEnd);
+    if (!Number.isNaN(resolved.getTime())) return resolved;
+  }
+  const date = obj?.date;
   if (!date) return null;
-  if (obj?.sessionEnd && !obj?.endTime) return new Date(obj.sessionEnd);
   const endTime = obj?.endTime;
   if (!endTime) return null;
   const m = String(endTime).match(/^(\d{1,2}):(\d{2})/);
@@ -210,9 +218,14 @@ export const sessionEndDate = (obj) => {
   return d;
 };
 
-// Session start datetime from date + startTime ("HH:MM"). Null when unknown.
-// Mirrors sessionEndDate so the UI can gate actions to "before service hours".
+// Session start datetime: prefers the actual service clock (serviceStartedAt)
+// over the static schedule, mirroring sessionEndDate so the UI gates on real
+// times once the OTP is verified.
 export const sessionStartDate = (obj) => {
+  if (obj?.serviceStartedAt) {
+    const live = new Date(obj.serviceStartedAt);
+    if (!Number.isNaN(live.getTime())) return live;
+  }
   const date = obj?.date;
   if (!date) return null;
   const startTime = obj?.startTime;
@@ -225,11 +238,26 @@ export const sessionStartDate = (obj) => {
   return d;
 };
 
-// True when now ≥ date + startTime — the service hours have begun. Unknown
-// start ⇒ false, matching how hours-complete treats an unknown end.
+// True when the session is under way: the cook verified the OTP
+// (serviceStartedAt set) OR now ≥ date + startTime. Unknown start ⇒ false,
+// matching how hours-complete treats an unknown end.
 export const hasServiceHoursStarted = (obj) => {
+  if (obj?.serviceStartedAt) return true;
   const start = sessionStartDate(obj);
   return !!start && Date.now() >= start.getTime();
+};
+
+// True when the customer may rate the booking. Mirrors the backend rule
+// (reviewController.createReview): completed, hours-complete, or session end
+// passed — but never requests the cook didn't accept or dead bookings.
+// Use as: show the form while `isReviewable(b) && !b.review`; the submitted
+// card takes over once `b.review` exists.
+export const isReviewable = (booking) => {
+  if (!booking) return false;
+  if (["requested", "rejected", "cancelled", "expired"].includes(booking.status)) return false;
+  if (booking.status === "completed" || booking.hoursCompleted === true) return true;
+  const end = sessionEndDate(booking);
+  return !!end && Date.now() >= end.getTime();
 };
 
 // Human countdown: "2h 15m left" / "Overdue by 10m" / null when unknown
@@ -337,7 +365,7 @@ export const osmEmbedUrl = (cookLoc, venueLoc) => {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${mark.lat},${mark.lng}`;
 };
 
-// Build a wa.me deep link that shares full order details + live location
+// Build a wa.me deep link that shares full order details + venue pin
 // with the cook on WhatsApp. Returns null when the cook has no valid number.
 export const bookingWhatsAppUrl = ({ cookPhone, customerName, customerPhone, booking }) => {
   const mobile = normalizeIndianMobile(cookPhone);
@@ -355,7 +383,7 @@ export const bookingWhatsAppUrl = ({ cookPhone, customerName, customerPhone, boo
     `Date: ${booking?.date ? new Date(booking.date).toLocaleDateString() : ""} | Time: ${booking?.startTime || ""} - ${booking?.endTime || ""}`,
     `Venue: ${booking?.address || ""}`,
   ];
-  if (mapsLink) lines.push(`Live location: ${mapsLink}`);
+  if (mapsLink) lines.push(`Venue pin: ${mapsLink}`);
   if (booking?.guests) lines.push(`Guests: ${booking.guests}`);
   if (booking?.durationHours) lines.push(`Duration: ${booking.durationHours} hrs`);
   if (booking?.selectedItems?.length) lines.push(`Dishes: ${booking.selectedItems.join(", ")}`);
@@ -371,7 +399,7 @@ export const bookingWhatsAppUrl = ({ cookPhone, customerName, customerPhone, boo
 // name, phone number and venue location (address + GPS pin). Used as the
 // fallback when a server response didn't include `cookWhatsappUrl`. Returns
 // null when the cook has no valid number.
-export const bookingCookJobWhatsAppUrl = ({ cookPhone, customerName, customerPhone, booking, trackingUrl }) => {
+export const bookingCookJobWhatsAppUrl = ({ cookPhone, customerName, customerPhone, booking }) => {
   const mobile = normalizeIndianMobile(cookPhone);
   if (!mobile) return null;
 
@@ -391,9 +419,6 @@ export const bookingCookJobWhatsAppUrl = ({ cookPhone, customerName, customerPho
     .filter(Boolean)
     .join(", ");
 
-  const trackLink =
-    trackingUrl || (booking?._id ? `${window.location.origin}/track/${booking._id}` : null);
-
   const lines = [
     "*Cook Mitra: Payment Received — Job Confirmed* ✅",
     `Customer: ${customerName || "Customer"}`,
@@ -408,7 +433,6 @@ export const bookingCookJobWhatsAppUrl = ({ cookPhone, customerName, customerPho
   if (booking?.selectedItems?.length) lines.push(`Dishes: ${booking.selectedItems.join(", ")}`);
   if (booking?.notes) lines.push(`Notes: ${booking.notes}`);
   if (booking?._id) lines.push(`Booking ID: ${booking._id}`);
-  if (trackLink) lines.push(`Live tracking: ${trackLink}`);
   lines.push("The customer has PAID. Please reach the venue on time.");
 
   return `https://wa.me/91${mobile}?text=${encodeURIComponent(lines.join("\n"))}`;

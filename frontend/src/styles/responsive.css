@@ -4,6 +4,7 @@
 
 .navbar-mobile-actions { display: none; gap: 0.5rem; }
 .mobile-bell { display: none; }
+.mobile-avatar { display: none; }
 
 /* Tablet */
 @media (max-width: 1024px) {
@@ -36,11 +37,15 @@
   .navbar-mobile-actions { display: flex; align-items: center; }
   .mobile-toggle-btn { display: inline-flex; }
   .mobile-bell { display: inline-flex; }
-  .mobile-menu .nav-link { font-size: 0.95rem; }
+  .mobile-avatar { display: inline-flex; }
+  /* Avatar button in the navbar bar: same footprint as the bell icon. */
+  .mobile-avatar .user-avatar-sm { width: 34px; height: 34px; font-size: 0.8rem; box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px var(--primary-100, #ffe1c4); }
+  /* Drawer links: comfortable row height for thumbs. */
+  .mobile-menu .nav-link { font-size: 0.95rem; min-height: 46px; }
 }
 
 @media (max-width: 640px) {
-  body { font-size: 15px; }
+  body { font-size: 15px; overflow-wrap: break-word; /* long emails/IDs never force a side-scroll */ }
   .main-content { padding-top: 0; }
   .hero-v2-inner { padding: 3rem 1.1rem 2rem; }
   .hero-v2-cook-wrap { width: min(430px, 94%); margin: 0.75rem 0 1.4rem; }
@@ -52,7 +57,11 @@
   .lead-section { padding: 3rem 1rem; }
   .cta-banner { padding: 2.4rem 1.2rem; margin-top: 2.5rem; }
   .section-header { margin-bottom: 1.8rem; }
-  .dashboard-container, .cooks-page-container, .cook-profile-page-container, .ondemand-page, .booking-flow-page, .auth-wrapper { padding-left: 1rem; padding-right: 1rem; }
+  /* Keep content clear of the rounded/notched edges in landscape. */
+  .dashboard-container, .cooks-page-container, .cook-profile-page-container, .ondemand-page, .booking-flow-page, .auth-wrapper {
+    padding-left: calc(1rem + env(safe-area-inset-left));
+    padding-right: calc(1rem + env(safe-area-inset-right));
+  }
   .page-header-banner { padding: 1.8rem 1.2rem; }
   .ondemand-hero { padding: 1.6rem 1.1rem; }
   .ondemand-hero .section-title { font-size: 1.5rem; }
@@ -68,6 +77,16 @@
   .slot-list .slot-chip { font-size: 0.78rem; padding: 0.42rem 0.7rem; }
   .cooks-filter-bar { padding: 0.9rem 1rem; }
   .booking-item-card { padding: 1rem; }
+  .booking-card-modern { padding: 1rem; }
+  .booking-card-header { align-items: flex-start; }
+  .booking-card-status-cluster { width: 100%; justify-content: space-between; }
+  .booking-card-details { gap: 0.7rem; }
+  .booking-card-details .meta-field,
+  .booking-card-details .meta-field:first-child,
+  .booking-card-details .meta-field:last-child {
+    padding: 0;
+    border-left: 0;
+  }
   .bf-wait-head { flex-direction: column; align-items: center; text-align: center; }
   .bf-wait-copy { width: 100%; }
   .bf-card { padding: 1.5rem 1.2rem; }
@@ -110,7 +129,8 @@
   
   /* Tabs navigation on mobile */
   .tabs-navigation-bar { padding: 0.25rem; }
-  .tab-btn { padding: 0.4rem 0.75rem; font-size: 0.82rem; }
+  /* Tabs stay 44px tall; the bar itself already scrolls horizontally. */
+  .tab-btn { padding: 0.4rem 0.75rem; font-size: 0.82rem; min-height: 44px; }
   
   /* Cooks filter bar on mobile */
   .cooks-filter-bar { flex-direction: column; align-items: stretch; }
@@ -157,10 +177,16 @@
   .admin-table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   
   /* Mobile menu improvements */
-  .mobile-menu { max-height: calc(100vh - 62px); overflow-y: auto; }
+  .mobile-menu {
+    max-height: calc(100vh - 62px);
+    max-height: calc(100dvh - 62px); /* dynamic viewport — nothing clipped by browser chrome */
+    overflow-y: auto;
+    overscroll-behavior: contain; /* page behind the drawer doesn't scroll */
+    padding-bottom: calc(1.25rem + env(safe-area-inset-bottom));
+    -webkit-overflow-scrolling: touch;
+  }
   
-  /* Review form on mobile */
-  .review-form-container { padding: 1rem; }
+  /* Review form mobile rules → styles/review-form.css */
   
   /* Navbar mobile actions */
   .navbar-mobile-actions { gap: 0.4rem; }
@@ -233,11 +259,14 @@
 /* Phones */
 @media (max-width: 640px) {
   .home-registration-form {
-    padding: 1.25rem;
+    /* Phones already get 1rem from the page container — keep the inner
+       padding tight so fields keep usable width. */
+    padding: 1.15rem 1rem;
   }
-  
+
   .home-registration-form .role-segment-btn {
     padding: 0.5rem 0.4rem;
+    min-height: 44px; /* comfortable thumb target (WCAG 2.5.8) */
   }
   
   .home-registration-form .role-segment-btn span:nth-child(2) {
@@ -245,12 +274,16 @@
   }
   
   .home-registration-form .role-hint {
-    font-size: 0.65rem;
+    font-size: 0.7rem; /* was 0.65rem — too small to read on a phone */
+    line-height: 1.35;
   }
   
+  /* 16px stops iOS Safari from zooming the whole page on focus, and the
+     taller control is easier to tap. */
   .home-registration-form .form-control {
-    font-size: 0.85rem;
-    padding: 0.5rem 0.65rem;
+    font-size: 16px;
+    padding: 0.62rem 0.72rem;
+    min-height: 46px;
   }
 
   /* ---- Cook listing ---- */

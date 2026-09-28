@@ -10,7 +10,15 @@ export const useFetch = (url) => {
     try {
       setLoading(true);
       const response = await API.get(url);
-      setData(response.data);
+      const payload = response.data;
+      // Tolerate the paginated envelope ({data, pagination}) so list screens
+      // keep working if ?page/limit is ever sent — today the API returns
+      // bare arrays and this is a no-op.
+      setData(
+        payload && typeof payload === "object" && !Array.isArray(payload) && Array.isArray(payload.data)
+          ? payload.data
+          : payload
+      );
       setError(null);
     } catch (err) {
       // Backend down / timed out: surface a clear message, never hang.

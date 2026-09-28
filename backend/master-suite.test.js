@@ -36,10 +36,16 @@ const makeRes = () => {
 };
 const next = (err) => { if (err) throw err || new Error("next()"); };
 
-// Thenable query: awaitable, with chainable .select/.populate that resolve to doc.
+// Thenable query: awaitable, with chainable query methods that resolve to doc.
+// .sort/.limit/.skip are needed because getCooks pages/sorts at the DB level
+// (controllers chain them synchronously before the await unwraps the query).
 const Q = (doc) => ({
   select: () => Q(doc),
   populate: () => Q(doc),
+  sort: () => Q(doc),
+  limit: () => Q(doc),
+  skip: () => Q(doc),
+  lean: () => Q(doc),
   then: (resolve, reject) => Promise.resolve(doc).then(resolve, reject),
 });
 const stubFindOne = (doc) => () => Q(doc);

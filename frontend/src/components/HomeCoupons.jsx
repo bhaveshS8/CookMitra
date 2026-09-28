@@ -46,14 +46,31 @@ const HomeCoupons = () => {
       : date.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
   };
 
+  // Customer-facing cards never advertise the restrictive terms — no rupee
+  // cap ("up to ₹70"), no per-customer limit ("one per customer"). The limits
+  // still apply at checkout, but the card headline stays a clean % OFF.
+  // The copy lives in the DB description (admin-editable), so strip it at
+  // render time instead of trusting stored text.
+  const cleanCouponDescription = (text) => {
+    const cleaned = String(text || "")
+      .replace(/\s*\bup\s*to\s*₹\s*[\d,]+/gi, "")
+      .replace(/[\s,]*\b(?:once|one|1\s*x?)\s*per\s*(?:customers?|users?)\b\s*[,.]?/gi, "")
+      .replace(/\(\s*\)/g, "")
+      .replace(/\s{2,}/g, " ")
+      .replace(/\s+,/g, ",")
+      .replace(/^,\s*|\s*,$/g, "")
+      .trim();
+    return cleaned;
+  };
+
   return (
     <section className="home-coupons home-band band-abyss" id="offers">
       <div className="section-header">
         <span className="section-eyebrow">🪔 Ganesh Utsav Specials</span>
         <h2 className="section-title">Festive Offers For You</h2>
         <p className="section-description">
-          Apply a coupon while booking — flat ₹50 off launch offers, fresh
-          from Bappa's kitchen.
+          Apply a coupon while booking — one offer per session, straight off
+          your bill.
         </p>
       </div>
 
@@ -96,9 +113,10 @@ const HomeCoupons = () => {
                 )}
               </button>
             </div>
-            {c.description && <p className="coupon-desc">{c.description}</p>}
+            {c.description && cleanCouponDescription(c.description) && (
+              <p className="coupon-desc">{cleanCouponDescription(c.description)}</p>
+            )}
             <ul className="coupon-meta">
-              {c.discountType !== "flat" && c.maxDiscount ? <li>Up to ₹{c.maxDiscount} off</li> : null}
               {c.minOrder ? <li>Min order ₹{c.minOrder}</li> : null}
               {c.firstBookingOnly ? <li>First booking only</li> : null}
               {c.validTo ? <li>Valid till {fmtDate(c.validTo)}</li> : null}

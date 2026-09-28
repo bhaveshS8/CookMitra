@@ -880,3 +880,162 @@
   .match-card:hover,
   .cook-service-toggle:hover { transform: none; }
 }
+
+/* ==========================================================================
+   Cook workspace refresh — hero dashboard, stat shortcuts, status-accented
+   booking cards, rating hero. Modern + thumb-friendly.
+   ========================================================================== */
+
+.cook-dash { animation: riseIn 0.3s ease; }
+
+/* Hero text legibility on the dark banner */
+.cook-modern-hero-copy h1 { color: #fff; }
+.cook-hero-sub { color: rgba(255, 255, 255, 0.82); margin: 0; font-size: 0.92rem; }
+.cook-hero-badges { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.65rem; }
+/* Pills that stay readable on the dark hero */
+.hero-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 0.28rem 0.7rem;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
+  white-space: nowrap;
+}
+.hero-pill.ok { background: rgba(5, 150, 105, 0.85); border-color: transparent; }
+.hero-pill.warn { background: rgba(217, 119, 6, 0.9); border-color: transparent; }
+.hero-pill.bad { background: rgba(225, 29, 72, 0.88); border-color: transparent; }
+
+/* Clickable stat cards (buttons reset to card look) */
+.cook-stat-btn {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}
+.cook-stat-btn:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
+
+/* Status-accented booking cards */
+.booking-item-card.cook-booking-card { border-left: 4px solid var(--slate-200); }
+.booking-item-card.cook-booking-card.st-requested { border-left-color: var(--accent-amber); }
+.booking-item-card.cook-booking-card.st-accepted,
+.booking-item-card.cook-booking-card.st-confirmed { border-left-color: var(--accent-blue); }
+.booking-item-card.cook-booking-card.st-in_progress { border-left-color: var(--accent-purple); }
+.booking-item-card.cook-booking-card.st-completed { border-left-color: var(--accent-emerald); }
+.booking-item-card.cook-booking-card.st-rejected,
+.booking-item-card.cook-booking-card.st-cancelled,
+.booking-item-card.cook-booking-card.st-expired { border-left-color: var(--slate-300); }
+
+/* Customer row inside a cook booking card */
+.cook-card-customer {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.cook-card-customer h3 {
+  margin: 0;
+  font-size: 1.02rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cook-card-when {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+  color: var(--slate-600);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.cook-card-addr {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  color: var(--slate-500);
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+/* Amount + paid pill row */
+.cook-card-money {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin: 0.7rem 0 0;
+}
+.cook-card-amount { font-weight: 800; font-size: 1.05rem; color: var(--slate-900); }
+.cook-pay-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0.24rem 0.65rem;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+.cook-pay-pill.paid { background: var(--accent-emerald-light); color: #065f46; }
+.cook-pay-pill.unpaid { background: var(--accent-amber-light); color: #92400e; }
+
+/* Setup intro card */
+.cook-setup-intro {
+  background: linear-gradient(150deg, #fff 0%, #fff7ef 100%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem 1.35rem;
+  margin-bottom: 1.25rem;
+}
+.cook-setup-steps {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.cook-setup-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--slate-600);
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 99px;
+  padding: 0.32rem 0.75rem;
+}
+
+/* Rating hero (reviews summary) */
+.cook-rating-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(480px 220px at 90% -20%, rgba(255, 190, 80, 0.25), transparent 60%),
+    linear-gradient(150deg, #241006 0%, #4a1c0a 60%, #7a2d0c 100%);
+  color: #fff;
+  box-shadow: var(--shadow-md);
+  padding: 1.35rem 1.4rem;
+  margin-bottom: 1.25rem;
+  animation: riseIn 0.3s ease;
+}
+.cook-rating-hero .stat-metric-number,
+.cook-rating-hero .stat-metric-title { color: #fff; }
+.cook-rating-hero .stat-metric-title { color: rgba(255, 255, 255, 0.78); }
+
+@media (max-width: 640px) {
+  .cook-modern-hero { padding: 1.35rem 1.1rem; }
+  .cook-modern-avatar-wrap { width: 68px; height: 68px; min-width: 68px; min-height: 68px; }
+  .cook-modern-hero-copy h1 { font-size: 1.25rem; }
+  .cook-card-customer h3 { white-space: normal; }
+}

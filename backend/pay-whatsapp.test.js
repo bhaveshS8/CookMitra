@@ -191,9 +191,9 @@ const next = (e) => {
       "cook number"
     );
     check(
-      "confirmation includes cook's live location pin",
-      selfMsg.includes("Cook's live location: https://www.google.com/maps?q=28.61,77.2"),
-      "live location"
+      "confirmation carries no live-location pin (tracking removed)",
+      !selfMsg.includes("Cook's live location: https://www.google.com/maps"),
+      "no live pin"
     );
     check(
       "confirmation includes service hours",
@@ -201,9 +201,9 @@ const next = (e) => {
       "service hours"
     );
     check(
-      "confirmation includes tracking link",
-      selfMsg.includes("Live tracking link:"),
-      "tracking"
+      "confirmation carries no tracking link (tracking removed)",
+      !selfMsg.includes("Live tracking link:"),
+      "no tracking"
     );
 
     process.exit(
@@ -224,9 +224,9 @@ const next = (e) => {
         selfMsg.includes("Payment Received") &&
         selfMsg.includes("Cook: Priya Sharma") &&
         selfMsg.includes("Cook's number: 9876543210") &&
-        selfMsg.includes("Cook's live location: https://www.google.com/maps?q=28.61,77.2") &&
+        !selfMsg.includes("Cook's live location: https://www.google.com/maps") &&
         selfMsg.includes("Service hours: 10:00 - 13:00 (3 hrs)") &&
-        selfMsg.includes("Live tracking link:")
+        !selfMsg.includes("Live tracking link:")
         ? 0
         : 1
     );

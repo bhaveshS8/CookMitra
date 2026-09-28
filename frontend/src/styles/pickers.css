@@ -32,53 +32,113 @@
   box-shadow: var(--shadow-sm);
 }
 
-/* Service-type picker (booking widget) */
-.service-pick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+/* Service-type picker (booking widget) — grid tiles with an icon chip,
+   stacked label + description, and a fixed radio slot on the right so
+   selecting never shifts the layout. */
+.service-pick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
 .service-pick-card {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 0.7rem;
   align-items: center;
-  gap: 0.45rem 0.6rem;
-  padding: 0.75rem 0.85rem;
-  border: 1.5px solid var(--slate-200);
-  border-radius: 12px;
+  min-height: 88px;
+  padding: 0.8rem 0.9rem;
+  border: 2px solid var(--slate-200);
+  border-radius: 16px;
   background: #fff;
-  font-weight: 650;
   font-size: 0.88rem;
   color: var(--slate-700);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
   text-align: left;
 }
-.service-pick-card:hover { border-color: var(--slate-300); }
+.service-pick-card:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+.service-pick-card:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
 .service-pick-icon {
-  color: var(--slate-400);
+  grid-column: 1;
+  grid-row: 1 / 3;
+  width: 44px;
+  height: 44px;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: var(--slate-100);
+  border: 1px solid var(--slate-200);
+  color: var(--slate-500);
   flex-shrink: 0;
 }
-.service-pick-card strong {
-  font-size: 0.88rem;
+.service-pick-card > strong {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: end;
+  font-size: 0.92rem;
+  font-weight: 800;
   line-height: 1.25;
+  color: var(--slate-900);
+  overflow-wrap: anywhere;
 }
-.service-pick-card span:last-child:not(.service-pick-icon):not(.service-pick-check) {
-  flex-basis: 100%;
-  font-size: 0.78rem;
-  font-weight: 500;
+.service-pick-card > span:not(.service-pick-icon):not(.service-pick-check) {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+  font-size: 0.76rem;
+  font-weight: 600;
   color: var(--slate-500);
-  line-height: 1.35;
-  margin-top: -0.15rem;
+  line-height: 1.4;
 }
 .service-pick-card.selected {
   border-color: var(--primary);
-  background: var(--primary-light);
-  color: var(--primary-700);
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--primary-glow), var(--shadow-sm);
 }
-.service-pick-card.selected .service-pick-icon { color: var(--primary); }
+.service-pick-card.selected > strong { color: var(--primary-700); }
+.service-pick-card.selected > span:not(.service-pick-icon):not(.service-pick-check) { color: var(--primary-700); opacity: 0.75; }
+.service-pick-card.selected .service-pick-icon { color: #fff; background: var(--primary); border-color: var(--primary); }
+/* Fixed radio slot — hollow ring idle, filled badge when selected */
 .service-pick-check {
-  margin-left: auto;
+  grid-column: 3;
+  grid-row: 1 / 3;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid var(--slate-300);
+  background: var(--slate-50);
+  color: transparent;
   flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
-.service-pick-card.selected .service-pick-check { color: var(--primary); }
+.service-pick-card.selected .service-pick-check {
+  background: var(--accent-emerald);
+  border-color: var(--accent-emerald);
+  color: #fff;
+}
+/* Admin "Add Cook" modal reuses these classes with label-only chips —
+   keep them compact instead of the tall booking tiles above. */
+.add-cook-modal .service-pick-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 0;
+}
+.add-cook-modal .service-pick-card > span:not(.service-pick-check) {
+  grid-column: auto;
+  grid-row: auto;
+  align-self: center;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: inherit;
+}
+.add-cook-modal .service-pick-check { grid-column: auto; grid-row: auto; }
 
 /* Time-slot chips — ONLY available slots are rendered (booked / held /
    unavailable windows never appear, so they cannot be picked). */
@@ -137,7 +197,7 @@
   gap: 0.6rem;
   cursor: pointer;
   font-size: 0.88rem;
-  color: var(--slate-600);
+  color: rgba(63, 42, 27, 0.8);
   user-select: none;
 }
 .login-remember input { position: absolute; opacity: 0; pointer-events: none; }
@@ -145,8 +205,8 @@
   width: 20px;
   height: 20px;
   border-radius: 6px;
-  border: 2px solid var(--slate-300);
-  background: #fff;
+  border: 2px solid rgba(184, 115, 51, 0.5);
+  background: rgba(255, 252, 248, 0.9);
   transition: all 0.15s ease;
   position: relative;
   flex-shrink: 0;
@@ -166,8 +226,8 @@
 .login-remember input:focus-visible + .login-checkbox { outline: 3px solid var(--primary-glow); }
 
 .login-label-row { display: flex; align-items: center; justify-content: space-between; }
-.login-label-row label { font-weight: 700; font-size: 0.85rem; color: var(--slate-700); }
-.login-link-btn { border: none; background: none; color: var(--primary); font-size: 0.82rem; font-weight: 600; padding: 0; }
+.login-label-row label { font-weight: 700; font-size: 0.85rem; color: #4b2d1b; }
+.login-link-btn { border: none; background: none; color: #b86f3c; font-size: 0.82rem; font-weight: 700; padding: 0; }
 .login-link-btn:hover { text-decoration: underline; }
 
 /* Maps link input group (copy link) */
@@ -184,4 +244,181 @@
 .maps-link-group .btn {
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+/* ==========================================================================
+   Custom calendar (CustomCalendar.jsx) — modern popup month grid.
+   Field pill + floating card with brand selected day, today ring,
+   greyed past dates. Used by both booking forms.
+   ========================================================================== */
+.ccal { position: relative; display: inline-flex; min-width: 0; }
+.ccal-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 48px;
+  max-width: 100%;
+  padding: 0.45rem 0.6rem 0.45rem 0.5rem;
+  border: 2px solid var(--slate-200);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fff 0%, var(--slate-50) 100%);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.ccal-field:hover { border-color: var(--primary); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.ccal-field:focus-visible { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-glow); }
+.ccal-field-icon {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: var(--primary-gradient);
+  color: #fff;
+  box-shadow: var(--shadow-brand);
+}
+.ccal-field-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.ccal-field-text strong { font-size: 0.92rem; font-weight: 800; color: var(--slate-900); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ccal-field-text em { font-style: normal; font-size: 0.7rem; font-weight: 700; color: var(--primary-700); }
+.ccal-field-empty { font-size: 0.88rem; font-weight: 600; color: var(--slate-400); white-space: nowrap; }
+.ccal-field-chev { color: var(--slate-400); flex-shrink: 0; transform: rotate(90deg); transition: transform 0.18s ease; }
+.ccal-field-chev.open { transform: rotate(-90deg); color: var(--primary); }
+
+/* Click-away layer */
+.ccal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: transparent;
+  cursor: default;
+}
+
+/* Popup card */
+.ccal-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 61;
+  width: 308px;
+  max-width: min(308px, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  background: #fff;
+  border: 1px solid var(--slate-200);
+  border-radius: 18px;
+  box-shadow: var(--shadow-lg);
+  padding: 0.85rem 0.9rem 0.8rem;
+  animation: ccalIn 0.18s ease backwards;
+}
+@keyframes ccalIn {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.ccal-head { display: flex; align-items: center; gap: 0.5rem; }
+.ccal-month { flex: 1; text-align: center; font-size: 0.92rem; font-weight: 800; color: var(--slate-900); letter-spacing: -0.01em; }
+.ccal-nav {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--slate-200);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--slate-600);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+/* Hover states only on devices that can actually hover — on touch, tapping a
+   day otherwise leaves a sticky scaled/orange artifact after the tap. */
+@media (hover: hover) and (pointer: fine) {
+  .ccal-nav:hover:not(:disabled) { border-color: var(--primary); background: var(--primary-light); color: var(--primary-700); }
+  .ccal-day:hover:not(:disabled) { background: var(--primary-light); border-color: #fed7aa; color: var(--primary-700); transform: scale(1.06); }
+  .ccal-today:hover { border-color: var(--primary); background: var(--primary-light); }
+}
+.ccal-nav:disabled { opacity: 0.35; cursor: not-allowed; }
+.ccal-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.2rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--slate-400);
+  text-align: center;
+}
+.ccal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.25rem;
+  animation: ccalGridIn 0.18s ease backwards;
+}
+@keyframes ccalGridIn {
+  from { opacity: 0; transform: translateX(6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.ccal-blank { min-height: 38px; }
+.ccal-day {
+  min-height: 38px;
+  border: 1.5px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--slate-700);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+.ccal-day.today { border-color: var(--primary); color: var(--primary-700); }
+.ccal-day.selected {
+  background: var(--primary-gradient);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: var(--shadow-brand);
+}
+.ccal-day.selected.today { border-color: rgba(255, 255, 255, 0.6); }
+.ccal-day:disabled { color: var(--slate-300); cursor: not-allowed; text-decoration: line-through; text-decoration-thickness: 1px; }
+.ccal-day:focus-visible, .ccal-nav:focus-visible, .ccal-today:focus-visible {
+  outline: 3px solid var(--primary-glow);
+  outline-offset: 1px;
+}
+.ccal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-top: 1px dashed var(--slate-200);
+  padding-top: 0.6rem;
+}
+.ccal-today {
+  border: 1.5px solid var(--slate-200);
+  background: var(--slate-50);
+  color: var(--primary-700);
+  font-size: 0.76rem;
+  font-weight: 800;
+  border-radius: 99px;
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.ccal-quick { display: inline-flex; gap: 0.35rem; }
+.ccal-picked { font-size: 0.76rem; font-weight: 700; color: var(--slate-500); margin-left: auto; }
+
+@media (max-width: 400px) {
+  .ccal-pop { width: 280px; padding: 0.75rem 0.7rem 0.7rem; }
+  .ccal-day, .ccal-blank { min-height: 33px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ccal-pop, .ccal-grid { animation: none; }
+  .ccal-field, .ccal-field-chev, .ccal-day, .ccal-nav, .ccal-today { transition: none; }
+  .ccal-day:hover:not(:disabled) { transform: none; }
+  .ccal-field:hover { transform: none; }
 }

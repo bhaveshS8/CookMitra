@@ -3,22 +3,25 @@ import { Link } from "react-router-dom";
 import { ArrowLeft, ShieldCheck, FileText, RotateCcw, Mail } from "lucide-react";
 
 const SUPPORT_EMAIL = "contactuscookmitra@gmail.com";
-const SUPPORT_PHONE = "+91 7231925496";
+const SUPPORT_PHONE = "+91 9322321831";
 const UPDATED = "September 2026";
 
 // Shared layout for the compliance pages Razorpay requires merchants to
 // publish: Terms, Privacy, Refunds/Cancellation, and Contact.
 const LegalShell = ({ icon: Icon, eyebrow, title, intro, children }) => (
   <div className="dashboard-container legal-page">
-    <Link to="/" className="back-link-bar" style={{ marginBottom: "1rem" }}>
+    <Link to="/" className="back-link-bar">
       <ArrowLeft size={16} /> Back to Home
     </Link>
-    <span className="badge badge-festive" style={{ marginBottom: "0.5rem" }}>
+    <span className="badge badge-festive">
       <Icon size={14} /> {eyebrow}
     </span>
     <h1>{title}</h1>
-    <p style={{ color: "var(--slate-600)", margin: "0.25rem 0 1.25rem" }}>
-      {intro} Last updated: {UPDATED}.
+    <p className="legal-intro">
+      {intro}
+      <span className="legal-date-stamp">
+        Last updated: <strong>{UPDATED}</strong>.
+      </span>
     </p>
     <div className="profile-card-block legal-content">{children}</div>
   </div>
@@ -71,7 +74,7 @@ export const TermsConditions = () => (
     <h3>7. Contact</h3>
     <p>
       Questions about these terms: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> ·{" "}
-      <a href="tel:+917231925496">{SUPPORT_PHONE}</a>.
+      <a href="tel:+919322321831">{SUPPORT_PHONE}</a>.
     </p>
   </LegalShell>
 );
@@ -83,35 +86,103 @@ export const PrivacyPolicy = () => (
     title="Privacy Policy"
     intro="How Cook Mitra collects, uses, and protects your information."
   >
-    <h3>1. What we collect</h3>
+    <h3>1. Information we collect</h3>
     <ul>
-      <li>Account details: name, email, phone number, role (customer/cook).</li>
-      <li>Booking details: service address, venue location pin, guests, dishes, notes.</li>
-      <li>Cook verification documents (Aadhaar/PAN/photo) for cooks.</li>
-      <li>Payment confirmations (order/payment IDs and amounts) — card and UPI credentials are handled only by Razorpay and never touch our servers.</li>
+      <li>
+        <strong>Account details:</strong> your name, email address, phone number, and role
+        (customer or cook) when you sign up.
+      </li>
+      <li>
+        <strong>Booking details:</strong> service address, venue location, number of guests,
+        dishes or menu preferences, and any special notes you add to a request.
+      </li>
+      <li>
+        <strong>Cook verification documents:</strong> Aadhaar, PAN, and photos submitted by
+        cooks to verify their identity. These are stored securely and shown only to you when
+        a booking is confirmed.
+      </li>
+      <li>
+        <strong>Payment records:</strong> order IDs, payment IDs, and amounts. Card numbers,
+        UPI IDs, and other payment credentials are handled only by Razorpay and never touch
+        our servers.
+      </li>
+      <li>
+        <strong>Cookies and device info:</strong> we use lightweight cookies to keep you
+        logged in and to remember your location preference. We do not use tracking cookies
+        for advertising.
+      </li>
     </ul>
-    <h3>2. How we use it</h3>
+
+    <h3>2. How we use your information</h3>
     <ul>
-      <li>To create accounts, process bookings, and coordinate sessions over WhatsApp/SMS.</li>
-      <li>To share necessary details with the other party (your cook gets your name, contact, and venue; you get the cook's name and contact for confirmed bookings).</li>
-      <li>To prevent fraud, resolve disputes, and improve the service.</li>
+      <li>To create and manage your account.</li>
+      <li>To match you with a cook, hold a time slot during the request window, and
+        coordinate the session.</li>
+      <li>To share the details the other party needs: your cook receives your name, contact
+        number, and venue for confirmed bookings; you receive the cook&apos;s name and contact
+        details for confirmed bookings.</li>
+      <li>To send booking confirmations, reminders, and payment receipts.</li>
+      <li>To prevent fraud, resolve disputes, and improve the quality of the platform.</li>
     </ul>
-    <h3>3. Sharing</h3>
+
+    <h3>3. How we share your information</h3>
     <p>
-      We do not sell your data. We share it only with the assigned cook/customer for a
-      booking, with Razorpay for payment processing, and with authorities when legally
-      required.
+      We do not sell, rent, or trade your personal data. We share information only when it is
+      necessary for a booking or required by law:
     </p>
-    <h3>4. Security & retention</h3>
+    <ul>
+      <li>With the assigned cook or customer for the duration of a confirmed booking.</li>
+      <li>With Razorpay for payment processing, under Razorpay&apos;s privacy terms.</li>
+      <li>With government or legal authorities when we are legally required to do so.</li>
+      <li>With service providers who help us run the platform (hosting, messaging, analytics)
+        under strict confidentiality agreements.</li>
+    </ul>
+
+    <h3>4. Security &amp; retention</h3>
     <p>
-      Data travels over encrypted connections and passwords are stored hashed. We keep
-      booking records as required for accounts and dispute resolution.
+      Your data is transmitted over encrypted (HTTPS) connections, and passwords are stored
+      using secure hashing. We retain booking records for as long as needed for account
+      management, tax, and dispute resolution, and then delete or anonymize them in line with
+      our retention policy. Verification documents submitted by cooks are stored securely and
+      removed when a cook is deactivated.
     </p>
+
     <h3>5. Your rights</h3>
     <p>
-      You may request access, correction, or deletion of your personal data at{" "}
-      <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>. Deletion may require
-      closing bookings that legally must be retained.
+      Depending on your location, you may have the right to:
+    </p>
+    <ul>
+      <li>Access the personal data we hold about you.</li>
+      <li>Correct inaccurate data.</li>
+      <li>Request deletion of your data, subject to legal retention requirements for active or
+        recently closed bookings.</li>
+      <li>Withdraw consent where processing is based on consent.</li>
+    </ul>
+    <p>
+      To exercise any of these rights, write to{" "}
+      <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>. We aim to respond within one
+      business day.
+    </p>
+
+    <h3>6. Children&apos;s privacy</h3>
+    <p>
+      Cook Mitra is not intended for children under 18. We do not knowingly collect personal
+      data from children. If we learn that we have collected such data, we will delete it as
+      soon as possible.
+    </p>
+
+    <h3>7. Changes to this policy</h3>
+    <p>
+      We may update this Privacy Policy from time to time. The latest version will always be
+      published on this page with an updated &quot;Last updated&quot; date. Material changes will
+      be notified through the app or by email where required.
+    </p>
+
+    <h3>8. Contact</h3>
+    <p>
+      Privacy questions or requests:{" "}
+      <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> ·{" "}
+      <a href="tel:+919322321831">{SUPPORT_PHONE}</a>.
     </p>
   </LegalShell>
 );
@@ -123,35 +194,90 @@ export const RefundPolicy = () => (
     title="Cancellation & Refund Policy"
     intro="When you can cancel and how refunds reach you."
   >
-    <h3>1. Free cancellation window</h3>
+    <h3>1. Free cancellation before acceptance</h3>
     <ul>
-      <li>Requests cancelled before the cook accepts are free and release the slot instantly — nothing is charged.</li>
-      <li>Requests the cook declines, or that expire unanswered, are never charged.</li>
+      <li>
+        You can cancel a request at any time <strong>before the cook accepts</strong> — there is
+        no charge and the slot is released immediately.
+      </li>
+      <li>
+        If the cook declines your request, or if the request expires unanswered, you are never
+        charged.
+      </li>
     </ul>
+
     <h3>2. Cancelling a paid booking</h3>
+    <p>
+      Once a booking is accepted and paid, you can still cancel — but refunds follow the rules
+      below. You can cancel from <strong>My Bookings</strong> or from the booking page.
+    </p>
     <ul>
-      <li>Cancel anytime before the session starts from My Bookings or the booking page.</li>
-      <li>Paid bookings are refunded automatically to the original payment method (UPI/card/net-banking/wallet).</li>
-      <li>Refunds reach your account within 5–7 business days, per bank timelines.</li>
-      <li>If the automatic refund fails, our team settles it manually and notifies you — write to us with your payment ID.</li>
+      <li>
+        Cancel <strong>before the session start time</strong> and you are eligible for a full
+        refund of the amount paid.
+      </li>
+      <li>
+        Paid bookings are refunded to the <strong>original payment method</strong> (UPI, card,
+        net-banking, or wallet).
+      </li>
+      <li>
+        Refunds typically reach your account within <strong>5–7 business days</strong>, depending
+        on your bank or payment provider.
+      </li>
+      <li>
+        If an automatic refund fails, our team will settle it manually and notify you. Please
+        contact us with your booking ID and Razorpay payment ID.
+      </li>
     </ul>
+
     <h3>3. Non-refundable cases</h3>
     <ul>
-      <li>Completed sessions are not refundable — rate your experience instead.</li>
-      <li>Test-mode checkouts move no real money, so there is nothing to refund.</li>
+      <li>
+        <strong>Completed sessions</strong> are not refundable. If a session has already taken
+        place, please rate your experience instead.
+      </li>
+      <li>
+        <strong>Test-mode checkouts</strong> move no real money, so there is nothing to refund.
+      </li>
+      <li>
+        Sessions cancelled <strong>after they have started</strong> are not eligible for a refund.
+      </li>
+      <li>
+        Refunds may be withheld in cases of <strong>misuse, fraud, or abuse</strong> of the
+        platform, subject to our Terms &amp; Conditions.
+      </li>
     </ul>
-    <h3>4. Payment-window expiry</h3>
+
+    <h3>4. Partial sessions and force majeure</h3>
     <p>
-      If the 5-minute payment window lapses, the slot is released and no money is
-      charged. If money was captured but the booking could not be confirmed (for
-      example, you closed the browser mid-payment), contact us with the Razorpay
-      payment ID and we will confirm or refund it.
+      If a session is interrupted or partially completed due to circumstances beyond our control
+      (for example, severe weather, a public emergency, or illness that prevents the cook from
+      attending), we will work with you to find a fair resolution — which may include a partial
+      refund, rescheduling, or a replacement cook where possible.
     </p>
-    <h3>5. Support</h3>
+
+    <h3>5. Payment-window expiry</h3>
+    <p>
+      After a cook accepts your request, you have <strong>5 minutes</strong> to complete
+      payment. If that window lapses, the slot is released and no money is charged. If money was
+      captured but the booking was not confirmed (for example, you closed the browser mid-payment),
+      contact us with your Razorpay payment ID and we will confirm the status and refund you if
+      needed.
+    </p>
+
+    <h3>6. How to request a refund</h3>
+    <p>
+      For any refund or cancellation issue, contact us with:
+    </p>
+    <ul>
+      <li>Your <strong>booking ID</strong> (from your booking confirmation or receipt).</li>
+      <li>Your <strong>Razorpay payment ID</strong> (from the payment receipt).</li>
+      <li>A short description of the issue.</li>
+    </ul>
     <p>
       Refund help: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> ·{" "}
-      <a href="tel:+917231925496">{SUPPORT_PHONE}</a>. Please include your booking ID
-      and Razorpay payment ID.
+      <a href="tel:+919322321831">{SUPPORT_PHONE}</a>. Please include your booking ID and
+      Razorpay payment ID so we can assist you quickly.
     </p>
   </LegalShell>
 );
@@ -169,16 +295,16 @@ export const ContactUs = () => (
         Email: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a>
       </li>
       <li>
-        Phone / WhatsApp: <a href="tel:+917231925496">{SUPPORT_PHONE}</a>
+        Phone / WhatsApp: <a href="tel:+919322321831">{SUPPORT_PHONE}</a>
       </li>
       <li>Area: Pune & Mumbai, India</li>
       <li>
         Instagram:{" "}
-        <a href="https://instagram.com/contactuscookmitra" target="_blank" rel="noreferrer">
-          @contactuscookmitra
+        <a href="https://instagram.com/cookmitra_india" target="_blank" rel="noreferrer">
+          @cookmitra_india
         </a>
       </li>
-      <li>Hours: 9:00 AM – 9:00 PM IST, all days</li>
+      <li>Hours: 10:00 AM – 6:00 PM IST, all days</li>
     </ul>
     <h3>What to include</h3>
     <p>

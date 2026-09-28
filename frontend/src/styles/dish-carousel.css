@@ -128,7 +128,7 @@
 .dish-carousel-dot.active { width: 26px; background: var(--primary); }
 
 @media (max-width: 640px) {
-  .dish-carousel { padding: 0.1rem 0 0; }
+  .dish-carousel { width: 90%; padding: 0.1rem 0 0; }
   .dish-carousel-dots { padding-left: 1rem; padding-right: 1rem; }
   .dish-frame { border-radius: 16px; aspect-ratio: 16 / 6; max-height: 200px; }
   .dish-stage-arrow { width: 34px; height: 34px; }

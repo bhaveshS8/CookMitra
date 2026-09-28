@@ -38,7 +38,8 @@ const formFromCoupon = (coupon) => ({
   maxDiscount: coupon.maxDiscount != null ? String(coupon.maxDiscount) : "",
   minOrder: coupon.minOrder != null ? String(coupon.minOrder) : "0",
   usageLimit: coupon.usageLimit != null ? String(coupon.usageLimit) : "",
-  perUserLimit: coupon.perUserLimit != null ? String(coupon.perUserLimit) : "1",
+  // null = unlimited: keep blank so editing never tightens it to 1/user.
+  perUserLimit: coupon.perUserLimit != null ? String(coupon.perUserLimit) : "",
   firstBookingOnly: coupon.firstBookingOnly === true,
   applicableServices: (coupon.applicableServices || []).join(", "),
   validFrom: toDateInputValue(coupon.validFrom),
@@ -174,7 +175,9 @@ const CouponModal = ({ open, onClose, onSaved, coupon }) => {
               onChange={handleChange}
               placeholder="e.g. WELCOME50"
               maxLength={24}
+              minLength={3}
               pattern="[A-Za-z0-9]+"
+              title="3–24 letters and numbers, no spaces"
               required
               style={{ textTransform: "uppercase" }}
             />

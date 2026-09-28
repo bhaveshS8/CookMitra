@@ -4,23 +4,46 @@ import API from "../api/axios";
 const TOKEN_KEY = "token";
 const USER_KEY = "user";
 
+// Backend stores spec-UPPERCASE roles (CUSTOMER/COOK/ADMIN, §17) while the
+// whole frontend compares lowercase ("customer"/"cook"/"admin"). Normalize
+// once at the auth boundary so every screen, guard and redirect keeps working
+// regardless of what case the API (or an old localStorage entry) returns.
+export const normalizeRole = (role) => {
+  if (typeof role !== "string") return role;
+  const lower = role.toLowerCase();
+  return ["customer", "cook", "admin"].includes(lower) ? lower : role;
+};
+
+const normalizeUser = (user) => {
+  if (!user || typeof user !== "object") return user;
+  if (typeof user.role === "string") {
+    const lower = normalizeRole(user.role);
+    if (user.role !== lower) return { ...user, role: lower };
+  }
+  return user;
+};
+
 const loadStored = () => {
   try {
-    const token = localStorage.getItem(TOKEN_KEY);
-    const rawUser = localStorage.getItem(USER_KEY);
+    // Persistent session first, then session-only ("Keep me signed in"
+    // unchecked stores the token in sessionStorage instead).
+    const token = localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
+    const rawUser =
+      localStorage.getItem(USER_KEY) || sessionStorage.getItem(USER_KEY);
     return {
       token: token || null,
-      user: rawUser ? JSON.parse(rawUser) : null,
+      user: rawUser ? normalizeUser(JSON.parse(rawUser)) : null,
     };
   } catch {
     return { token: null, user: null };
   }
 };
 
-const persist = (token, user) => {
+const persist = (token, user, persistent = true) => {
+  const store = persistent ? localStorage : sessionStorage;
   try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+    if (token) store.setItem(TOKEN_KEY, token);
+    if (user) store.setItem(USER_KEY, JSON.stringify(user));
   } catch {
     // storage unavailable — session still works for this visit
   }
@@ -30,6 +53,8 @@ const clearStored = () => {
   try {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(USER_KEY);
   } catch {
     // ignore
   }
@@ -42,19 +67,21 @@ const stored = loadStored();
 // `err.response?.data?.message` unchanged via `.unwrap()`.
 export const loginUser = createAsyncThunk(
   "auth/login",
-  async ({ email, password }) => {
+  async ({ email, password, rememberMe = true }) => {
     const response = await API.post("/auth/login", { email, password });
     const { token, user } = response.data;
-    persist(token, user);
-    return { token, user };
+    const normalized = normalizeUser(user);
+    persist(token, normalized, rememberMe !== false);
+    return { token, user: normalized };
   }
 );
 
 export const registerUser = createAsyncThunk("auth/register", async (data) => {
   const response = await API.post("/auth/register", data);
   const { token, user } = response.data;
-  persist(token, user);
-  return { token, user };
+  const normalized = normalizeUser(user);
+  persist(token, normalized);
+  return { token, user: normalized };
 });
 
 export const googleLoginUser = createAsyncThunk(
@@ -62,8 +89,9 @@ export const googleLoginUser = createAsyncThunk(
   async ({ idToken, role }) => {
     const response = await API.post("/auth/google", { idToken, role });
     const { token, user } = response.data;
-    persist(token, user);
-    return { token, user };
+    const normalized = normalizeUser(user);
+    persist(token, normalized);
+    return { token, user: normalized };
   }
 );
 
@@ -86,9 +114,11 @@ const authSlice = createSlice({
     },
     updateUser(state, action) {
       if (!state.user) return;
-      state.user = { ...state.user, ...action.payload };
+      state.user = normalizeUser({ ...state.user, ...action.payload });
       try {
-        localStorage.setItem(USER_KEY, JSON.stringify(state.user));
+        // Write back to whichever store holds this session.
+        const store = localStorage.getItem(TOKEN_KEY) ? localStorage : sessionStorage;
+        store.setItem(USER_KEY, JSON.stringify(state.user));
       } catch {
         // ignore
       }

@@ -49,8 +49,29 @@ const API = axios.create({
   timeout: 15000,
 });
 
+// Session token lives in localStorage ("Keep me signed in") or
+// sessionStorage (session-only login) — read both, in that order.
+export const getStoredToken = () => {
+  try {
+    return localStorage.getItem("token") || sessionStorage.getItem("token");
+  } catch {
+    return null;
+  }
+};
+
+export const clearStoredSession = () => {
+  try {
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    sessionStorage.removeItem("token");
+    sessionStorage.removeItem("user");
+  } catch {
+    // ignore
+  }
+};
+
 API.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+  const token = getStoredToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -74,8 +95,7 @@ API.interceptors.response.use(
     const isInlinePreview =
       url.includes("/coupons/validate");
     if (error.response?.status === 401 && !isAuthForm && !isInlinePreview) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
+      clearStoredSession();
       if (window.location.pathname !== "/login") {
         window.location.href = "/login";
       }
@@ -90,8 +110,7 @@ API.interceptors.response.use(
       /blocked by an administrator/i.test(blockedMsg) &&
       window.location.pathname !== "/login"
     ) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
+      clearStoredSession();
       window.location.href = "/login";
     }
     return Promise.reject(error);

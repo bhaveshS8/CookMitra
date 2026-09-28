@@ -1,4 +1,5 @@
 const Booking = require("../models/Booking");
+const mongoose = require("mongoose");
 const Notification = require("../models/Notification");
 const CookProfile = require("../models/CookProfile");
 const Coupon = require("../models/Coupon");
@@ -20,24 +21,9 @@ const {
   intervalsOverlap,
   resolveCookAvailability,
 } = require("../utils/slots");
-const { buildBookingWhatsAppUrl, buildCustomerWhatsAppUrl, buildCookJobSheetWhatsAppUrl, buildHoursCompleteWhatsAppUrl, buildReviewWhatsAppUrl, buildTrackingUrl, FRONTEND_BASE_URL } = require("../utils/whatsapp");
+const { buildCustomerWhatsAppUrl, buildCookJobSheetWhatsAppUrl, buildHoursCompleteWhatsAppUrl, buildReviewWhatsAppUrl, FRONTEND_BASE_URL } = require("../utils/whatsapp");
+const { paginationParams, applyPagination, sendList, HARD_CAP } = require("../utils/pagination");
 const { razorpay: razorpayClient, isConfigured: razorpayConfigured } = require("../config/razorpay");
-
-// Cook is considered "reached" within this radius of the venue.
-const ARRIVAL_RADIUS_KM = 0.3;
-
-const haversineKm = (a, b) => {
-  if (a?.lat == null || a?.lng == null || b?.lat == null || b?.lng == null) return null;
-  const R = 6371;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const s1 = Math.sin(dLat / 2);
-  const s2 = Math.sin(dLng / 2);
-  const aa =
-    s1 * s1 +
-    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * s2 * s2;
-  return 2 * R * Math.asin(Math.sqrt(aa));
-};
 
 // OTP for starting a service: 4 digits, first digit non-zero so it always
 // renders as 4 digits (no leading-zero display issues).
@@ -58,6 +44,17 @@ const sessionEndDate = (booking) => {
   const d = new Date(booking.date);
   d.setHours(Number(m[1]), Number(m[2]), 0, 0);
   return d;
+};
+
+// True when a live MongoDB connection exists. Unit tests run disconnected,
+// so DB-dependent safety re-checks (not core logic) skip instead of hanging
+// on buffered operations.
+const dbReady = () => {
+  try {
+    return mongoose.connection && mongoose.connection.readyState === 1;
+  } catch {
+    return false;
+  }
 };
 
 // Strip the service OTP from a booking payload before it reaches the cook:
@@ -87,51 +84,143 @@ const ensureServiceOtp = (booking) => {
   return true;
 };
 
+// Constant-time HMAC comparison (plain !== leaks via timing).
+const signaturesEqual = (a, b) => {
+  const ab = Buffer.from(String(a || ""), "utf8");
+  const bb = Buffer.from(String(b || ""), "utf8");
+  if (ab.length === 0 || ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+};
+
+// Bind a Razorpay payment to the expected fee: the HMAC alone only proves the
+// (orderId, paymentId) pair is genuine — NOT that the order charged this
+// booking's amount. Without this check a cheap order's valid triple could be
+// replayed to "pay" an expensive booking. Enforced only when the gateway is
+// configured (unit tests run unconfigured and keep the HMAC-only path).
+// Returns null when OK/skipped, otherwise an error message.
+const assertRazorpayOrderAmount = async (orderId, expectedPaise) => {
+  if (!razorpayConfigured || !razorpayClient) return null;
+  let order;
+  try {
+    order = await razorpayClient.orders.fetch(orderId);
+  } catch {
+    return "Payment could not be verified with the gateway. Please try again.";
+  }
+  if (Number(order?.amount) !== Math.round(Number(expectedPaise))) {
+    return "Paid amount does not match this booking's fee. Please create a fresh payment.";
+  }
+  return null;
+};
+
+// Notifies the customer that the service completed and prompts a rating.
+// Shared by manual, live-clock auto and legacy auto completions.
+const notifyServiceCompleted = async (booking) => {
+  let cookName = "your cook";
+  try {
+    const cookUser = await User.findById(booking.cook).select("name");
+    if (cookUser?.name) cookName = cookUser.name;
+  } catch {
+    // non-fatal
+  }
+  await Notification.create({
+    user: booking.customer,
+    type: "booking_completed",
+    message: `Service complete! ${cookName} finished your session — please rate your cook.`,
+  });
+};
+
 // Flag cooking-hours completion. The session clock only runs after the cook
 // verifies the service-start OTP (serviceStartedAt → serviceEndsAt); the
 // static schedule is only a fallback for bookings started before this
 // feature. Creates the alarm notification for BOTH customer and cook.
 // Returns true when newly flagged.
+// Auto-complete: a service that ran on the live OTP clock and is still
+// `in_progress` past its end flips to `completed` by itself (with the same
+// rate-prompt as a manual complete). OTP verification proves the cook and
+// customer met, so payment state deliberately does NOT gate this — money
+// stays visible separately as paid/due.
 const markHoursCompleteIfNeeded = async (booking) => {
-  if (booking.hoursCompleted) return false;
-  if (!["accepted", "confirmed", "in_progress"].includes(booking.status)) return false;
-  // Legacy bookings (no OTP flow yet) still complete on the static schedule;
-  // OTP-started bookings complete on the live service clock.
-  if (!booking.serviceStartedAt && booking.serviceOtp) return false;
-  const end = sessionEndDate(booking);
-  if (!end || Date.now() < end.getTime()) return false;
-  booking.hoursCompleted = true;
-  booking.hoursCompletedAt = new Date();
-  await booking.save();
-  await Notification.create({
-    user: booking.customer,
-    type: "cooking_hours_completed",
-    message: "Your cooking hours are complete! Please review your session.",
-  });
-  await Notification.create({
-    user: booking.cook,
-    type: "cooking_hours_completed",
-    message: "Cooking hours complete for this booking! Please wrap up your session.",
-  });
-  return true;
+  let changed = false;
+  if (!booking.hoursCompleted) {
+    if (!["accepted", "confirmed", "in_progress"].includes(booking.status)) return false;
+    // Legacy bookings (no OTP flow yet) still complete on the static schedule;
+    // OTP-started bookings complete on the live service clock.
+    if (!booking.serviceStartedAt && booking.serviceOtp) return false;
+    const end = sessionEndDate(booking);
+    if (!end || Date.now() < end.getTime()) return false;
+    booking.hoursCompleted = true;
+    booking.hoursCompletedAt = new Date();
+    changed = true;
+    await booking.save();
+    await Notification.create({
+      user: booking.customer,
+      type: "cooking_hours_completed",
+      message: "Your cooking hours are complete! Please review your session.",
+    });
+    await Notification.create({
+      user: booking.cook,
+      type: "cooking_hours_completed",
+      message: "Cooking hours complete for this booking! Please wrap up your session.",
+    });
+  }
+  if (booking.status === "in_progress" && booking.serviceStartedAt) {
+    const end = sessionEndDate(booking);
+    if (end && Date.now() >= end.getTime()) {
+      booking.status = "completed";
+      booking.statusHistory.push({
+        status: "completed",
+        note: "Service hours completed — auto-completed",
+      });
+      changed = true;
+      await booking.save();
+      await notifyServiceCompleted(booking);
+    }
+  }
+  // Backfill for old bookings (no OTP clock ever started): services with
+  // evidence they happened (paid, or cook marked arrived) that are stuck in
+  // a live status long after their scheduled end are closed automatically.
+  // 24h grace past the scheduled end so a service running today without OTP
+  // is never cut off mid-day. Ghost bookings (no pay, no arrival) are left
+  // for a human to cancel.
+  if (
+    !booking.serviceStartedAt &&
+    ["accepted", "confirmed", "in_progress"].includes(booking.status) &&
+    (booking.payment?.status === "paid" || booking.cookArrived)
+  ) {
+    const end = sessionEndDate(booking);
+    if (end && Date.now() >= end.getTime() + 24 * 60 * 60 * 1000) {
+      booking.hoursCompleted = true;
+      booking.hoursCompletedAt = booking.hoursCompletedAt || new Date();
+      booking.status = "completed";
+      booking.statusHistory.push({
+        status: "completed",
+        note: "Auto-completed: legacy booking past its scheduled end",
+      });
+      changed = true;
+      await booking.save();
+      await notifyServiceCompleted(booking);
+    }
+  }
+  return changed;
 };
 
-// Shared helper: mark booking arrived once, notify the customer.
-const markArrivedIfNeeded = async (booking, source) => {
+// Shared helper: mark booking arrived once (manual tap by the cook),
+// notify the customer.
+const markArrivedIfNeeded = async (booking) => {
   if (booking.cookArrived) return false;
   booking.cookArrived = true;
   booking.cookArrivedAt = new Date();
   if (["accepted", "confirmed"].includes(booking.status)) {
     booking.status = "in_progress";
-    booking.statusHistory.push({ status: "in_progress", note: `Cook arrived (${source})` });
+    booking.statusHistory.push({ status: "in_progress", note: "Cook arrived (manual)" });
   } else {
-    booking.statusHistory.push({ status: booking.status, note: `Cook arrived (${source})` });
+    booking.statusHistory.push({ status: booking.status, note: "Cook arrived (manual)" });
   }
   await booking.save();
   await Notification.create({
     user: booking.customer,
     type: "cook_arrived",
-    message: `Your cook has reached your location (${source === "auto" ? "GPS detected" : "confirmed by cook"})!`,
+    message: "Your cook has reached your location (confirmed by cook)!",
   });
   return true;
 };
@@ -139,11 +228,10 @@ const markArrivedIfNeeded = async (booking, source) => {
 // Fields a customer may set when creating a booking. Everything else
 // (customer, status, payment, amount, cookArrived, hoursCompleted, dates)
 // is derived server-side. Without this whitelist a customer could POST
-// `{ customer: <someoneElseId>, cookArrived: true, hoursCompleted: true,
-// cookLocation: {...} }` — the old `Booking.create({ customer: req.user.id,
-// ...req.body, ... })` spread put the body AFTER customer, so a body
-// `customer` field silently OVERRODE the authenticated user and injected
-// lifecycle flags.
+// `{ customer: <someoneElseId>, cookArrived: true, hoursCompleted: true }` —
+// the old `Booking.create({ customer: req.user.id, ...req.body, ... })`
+// spread put the body AFTER customer, so a body `customer` field silently
+// OVERRODE the authenticated user and injected lifecycle flags.
 const BOOKING_CUSTOMER_FIELDS = [
   "serviceType",
   "selectedItems",
@@ -214,7 +302,7 @@ exports.createBooking = async (req, res, next) => {
         .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
         .update(`${razorpayOrderId}|${razorpayPaymentId}`)
         .digest("hex");
-      if (expectedSignature !== razorpaySignature) {
+      if (!signaturesEqual(expectedSignature, razorpaySignature)) {
         return res.status(402).json({ message: "Payment verification failed. Please try paying again." });
       }
     }
@@ -265,12 +353,51 @@ exports.createBooking = async (req, res, next) => {
       if (discount <= 0) {
         return res.status(400).json({ message: "This coupon gives no discount on this order." });
       }
-      couponCode = coupon.code;
-      coupon.usedCount = Number(coupon.usedCount || 0) + 1;
-      coupon.usedBy.push(req.user.id);
-      await coupon.save();
+      // Atomic redemption: the eligibility check above is a read, so two
+      // concurrent requests could both pass it (double-spend of a single-use
+      // code). Re-enforce the count limits INSIDE a conditional update — only
+      // one racer's filter matches, the loser gets null and a 409.
+      const userIdStr = String(req.user.id);
+      const redeemed = await Coupon.findOneAndUpdate(
+        {
+          _id: coupon._id,
+          $expr: {
+            $and: [
+              { $ne: ["$active", false] },
+              ...(coupon.usageLimit != null
+                ? [{ $lt: [{ $ifNull: ["$usedCount", 0] }, Number(coupon.usageLimit)] }]
+                : []),
+              ...(coupon.perUserLimit != null
+                ? [
+                    {
+                      $lt: [
+                        {
+                          $size: {
+                            $filter: {
+                              input: { $ifNull: ["$usedBy", []] },
+                              cond: { $eq: [{ $toString: "$$this" }, userIdStr] },
+                            },
+                          },
+                        },
+                        Number(coupon.perUserLimit),
+                      ],
+                    },
+                  ]
+                : []),
+            ],
+          },
+        },
+        { $inc: { usedCount: 1 }, $push: { usedBy: req.user.id } },
+        { new: true }
+      );
+      if (!redeemed) {
+        return res.status(409).json({
+          message: "This coupon was just fully redeemed. Please try another code.",
+        });
+      }
+      couponCode = redeemed.code;
     }
-    // ~10% platform commission; the cook earns the rest of the final amount.
+    // 25% platform commission; the cook earns 75% of the final amount.
     const { finalAmount, commission, cookPayout } = splitPayout(slabPrice - discount);
     const expectedAmount = finalAmount;
     if (hasPayment) {
@@ -279,6 +406,12 @@ exports.createBooking = async (req, res, next) => {
         return res.status(400).json({
           message: `Paid amount does not match the payable fee of ₹${expectedAmount}. Please create a fresh payment.`,
         });
+      }
+      // The HMAC above proves the triple is genuine; this proves the order
+      // actually charged THIS booking's fee (blocks cheap-order replay).
+      const orderErr = await assertRazorpayOrderAmount(razorpayOrderId, expectedAmount * 100);
+      if (orderErr) {
+        return res.status(402).json({ message: orderErr });
       }
     }
 
@@ -341,6 +474,12 @@ exports.createBooking = async (req, res, next) => {
         return rs != null && re != null && intervalsOverlap(raceStart, raceEnd, rs, re);
       });
       if (rival && String(rival._id) < String(booking._id)) {
+        // Losing the race must not burn a redeemed coupon with no booking.
+        try {
+          await releaseCouponUsage(booking);
+        } catch {
+          // non-fatal: the 409 below is what matters
+        }
         await Booking.findByIdAndDelete(booking._id);
         return res.status(409).json({
           message: "This slot was just claimed by another booking request. Please pick a different start time.",
@@ -352,47 +491,24 @@ exports.createBooking = async (req, res, next) => {
 
     // Build WhatsApp URLs for cook notification
 
-    await Notification.create({
-      user: cook,
-      type: "booking_request",
-      message: `New booking request from ${req.user.name || "a customer"}`,
-    });
-
-    // Build WhatsApp deep links:
-    // - `whatsappUrl` targets the COOK's number (order details + venue pin).
-    //   The customer app opens this right after sending the request.
-    // - `customerWhatsappUrl` targets the USER's own WhatsApp (pending details;
-    //   the CONFIRMED booked message with cook name/phone/tracking is built on accept).
-    let whatsappUrl = null;
-    let customerWhatsappUrl = null;
-    let cookPhone = null;
-    const trackingUrl = buildTrackingUrl(booking._id);
+    // Non-fatal: the booking already exists — a notification outage must not
+    // 500 the request (the client would retry and double-book).
     try {
-      const cookUser = await User.findById(cook).select("phone name");
-      const customer = await User.findById(req.user.id).select("name phone");
-      cookPhone = cookUser?.phone || null;
-      whatsappUrl = buildBookingWhatsAppUrl({
-        cookPhone,
-        customerName: customer?.name || req.user.name,
-        customerPhone: customer?.phone,
-        booking,
-      });
-      const cookLive = cookProfile?.liveLocation?.lat != null ? cookProfile.liveLocation : null;
-      customerWhatsappUrl = buildCustomerWhatsAppUrl({
-        customerPhone: customer?.phone,
-        cookName: cookUser?.name,
-        cookPhone,
-        cookLocation: booking.cookLocation?.lat != null ? booking.cookLocation : cookLive,
-        booking,
-        trackingUrl,
+      await Notification.create({
+        user: cook,
+        type: "booking_request",
+        message: `New booking request from ${req.user.name || "a customer"}`,
       });
     } catch {
-      whatsappUrl = null;
-      customerWhatsappUrl = null;
+      // non-fatal: booking creation already succeeded
     }
 
+    // Contact privacy: the cook's phone number is shared only AFTER they
+    // accept (see acceptBooking). A fresh "requested" booking therefore
+    // exposes no contact details — coordination runs through in-app
+    // notifications. Keys stay present (null) so client contracts don't break.
     const bookingObj = booking.toObject ? booking.toObject() : booking;
-    res.status(201).json({ ...bookingObj, whatsappUrl, customerWhatsappUrl, cookPhone, trackingUrl });
+    res.status(201).json({ ...bookingObj, whatsappUrl: null, customerWhatsappUrl: null, cookPhone: null });
   } catch (error) {
     next(error);
   }
@@ -404,6 +520,28 @@ exports.createBooking = async (req, res, next) => {
 // otherwise the booking auto-cancels and the slot is freed.
 const REQUEST_WINDOW_MS = 5 * 60 * 1000;
 const PAYMENT_WINDOW_MS = 5 * 60 * 1000;
+
+// Release a previously consumed coupon (reject/cancel/payment-expiry paths).
+// Best-effort: decrements usedCount and removes the customer from usedBy.
+// Must never throw — booking state transitions must succeed even if the
+// coupon record is missing.
+const releaseCouponUsage = async (booking) => {
+  try {
+    if (!booking?.couponCode || !booking?.customer) return;
+    const Coupon = require("../models/Coupon");
+    await Coupon.updateOne(
+      { code: String(booking.couponCode).toUpperCase() },
+      { $inc: { usedCount: -1 }, $pull: { usedBy: booking.customer } }
+    );
+    // Guard against negative counters from double-release.
+    await Coupon.updateOne(
+      { code: String(booking.couponCode).toUpperCase(), usedCount: { $lt: 0 } },
+      { $set: { usedCount: 0 } }
+    );
+  } catch {
+    // non-fatal
+  }
+};
 
 // Lazy expiry pass, run whenever a booking is read. Returns the booking when
 // a transition happened so callers can re-read fresh fields.
@@ -424,6 +562,7 @@ const expireBookingIfNeeded = async (booking) => {
         note: "Cook did not respond within 5 minutes",
       });
       await booking.save();
+      await releaseCouponUsage(booking);
       return booking;
     }
     if (
@@ -438,6 +577,7 @@ const expireBookingIfNeeded = async (booking) => {
         note: "Payment not completed within 5 minutes — slot released",
       });
       await booking.save();
+      await releaseCouponUsage(booking);
       return booking;
     }
   } catch {
@@ -447,20 +587,12 @@ const expireBookingIfNeeded = async (booking) => {
 };
 
 exports.getMyBookings = async (req, res, next) => {  try {
-    const bookings = await Booking.find({ customer: req.user.id })
-      .populate("cook", "name email phone")
-      .sort({ date: -1 });
-    // Attach each cook's current live location (from CookProfile) so the
-    // frontend can share "order details + cook's live location" to the
-    // user's own WhatsApp even before a per-booking snapshot exists.
-    const cookIds = [...new Set(bookings.map((b) => b.cook?._id?.toString()).filter(Boolean))];
-    let liveByUserId = {};
-    if (cookIds.length) {
-      const profiles = await CookProfile.find({ user: { $in: cookIds } }).select("user liveLocation");
-      liveByUserId = Object.fromEntries(
-        profiles.map((p) => [p.user.toString(), p.liveLocation || null])
-      );
-    }
+    const filter = { customer: req.user.id };
+    const pg = paginationParams(req);
+    const bookings = await applyPagination(
+      Booking.find(filter).populate("cook", "name email phone").sort({ date: -1 }).limit(HARD_CAP),
+      pg
+    );
     // Submitted reviews keyed by booking id (one review per booking max).
     let reviewByBookingId = {};
     try {
@@ -476,13 +608,8 @@ exports.getMyBookings = async (req, res, next) => {  try {
     }
     const out = bookings.map((b) => {
       const obj = b.toObject ? b.toObject() : b;
-      const live = liveByUserId[b.cook?._id?.toString()] || null;
       return {
         ...obj,
-        cookLiveLocation: live?.lat != null ? live : null,
-        // Effective cook location: per-booking snapshot wins, else live.
-        effectiveCookLocation:
-          obj.cookLocation?.lat != null ? obj.cookLocation : live?.lat != null ? live : null,
         // Submitted review for completed services (one per booking).
         review: reviewByBookingId[b._id.toString()] || null,
       };
@@ -546,9 +673,15 @@ exports.getMyBookings = async (req, res, next) => {  try {
         o.reviewUrl = null;
         o.reviewWhatsappUrl = null;
       }
+      // Contact privacy: the customer never needs the cook's email, and the
+      // cook's phone is shared only after they accept the request.
+      if (o.cook && typeof o.cook === "object" && !Array.isArray(o.cook)) {
+        delete o.cook.email;
+        if (o.status === "requested") delete o.cook.phone;
+      }
       return o;
     });
-    res.json(finalOut);
+    return sendList(res, finalOut, pg, () => Booking.countDocuments(filter));
   } catch (error) {
     next(error);
   }
@@ -556,9 +689,12 @@ exports.getMyBookings = async (req, res, next) => {  try {
 
 exports.getCookBookings = async (req, res, next) => {
   try {
-    const bookings = await Booking.find({ cook: req.user.id })
-      .populate("customer", "name email phone")
-      .sort({ date: -1 });
+    const filter = { cook: req.user.id };
+    const pg = paginationParams(req);
+    const bookings = await applyPagination(
+      Booking.find(filter).populate("customer", "name email phone").sort({ date: -1 }).limit(HARD_CAP),
+      pg
+    );
     for (const b of bookings) {
       try {
         await markHoursCompleteIfNeeded(b);
@@ -601,20 +737,29 @@ exports.getCookBookings = async (req, res, next) => {
     } catch {
       cookSelfPhone = null;
     }
-    const finalCookOut = out.map((o) => ({
-      ...o,
-      review: cookReviewByBookingId[o._id.toString()] || null,
-      hoursCompleteWhatsappUrl: o.hoursCompleted
-        ? buildHoursCompleteWhatsAppUrl({
-            toPhone: cookSelfPhone,
-            booking: { ...o, hoursCompletedAt: o.hoursCompletedAt },
-            cookName: null,
-            cookPhone: cookSelfPhone,
-            customerName: o.customer?.name,
-          })
-        : null,
-    }));
-    res.json(finalCookOut);
+    const finalCookOut = out.map((o) => {
+      // Contact privacy (mirror of the customer side): the cook never needs
+      // the customer's email, and the customer's phone is shared only after
+      // the cook accepts the request.
+      if (o.customer && typeof o.customer === "object" && !Array.isArray(o.customer)) {
+        delete o.customer.email;
+        if (o.status === "requested") delete o.customer.phone;
+      }
+      return {
+        ...o,
+        review: cookReviewByBookingId[o._id.toString()] || null,
+        hoursCompleteWhatsappUrl: o.hoursCompleted
+          ? buildHoursCompleteWhatsAppUrl({
+              toPhone: cookSelfPhone,
+              booking: { ...o, hoursCompletedAt: o.hoursCompletedAt },
+              cookName: null,
+              cookPhone: cookSelfPhone,
+              customerName: o.customer?.name,
+            })
+          : null,
+      };
+    });
+    return sendList(res, finalCookOut, pg, () => Booking.countDocuments(filter));
   } catch (error) {
     next(error);
   }
@@ -624,7 +769,7 @@ exports.acceptBooking = async (req, res, next) => {
   try {
     // Cooks act only on their own bookings; admins may moderate any booking.
     const filter = { _id: req.params.id };
-    if (req.user.role !== "admin") filter.cook = req.user.id;
+    if (String(req.user.role).toUpperCase() !== "ADMIN") filter.cook = req.user.id;
     const booking = await Booking.findOne(filter);
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
@@ -655,7 +800,7 @@ exports.acceptBooking = async (req, res, next) => {
     }
 
     // First accept wins: refuse if the slot has been booked since the request.
-    const cookIdForCheck = req.user.role === "admin" ? booking.cook : req.user.id;
+    const cookIdForCheck = String(req.user.role).toUpperCase() === "ADMIN" ? booking.cook : req.user.id;
     try {
       const { start: dayStart, end: dayEnd } = dayBounds(booking.date);
       const rivals = await Booking.find({
@@ -685,37 +830,74 @@ exports.acceptBooking = async (req, res, next) => {
     // that an admin pressed the button on the cook's behalf.
     booking.statusHistory.push({
       status: "accepted",
-      ...(req.user.role === "admin" ? { note: "Accepted by admin on behalf of the cook" } : {}),
+      ...(String(req.user.role).toUpperCase() === "ADMIN" ? { note: "Accepted by admin on behalf of the cook" } : {}),
     });
     // Customer now has 5 minutes to pay before the slot is released.
     booking.paymentExpiresAt = new Date(Date.now() + PAYMENT_WINDOW_MS);
-    // Snapshot the cook's current live location onto the booking so the
-    // customer receives the cook's location on their WhatsApp.
-    const cookId = req.user.role === "admin" ? booking.cook : req.user.id;
-    try {
-      const profile = await CookProfile.findOne({ user: cookId }).select("liveLocation");
-      if (profile?.liveLocation?.lat != null && booking.cookLocation?.lat == null) {
-        booking.cookLocation = {
-          lat: profile.liveLocation.lat,
-          lng: profile.liveLocation.lng,
-          updatedAt: new Date(),
-        };
-      }
-    } catch {
-      // non-fatal: accept succeeds even without a location snapshot
-    }
+    const cookId = String(req.user.role).toUpperCase() === "ADMIN" ? booking.cook : req.user.id;
     await booking.save();
 
-    await Notification.create({
-      user: booking.customer,
-      type: "booking_accepted",
-      message:
-        "Your booking request has been accepted! Complete payment within 5 minutes to confirm your slot.",
-    });
+    // Post-accept race verification (TOCTOU close): two overlapping
+    // "requested" holds can both pass the pre-check above at the same moment
+    // and both flip to "accepted". Re-read rivals AFTER persisting — if an
+    // overlapping rival is already accepted/confirmed/in_progress, this
+    // accept loses deterministically and rolls back to "requested" with a
+    // 409. Every concurrent accepter runs the same rule after its own flip,
+    // so no interleaving can leave two overlapping accepted bookings behind
+    // (worst case both roll back and both customers retry — safe).
+    let acceptClash = false;
+    try {
+      const { start: vStart, end: vEnd } = dayBounds(booking.date);
+      const postRivals = await Booking.find({
+        cook: booking.cook,
+        _id: { $ne: booking._id },
+        date: { $gte: vStart, $lte: vEnd },
+        status: { $in: ["accepted", "confirmed", "in_progress"] },
+      }).select("startTime endTime status");
+      const myStart = timeToMinutes(booking.startTime);
+      const myEnd = timeToMinutes(booking.endTime);
+      acceptClash = (postRivals || []).some((r) => {
+        const rs = timeToMinutes(r.startTime);
+        const re = timeToMinutes(r.endTime);
+        return rs != null && re != null && intervalsOverlap(myStart, myEnd, rs, re);
+      });
+    } catch {
+      acceptClash = false; // verification unavailable — keep today's behavior
+    }
+    if (acceptClash) {
+      booking.status = "requested";
+      booking.paymentExpiresAt = null;
+      // Renew the hold from now — rolling back onto the old (possibly
+      // already-expired) requestExpiresAt would revive a dead hold.
+      booking.requestExpiresAt = new Date(Date.now() + REQUEST_WINDOW_MS);
+      booking.statusHistory.push({
+        status: "requested",
+        note: "Accept rolled back — the slot was just confirmed for another request",
+      });
+      try {
+        await booking.save();
+      } catch {
+        // non-fatal: the 409 below is what matters
+      }
+      return res.status(409).json({
+        message: "This slot was just confirmed for another request. Please decline this one.",
+      });
+    }
+
+    try {
+      await Notification.create({
+        user: booking.customer,
+        type: "booking_accepted",
+        message:
+          "Your booking request has been accepted! Complete payment within 5 minutes to confirm your slot.",
+      });
+    } catch {
+      // non-fatal: the accept itself already succeeded
+    }
 
     // When an admin accepted on the cook's behalf, alert the cook — their
     // calendar just gained a booked slot and they would otherwise never know.
-    if (req.user.role === "admin") {
+    if (String(req.user.role).toUpperCase() === "ADMIN") {
       try {
         const customerUser = await User.findById(booking.customer).select("name");
         const dateLabel = new Date(booking.date).toLocaleDateString("en-IN", {
@@ -737,37 +919,26 @@ exports.acceptBooking = async (req, res, next) => {
     }
 
     // Include a customer-targeted "BOOKED" WhatsApp confirmation (cook name +
-    // cook phone + live tracking link + cook live location) so the cook app
-    // can forward it to the user in one tap, and the customer sees it under
-    // My Bookings.
+    // cook phone) so the cook app can forward it to the user in one tap, and
+    // the customer sees it under My Bookings.
     let customerWhatsappUrl = null;
-    let trackingUrl = buildTrackingUrl(booking._id);
     let cookPhoneForCustomer = null;
     try {
       const cookUser = await User.findById(cookId).select("name phone");
       const customer = await User.findById(booking.customer).select("phone");
-      const profile = await CookProfile.findOne({ user: cookId }).select("liveLocation");
-      const cookLoc =
-        booking.cookLocation?.lat != null
-          ? booking.cookLocation
-          : profile?.liveLocation?.lat != null
-            ? profile.liveLocation
-            : null;
       cookPhoneForCustomer = cookUser?.phone || null;
       customerWhatsappUrl = buildCustomerWhatsAppUrl({
         customerPhone: customer?.phone,
         cookName: cookUser?.name,
         cookPhone: cookUser?.phone,
-        cookLocation: cookLoc,
         booking,
-        trackingUrl,
       });
     } catch {
       customerWhatsappUrl = null;
     }
 
-    const obj = booking.toObject ? booking.toObject() : booking;
-    res.json({ ...obj, customerWhatsappUrl, trackingUrl, cookPhone: cookPhoneForCustomer });
+    const obj = stripServiceOtp(booking);
+    res.json({ ...obj, customerWhatsappUrl, cookPhone: cookPhoneForCustomer });
   } catch (error) {
     next(error);
   }
@@ -778,7 +949,7 @@ exports.rejectBooking = async (req, res, next) => {
     // Cooks act only on their own bookings; admins may moderate any booking.
     // Only pending "requested" bookings can be declined (ignore/cancel path).
     const filter = { _id: req.params.id };
-    if (req.user.role !== "admin") filter.cook = req.user.id;
+    if (String(req.user.role).toUpperCase() !== "ADMIN") filter.cook = req.user.id;
     const booking = await Booking.findOne(filter);
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
@@ -790,22 +961,27 @@ exports.rejectBooking = async (req, res, next) => {
     booking.status = "rejected";
     booking.statusHistory.push({
       status: "rejected",
-      ...(req.user.role === "admin" ? { note: "Declined by admin on behalf of the cook" } : {}),
+      ...(String(req.user.role).toUpperCase() === "ADMIN" ? { note: "Declined by admin on behalf of the cook" } : {}),
     });
     await booking.save();
+    await releaseCouponUsage(booking);
 
     // No availability flip-back needed: bookings only carve out part of an
     // open window, which stays bookable for its remaining free time.
 
-    await Notification.create({
-      user: booking.customer,
-      type: "booking_rejected",
-      message: "Your booking request has been rejected.",
-    });
+    try {
+      await Notification.create({
+        user: booking.customer,
+        type: "booking_rejected",
+        message: "Your booking request has been rejected.",
+      });
+    } catch {
+      // non-fatal: the reject itself already succeeded
+    }
 
     // Tell the cook when an admin declined on their behalf so they know the
     // request was handled and the slot stayed open.
-    if (req.user.role === "admin") {
+    if (String(req.user.role).toUpperCase() === "ADMIN") {
       try {
         await Notification.create({
           user: booking.cook,
@@ -817,7 +993,7 @@ exports.rejectBooking = async (req, res, next) => {
       }
     }
 
-    res.json(booking);
+    res.json(stripServiceOtp(booking));
   } catch (error) {
     next(error);
   }
@@ -826,13 +1002,16 @@ exports.rejectBooking = async (req, res, next) => {
 exports.completeBooking = async (req, res, next) => {
   try {
     const filter = { _id: req.params.id };
-    if (req.user.role !== "admin") filter.cook = req.user.id;
+    if (String(req.user.role).toUpperCase() !== "ADMIN") filter.cook = req.user.id;
     const booking = await Booking.findOne(filter);
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
     }
-    if (!["accepted", "confirmed", "in_progress"].includes(booking.status)) {
-      return res.status(400).json({ message: "Only active (accepted) bookings can be marked completed" });
+    // Completion requires a paid, live booking — an unpaid `accepted`
+    // request must never jump straight to `completed` without payment,
+    // service start, or hours running.
+    if (!["confirmed", "in_progress"].includes(booking.status)) {
+      return res.status(400).json({ message: "Only paid, live (confirmed) bookings can be marked completed" });
     }
 
     booking.status = "completed";
@@ -847,11 +1026,15 @@ exports.completeBooking = async (req, res, next) => {
     } catch {
       // non-fatal
     }
-    await Notification.create({
-      user: booking.customer,
-      type: "booking_completed",
-      message: `Service complete! ${cookNameForMsg} finished your session — please rate your cook.`,
-    });
+    try {
+      await Notification.create({
+        user: booking.customer,
+        type: "booking_completed",
+        message: `Service complete! ${cookNameForMsg} finished your session — please rate your cook.`,
+      });
+    } catch {
+      // non-fatal: completion already succeeded
+    }
 
     // WhatsApp rating reminder to the customer's own number, with a link to
     // the booking page where the review form lives.
@@ -869,7 +1052,7 @@ exports.completeBooking = async (req, res, next) => {
       reviewWhatsappUrl = null;
     }
 
-    const completedObj = booking.toObject ? booking.toObject() : booking;
+    const completedObj = stripServiceOtp(booking);
     res.json({ ...completedObj, reviewWhatsappUrl, reviewUrl });
   } catch (error) {
     next(error);
@@ -906,6 +1089,7 @@ exports.deleteBooking = async (req, res, next) => {
     }
 
     await Booking.findByIdAndDelete(booking._id);
+    await releaseCouponUsage(booking);
     res.json({ message: "Booking deleted", id: req.params.id });
   } catch (error) {
     next(error);
@@ -921,12 +1105,20 @@ exports.cancelBooking = async (req, res, next) => {
 
     const isCustomer = booking.customer.toString() === req.user.id;
     const isCook = booking.cook.toString() === req.user.id;
-    if (!isCustomer && !isCook) {
+    const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
+    if (!isCustomer && !isCook && !isAdmin) {
       return res.status(403).json({ message: "Not authorized" });
     }
 
     if (["completed", "cancelled", "rejected", "expired"].includes(booking.status)) {
       return res.status(400).json({ message: "Booking cannot be cancelled" });
+    }
+
+    // Once the service clock is running the session is underway — it can't
+    // be cancelled for a full refund. Partial/no-show settlement goes
+    // through support instead of the self-serve path.
+    if (booking.serviceStartedAt) {
+      return res.status(400).json({ message: "Service has already started — this booking can no longer be cancelled. Please contact support." });
     }
 
     booking.status = "cancelled";
@@ -974,30 +1166,42 @@ exports.cancelBooking = async (req, res, next) => {
       // non-fatal: cancellation itself must always succeed
     }
     await booking.save();
+    // The held coupon (if any) is freed — a cancelled booking must not burn
+    // a single-use code like WELCOME50.
+    await releaseCouponUsage(booking);
 
     // No availability flip-back needed (see rejectBooking).
 
-    const notifyUser = isCustomer ? booking.cook : booking.customer;
-    await Notification.create({
-      user: notifyUser,
-      type: "booking_cancelled",
-      message: "A booking has been cancelled.",
-    });
-    // The payer always hears about the refund outcome, even when the other
-    // party cancelled.
-    if (refundNote) {
-      try {
-        await Notification.create({
-          user: booking.customer,
-          type: "booking_cancelled",
-          message: `Booking cancelled.${refundNote}`,
-        });
-      } catch {
-        // non-fatal
-      }
+    // Both parties always hear about the cancellation: each side's
+    // dashboard/details row flips to "cancelled", and EACH side gets a
+    // notification naming who cancelled. (Previously the canceller heard
+    // nothing on unpaid bookings, and the other side got a vague message.)
+    const customerMsg = isCustomer
+      ? `Your booking has been cancelled.${refundNote}`
+      : `Cook cancelled your booking.${refundNote}`;
+    const cookMsg = isCustomer
+      ? "Customer cancelled a booking."
+      : "You cancelled a booking.";
+    try {
+      await Notification.create({
+        user: booking.customer,
+        type: "booking_cancelled",
+        message: customerMsg,
+      });
+    } catch {
+      // non-fatal
+    }
+    try {
+      await Notification.create({
+        user: booking.cook,
+        type: "booking_cancelled",
+        message: cookMsg,
+      });
+    } catch {
+      // non-fatal
     }
 
-    res.json(booking);
+    res.json(stripServiceOtp(booking));
   } catch (error) {
     next(error);
   }
@@ -1020,6 +1224,10 @@ exports.rescheduleBooking = async (req, res, next) => {
     if (booking.customer.toString() !== req.user.id) {
       return res.status(403).json({ message: "Only the customer can reschedule this booking" });
     }
+    // Lazily expire first: without this a "requested" booking whose 5-minute
+    // hold already elapsed (but no read expired it yet) could be rescheduled
+    // and revived past its hold.
+    await expireBookingIfNeeded(booking);
     if (!["requested", "accepted", "confirmed"].includes(booking.status)) {
       return res.status(400).json({ message: "Only upcoming bookings can be rescheduled" });
     }
@@ -1036,9 +1244,17 @@ exports.rescheduleBooking = async (req, res, next) => {
     if (localDayString(day) < localDayString()) {
       return res.status(400).json({ message: "That date already passed — please pick today or a future date" });
     }
+    // Same-day guard: the date check above allows today, but a start time
+    // that already passed today must be refused like past dates are.
+    if (localDayString(day) === localDayString()) {
+      const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+      if (startMin <= nowMin) {
+        return res.status(400).json({ message: "That time already passed today — please pick a later start time" });
+      }
+    }
 
     const durMin = Math.round(Number(booking.durationHours || 0) * 60);
-    if (!Number.isFinite(durMin) || durMin < 30) {
+    if (!Number.isInteger(Number(booking.durationHours)) || durMin < 60 || durMin > 4 * 60) {
       return res.status(400).json({ message: "This booking has no usable duration — please contact support" });
     }
     const endMin = startMin + durMin;
@@ -1060,6 +1276,9 @@ exports.rescheduleBooking = async (req, res, next) => {
     }
 
     const oldLabel = `${booking.date ? new Date(booking.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : ""} ${booking.startTime || ""}–${booking.endTime || ""}`.trim();
+    const prevDate = booking.date;
+    const prevStart = booking.startTime;
+    const prevEnd = booking.endTime;
     booking.date = day;
     booking.startTime = startTime;
     booking.endTime = endTime;
@@ -1068,7 +1287,46 @@ exports.rescheduleBooking = async (req, res, next) => {
       status: booking.status,
       note: `Rescheduled from ${oldLabel} to ${newLabel} by customer`,
     });
+    // A move must not inherit a stale near-expired hold/payment window —
+    // refresh them from the move so an accepted-unpaid booking isn't
+    // instantly cancelled on the next read.
+    if (booking.status === "requested") {
+      booking.requestExpiresAt = new Date(Date.now() + REQUEST_WINDOW_MS);
+    }
+    if (booking.status === "accepted" && booking.payment?.status !== "paid") {
+      booking.paymentExpiresAt = new Date(Date.now() + PAYMENT_WINDOW_MS);
+    }
     await booking.save();
+
+    // Post-move race verification (same TOCTOU as accept): two concurrent
+    // moves into one slot can both pass the pre-check. Re-read rivals after
+    // persisting — on clash restore the previous window and 409.
+    let moveClash = false;
+    try {
+      const postRivals = (await getDayBookings(booking.cook, booking.date)).filter(
+        (b) => String(b._id) !== String(booking._id)
+      );
+      moveClash = Boolean(findOverlapBooking(postRivals, booking.startTime, booking.endTime));
+    } catch {
+      moveClash = false;
+    }
+    if (moveClash) {
+      booking.date = prevDate;
+      booking.startTime = prevStart;
+      booking.endTime = prevEnd;
+      booking.statusHistory.push({
+        status: booking.status,
+        note: `Reschedule to ${newLabel} reverted — the slot was just taken`,
+      });
+      try {
+        await booking.save();
+      } catch {
+        // non-fatal: the 409 below is what matters
+      }
+      return res.status(409).json({
+        message: "That time just got booked — please pick another start time",
+      });
+    }
 
     try {
       await Notification.create({
@@ -1100,35 +1358,102 @@ exports.rescheduleBooking = async (req, res, next) => {
 exports.startService = async (req, res, next) => {
   try {
     const filter = { _id: req.params.id };
-    if (req.user.role !== "admin") filter.cook = req.user.id;
+    if (String(req.user.role).toUpperCase() !== "ADMIN") filter.cook = req.user.id;
     const booking = await Booking.findOne(filter);
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
     }
-    if (!["accepted", "confirmed", "in_progress"].includes(booking.status)) {
-      return res.status(400).json({ message: "Only accepted bookings can start service" });
+    // The clock only runs on paid work: confirmed/in_progress, or a legacy
+    // accepted booking whose payment is already recorded. Unpaid requests
+    // must never start the service clock.
+    const prepaid = booking.payment?.status === "paid";
+    if (!["confirmed", "in_progress"].includes(booking.status) && !(booking.status === "accepted" && prepaid)) {
+      return res.status(400).json({ message: "Only paid, confirmed bookings can start service" });
     }
     if (booking.serviceStartedAt) {
       const obj = stripServiceOtp(booking);
       return res.json({ ...obj, serviceStarted: true });
     }
     const otp = String(req.body?.otp || "").trim();
+    // Backfill for pre-OTP legacy bookings (creation always sets one now):
+    // mint the code so the customer can read it on their booking page.
+    if (!booking.serviceOtp && ensureServiceOtp(booking)) {
+      try {
+        await booking.save();
+      } catch {
+        // non-fatal: the check below still applies
+      }
+    }
+    // Brute-force guard: 10 wrong tries lock the code for 15 minutes.
+    if (booking.serviceOtpLockedUntil && new Date(booking.serviceOtpLockedUntil) > new Date()) {
+      return res.status(429).json({
+        message: "Too many incorrect attempts — please wait 15 minutes and ask the customer for the code again.",
+      });
+    }
     if (!booking.serviceOtp || otp !== String(booking.serviceOtp)) {
+      booking.serviceOtpAttempts = Number(booking.serviceOtpAttempts || 0) + 1;
+      if (booking.serviceOtpAttempts >= 10) {
+        booking.serviceOtpLockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+      }
+      try {
+        await booking.save();
+      } catch {
+        // non-fatal: the 400 below is what matters
+      }
+      if (booking.serviceOtpAttempts >= 10) {
+        return res.status(429).json({
+          message: "Too many incorrect attempts — please wait 15 minutes and ask the customer for the code again.",
+        });
+      }
       return res.status(400).json({ message: "Incorrect OTP — please ask the customer for the 4-digit code shown on their booking" });
     }
+    // Success resets the guard.
+    booking.serviceOtpAttempts = 0;
+    booking.serviceOtpLockedUntil = undefined;
     const durMin = Math.round(Number(booking.durationHours || 0) * 60);
-    if (!Number.isFinite(durMin) || durMin < 30) {
+    if (!Number.isInteger(Number(booking.durationHours)) || durMin < 60 || durMin > 4 * 60) {
       return res.status(400).json({ message: "This booking has no usable duration — please contact support" });
     }
     const startedAt = new Date();
+    // Late-start overlap guard: the rewrite below moves the window to
+    // (now → now+duration). On the booking's own day that can collide with
+    // another live booking for the same cook — refuse with 409 so an admin
+    // reschedules instead of double-booking the cook. Skipped without a DB
+    // connection (unit-test path keeps the pure OTP flow).
+    if (dbReady() && localDayString(booking.date) === localDayString(startedAt)) {
+      try {
+        const nowMin = startedAt.getHours() * 60 + startedAt.getMinutes();
+        const newStart = minutesToTime(nowMin);
+        const newEnd = minutesToTime(nowMin + durMin);
+        const sameDay = (await getDayBookings(booking.cook, booking.date)).filter(
+          (b) => String(b._id) !== String(booking._id) &&
+            ["accepted", "confirmed", "in_progress"].includes(b.status)
+        );
+        if (findOverlapBooking(sameDay, newStart, newEnd)) {
+          return res.status(409).json({
+            message: "Starting now overlaps another confirmed booking for this cook — please ask support to reschedule first.",
+          });
+        }
+      } catch {
+        // non-fatal: verification unavailable, proceed with the start
+      }
+    }
     booking.serviceStartedAt = startedAt;
     booking.serviceEndsAt = new Date(startedAt.getTime() + durMin * 60 * 1000);
-    await markArrivedIfNeeded(booking, "manual");
+    // Redefine the service window from the actual start: the scheduled
+    // start/end shift to (actual start → actual start + duration) so the
+    // stored endTime always reflects real cooking time, not the slot guess.
+    const fmtClock = (d) =>
+      `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    booking.startTime = fmtClock(startedAt);
+    booking.endTime = fmtClock(booking.serviceEndsAt);
+    await markArrivedIfNeeded(booking);
+    const serviceNote = `Service started (OTP verified) ${booking.startTime}–${booking.endTime}`;
     if (booking.status !== "in_progress") {
       booking.status = "in_progress";
-      booking.statusHistory.push({ status: "in_progress", note: "Service started (OTP verified)" });
+      booking.statusHistory.push({ status: "in_progress", note: serviceNote });
     } else {
-      booking.statusHistory.push({ status: "in_progress", note: "Service started (OTP verified)" });
+      booking.statusHistory.push({ status: "in_progress", note: serviceNote });
     }
     await booking.save();
     try {
@@ -1147,101 +1472,21 @@ exports.startService = async (req, res, next) => {
   }
 };
 
-// Cook shares their current live location for a specific booking. Stores a
-// snapshot on the booking + updates the cook profile, and returns a
-// customer-targeted WhatsApp link (order details + cook live location).
-// Auto-detects arrival when the cook is within ARRIVAL_RADIUS_KM of the venue
-// and notifies the customer.
-exports.shareCookLocation = async (req, res, next) => {
-  try {
-    const { lat, lng, accuracy } = req.body || {};
-    if (typeof lat !== "number" || typeof lng !== "number") {
-      return res.status(400).json({ message: "Valid lat/lng are required" });
-    }
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      return res.status(400).json({ message: "Invalid coordinates" });
-    }
-    const acc =
-      typeof accuracy === "number" && Number.isFinite(accuracy) && accuracy >= 0 && accuracy <= 100000
-        ? Math.round(accuracy)
-        : undefined;
-    const filter = { _id: req.params.id };
-    if (req.user.role !== "admin") filter.cook = req.user.id;
-    const booking = await Booking.findOne(filter);
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-    booking.cookLocation = {
-      lat,
-      lng,
-      ...(acc !== undefined ? { accuracy: acc } : {}),
-      updatedAt: new Date(),
-    };
-
-    // Auto arrival: cook GPS within radius of the venue pin. Skipped for poor
-    // fixes (accuracy > 500 m) so a coarse network fix can't fake an arrival.
-    let justArrived = false;
-    if (!booking.cookArrived && booking.location?.lat != null) {
-      const fixTooCoarse = acc !== undefined && acc > 500;
-      const dist = fixTooCoarse ? null : haversineKm({ lat, lng }, booking.location);
-      if (dist != null && dist <= ARRIVAL_RADIUS_KM) {
-        await markArrivedIfNeeded(booking, "auto");
-        justArrived = true;
-      } else {
-        await booking.save();
-      }
-    } else {
-      await booking.save();
-    }
-    await CookProfile.findOneAndUpdate(
-      { user: req.user.role === "admin" ? booking.cook : req.user.id },
-      {
-        liveLocation: {
-          lat,
-          lng,
-          ...(acc !== undefined ? { accuracy: acc } : {}),
-          updatedAt: new Date(),
-        },
-      }
-    );
-
-    let customerWhatsappUrl = null;
-    try {
-      const cookUser = await User.findById(req.user.role === "admin" ? booking.cook : req.user.id).select("name phone");
-      const customer = await User.findById(booking.customer).select("phone");
-      customerWhatsappUrl = buildCustomerWhatsAppUrl({
-        customerPhone: customer?.phone,
-        cookName: cookUser?.name,
-        cookPhone: cookUser?.phone,
-        cookLocation: booking.cookLocation,
-        booking,
-      });
-    } catch {
-      customerWhatsappUrl = null;
-    }
-
-    // Cook-facing response: never leak the service-start OTP.
-    const obj = stripServiceOtp(booking);
-    res.json({ ...obj, customerWhatsappUrl, justArrived });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// Manual arrival: cook taps "I've arrived". Notifies the customer even when
-// GPS is imprecise or the venue has no exact pin.
+// Manual arrival: cook taps "I've arrived". Notifies the customer.
 exports.markCookArrived = async (req, res, next) => {
   try {
     const filter = { _id: req.params.id };
-    if (req.user.role !== "admin") filter.cook = req.user.id;
+    if (String(req.user.role).toUpperCase() !== "ADMIN") filter.cook = req.user.id;
     const booking = await Booking.findOne(filter);
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
     }
-    if (["completed", "cancelled", "rejected"].includes(booking.status)) {
-      return res.status(400).json({ message: "Booking is no longer active" });
+    // Arrival only makes sense once the request is accepted — never on a
+    // pending `requested` hold or a terminal booking.
+    if (!["accepted", "confirmed", "in_progress"].includes(booking.status)) {
+      return res.status(400).json({ message: "The booking must be accepted before arrival can be marked" });
     }
-    const justArrived = await markArrivedIfNeeded(booking, "manual");
+    const justArrived = await markArrivedIfNeeded(booking);
     // Cook-facing response: never leak the service-start OTP.
     const obj = stripServiceOtp(booking);
     res.json({ ...obj, justArrived });
@@ -1250,101 +1495,9 @@ exports.markCookArrived = async (req, res, next) => {
   }
 };
 
-// Live tracking payload for a single booking. Visible to the customer who
-// owns it, the assigned cook, or an admin. Returns venue + cook live
-// positions so the website can render a live map for the customer.
-exports.getBookingLiveTracking = async (req, res, next) => {
-  try {
-    const booking = await Booking.findById(req.params.id)
-      .populate("cook", "name phone")
-      .populate("customer", "name phone");
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-    const isCustomer = booking.customer?._id?.toString() === req.user.id;
-    const isCook = booking.cook?._id?.toString() === req.user.id;
-    const isAdmin = req.user.role === "admin";
-    if (!isCustomer && !isCook && !isAdmin) {
-      return res.status(403).json({ message: "Not authorized" });
-    }
-
-    let cookLiveLocation = null;
-    try {
-      const profile = await CookProfile.findOne({ user: booking.cook._id }).select(
-        "liveLocation serviceArea"
-      );
-      if (profile?.liveLocation?.lat != null) cookLiveLocation = profile.liveLocation;
-    } catch {
-      cookLiveLocation = null;
-    }
-
-    const snapshot = booking.cookLocation?.lat != null ? booking.cookLocation : null;
-    const effectiveCookLocation = snapshot || cookLiveLocation;
-
-    // Time-based alarm for this booking.
-    try {
-      await markHoursCompleteIfNeeded(booking);
-    } catch {
-      // non-fatal
-    }
-    const end = sessionEndDate(booking);
-
-    // Hours-complete WhatsApp alarms for both parties (requester picks theirs).
-    const hoursPayload = { ...booking.toObject(), hoursCompletedAt: booking.hoursCompletedAt };
-    const hoursCompleteCustomerUrl = booking.hoursCompleted
-      ? buildHoursCompleteWhatsAppUrl({
-          toPhone: booking.customer?.phone,
-          booking: hoursPayload,
-          cookName: booking.cook?.name,
-          cookPhone: booking.cook?.phone,
-          customerName: booking.customer?.name,
-        })
-      : null;
-    const hoursCompleteCookUrl = booking.hoursCompleted
-      ? buildHoursCompleteWhatsAppUrl({
-          toPhone: booking.cook?.phone,
-          booking: hoursPayload,
-          cookName: booking.cook?.name,
-          cookPhone: booking.cook?.phone,
-          customerName: booking.customer?.name,
-        })
-      : null;
-
-    res.json({
-      bookingId: booking._id,
-      status: booking.status,
-      serviceType: booking.serviceType,
-      date: booking.date,
-      startTime: booking.startTime,
-      endTime: booking.endTime,
-      sessionEnd: end ? end.toISOString() : null,
-      hoursCompleted: !!booking.hoursCompleted,
-      hoursCompletedAt: booking.hoursCompletedAt || null,
-      hoursCompleteCustomerUrl,
-      hoursCompleteCookUrl,
-      address: booking.address,
-      amount: booking.amount,
-      venue: booking.location?.lat != null ? booking.location : null,
-      guests: booking.guests,
-      selectedItems: booking.selectedItems,
-      cook: { _id: booking.cook?._id, name: booking.cook?.name, phone: booking.cook?.phone },
-      customer: { _id: booking.customer?._id, name: booking.customer?.name },
-      cookLocation: snapshot,
-      cookLiveLocation,
-      effectiveCookLocation,
-      cookArrived: !!booking.cookArrived,
-      cookArrivedAt: booking.cookArrivedAt || null,
-      statusHistory: booking.statusHistory,
-      updatedAt: booking.updatedAt,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
 // Single booking details for the details page. Visible to the customer who
-// owns it, the assigned cook, or an admin. Includes live-location context,
-// session end, and role-agnostic WhatsApp links.
+// owns it, the assigned cook, or an admin. Includes session end and
+// role-agnostic WhatsApp links.
 exports.getBookingById = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id)
@@ -1355,7 +1508,7 @@ exports.getBookingById = async (req, res, next) => {
     }
     const isCustomer = booking.customer?._id?.toString() === req.user.id;
     const isCook = booking.cook?._id?.toString() === req.user.id;
-    const isAdmin = req.user.role === "admin";
+    const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
     if (!isCustomer && !isCook && !isAdmin) {
       return res.status(403).json({ message: "Not authorized" });
     }
@@ -1373,28 +1526,37 @@ exports.getBookingById = async (req, res, next) => {
     } catch {
       // non-fatal
     }
-    // NOTE: all three must be declared — `cookLiveLocation` stays null when
-    // the cook hasn't shared a live location yet, and reading an undeclared
-    // variable below used to throw a ReferenceError that 500'd this endpoint
-    // (breaking the customer's waiting-page polling and details page).
-    let cookLiveLocation = null;
+    // Cook public profile bits for the details page (rate/area). Live
+    // location tracking was removed — no cookLiveLocation here.
     let cookRate = null;
     let cookServiceArea = null;
     try {
       const profile = await CookProfile.findOne({ user: booking.cook._id }).select(
-        "liveLocation rate serviceArea"
+        "rate serviceArea"
       );
-      if (profile?.liveLocation?.lat != null) cookLiveLocation = profile.liveLocation;
       if (profile?.rate != null) cookRate = profile.rate;
       if (profile?.serviceArea) cookServiceArea = profile.serviceArea;
     } catch {
-      cookLiveLocation = null;
+      // non-fatal
     }
 
     const fullObj = booking.toObject ? booking.toObject() : booking;
     // The cook must never see the service-start OTP — they ask the customer
     // for it in person. Customers and admins keep it.
     const obj = isCook ? stripServiceOtp(fullObj) : fullObj;
+    // Contact privacy: while "requested", neither side sees the other's
+    // phone; post-accept each side gets the other's phone for coordination.
+    // Emails are never needed client-side. Admins keep full details.
+    if (!isAdmin) {
+      if (obj.cook && typeof obj.cook === "object" && !Array.isArray(obj.cook)) {
+        delete obj.cook.email;
+        if (obj.status === "requested") delete obj.cook.phone;
+      }
+      if (isCook && obj.customer && typeof obj.customer === "object" && !Array.isArray(obj.customer)) {
+        delete obj.customer.email;
+        if (obj.status === "requested") delete obj.customer.phone;
+      }
+    }
     const end = sessionEndDate(booking);
     const hoursPayload = { ...obj, hoursCompletedAt: booking.hoursCompletedAt };
     // Submitted review for this service (one per booking max) — visible to
@@ -1425,13 +1587,6 @@ exports.getBookingById = async (req, res, next) => {
               booking: obj,
             })
           : null,
-      cookLiveLocation: cookLiveLocation?.lat != null ? cookLiveLocation : null,
-      effectiveCookLocation:
-        obj.cookLocation?.lat != null
-          ? obj.cookLocation
-          : cookLiveLocation?.lat != null
-            ? cookLiveLocation
-            : null,
       cookRate,
       cookServiceArea,
       hoursCompleteCustomerUrl: booking.hoursCompleted
@@ -1466,7 +1621,7 @@ exports.getBookingById = async (req, res, next) => {
 // integration).
 exports.payBooking = async (req, res, next) => {
   try {
-    const booking = await Booking.findOne({
+    let booking = await Booking.findOne({
       _id: req.params.id,
       customer: req.user.id,
     });
@@ -1488,8 +1643,20 @@ exports.payBooking = async (req, res, next) => {
         message: `This booking is not awaiting payment (status: ${booking.status}).`,
       });
     }
+    // Idempotent re-pay: a booking already recorded as paid (webhook or an
+    // earlier attempt) settles into `confirmed` instead of dead-ending,
+    // and repeat calls simply return the confirmed booking.
     if (booking.payment?.status === "paid") {
-      return res.status(400).json({ message: "This booking is already paid." });
+      if (booking.status === "accepted") {
+        booking.status = "confirmed";
+        booking.statusHistory.push({
+          status: "confirmed",
+          note: "Payment already recorded — confirmed on re-check.",
+        });
+        await booking.save();
+      }
+      const paidObj = booking.toObject ? booking.toObject() : booking;
+      return res.json({ ...paidObj, alreadyPaid: true });
     }
 
     // Real money only: a booking is confirmed exclusively on a verified
@@ -1509,7 +1676,7 @@ exports.payBooking = async (req, res, next) => {
         .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
         .update(`${razorpayOrderId}|${razorpayPaymentId}`)
         .digest("hex");
-      if (expectedSignature !== razorpaySignature) {
+      if (!signaturesEqual(expectedSignature, razorpaySignature)) {
         return res.status(402).json({ message: "Payment verification failed. Please try paying again." });
       }
     }
@@ -1521,6 +1688,16 @@ exports.payBooking = async (req, res, next) => {
       req.body?.testMode === true &&
       process.env.ALLOW_TEST_PAYMENTS === "true" &&
       process.env.NODE_ENV !== "production";
+    // Bind the genuine triple to this booking's stored fee (blocks replay
+    // of a cheaper order's payment onto this booking). Enforced whenever a
+    // real triple is presented — including test mode — so testMode can never
+    // launder a cheap genuine payment onto an expensive booking.
+    if (hasPayment) {
+      const orderErr = await assertRazorpayOrderAmount(razorpayOrderId, Number(booking.amount || 0) * 100);
+      if (orderErr) {
+        return res.status(402).json({ message: orderErr });
+      }
+    }
     if (!hasPayment && !allowTest) {
       return res.status(400).json({
         message:
@@ -1529,7 +1706,7 @@ exports.payBooking = async (req, res, next) => {
     }
     const method = String(req.body?.method || "upi").toLowerCase();
     const now = new Date();
-    booking.payment = {
+    const paymentDoc = {
       status: "paid",
       paidAmount: booking.amount,
       paidAt: now,
@@ -1542,14 +1719,29 @@ exports.payBooking = async (req, res, next) => {
           }
         : { razorpayOrderId, razorpayPaymentId, razorpaySignature }),
     };
-    booking.status = "confirmed";
-    booking.statusHistory.push({
+    const confirmEntry = {
       status: "confirmed",
       note: allowTest
         ? `Test payment (no real money) via ${method}`
         : `Payment received via ${method}`,
-    });
-    await booking.save();
+    };
+    // Atomic claim: only one concurrent pay attempt flips accepted+unpaid to
+    // confirmed. A lost race re-reads — paid elsewhere means success (the
+    // idempotent path above returns it), anything else is a conflict.
+    const claimed = await Booking.findOneAndUpdate(
+      { _id: booking._id, status: "accepted", "payment.status": { $ne: "paid" } },
+      { $set: { payment: paymentDoc, status: "confirmed" }, $push: { statusHistory: confirmEntry } },
+      { new: true }
+    );
+    if (!claimed) {
+      const fresh = await Booking.findOne({ _id: booking._id, customer: req.user.id });
+      if (fresh?.payment?.status === "paid") {
+        const freshObj = fresh.toObject ? fresh.toObject() : fresh;
+        return res.json({ ...freshObj, alreadyPaid: true });
+      }
+      return res.status(409).json({ message: "Payment is already being processed — please check your bookings." });
+    }
+    booking = claimed;
 
     // Load both parties first — the cook's confirmation notification below
     // carries the full job details (customer, service, guests, venue + pin).
@@ -1564,8 +1756,6 @@ exports.payBooking = async (req, res, next) => {
       cookUser = null;
       customer = null;
     }
-
-    const trackingUrl = buildTrackingUrl(booking._id);
 
     // Confirmation alert to the COOK's login: full booking details so the
     // cook can see the job in Notifications without opening the dashboard.
@@ -1601,7 +1791,6 @@ exports.payBooking = async (req, res, next) => {
         venuePin ? `Venue pin: ${venuePin}` : null,
         booking.selectedItems?.length ? `Dishes: ${booking.selectedItems.join(", ")}` : null,
         booking.notes ? `Notes: ${booking.notes}` : null,
-        `Track: ${trackingUrl}`,
         "Please reach the venue on time.",
       ].filter(Boolean);
       await Notification.create({
@@ -1613,16 +1802,6 @@ exports.payBooking = async (req, res, next) => {
       // non-fatal: the confirmation itself already succeeded
     }
 
-    // Freshest cook live location at payment time (falls back to the
-    // snapshot taken when the cook accepted).
-    let cookLoc = booking.cookLocation?.lat != null ? booking.cookLocation : null;
-    try {
-      const profile = await CookProfile.findOne({ user: booking.cook }).select("liveLocation");
-      if (profile?.liveLocation?.lat != null) cookLoc = profile.liveLocation;
-    } catch {
-      // non-fatal: message says the location will follow once shared
-    }
-
     // 1) Job sheet -> the COOK's WhatsApp (customer name/number/location).
     //    The customer's app opens this right after payment succeeds.
     let cookWhatsappUrl = null;
@@ -1632,24 +1811,20 @@ exports.payBooking = async (req, res, next) => {
         customerName: customer?.name,
         customerPhone: customer?.phone,
         booking,
-        trackingUrl,
       });
     } catch {
       cookWhatsappUrl = null;
     }
 
     // 2) Confirmation -> the USER's own WhatsApp: payment-received
-    //    confirmation, cook's name + number, cook's live location and the
-    //    booked service hours.
+    //    confirmation with the cook's name + number and booked service hours.
     let customerWhatsappUrl = null;
     try {
       customerWhatsappUrl = buildCustomerWhatsAppUrl({
         customerPhone: customer?.phone,
         cookName: cookUser?.name,
         cookPhone: cookUser?.phone,
-        cookLocation: cookLoc,
         booking,
-        trackingUrl,
       });
     } catch {
       customerWhatsappUrl = null;
@@ -1724,10 +1899,14 @@ exports.getMyLocations = async (req, res, next) => {
 
 exports.getAdminBookings = async (req, res, next) => {
   try {
-    const bookings = await Booking.find()
-      .populate("customer", "name email phone")
-      .populate("cook", "name email phone")
-      .sort({ createdAt: -1 });
+    const pg = paginationParams(req);
+    const bookings = await applyPagination(
+      Booking.find()
+        .populate("customer", "name email phone")
+        .populate("cook", "name email phone")
+        .sort({ createdAt: -1 }),
+      pg
+    );
     // Lazily expire stale pending requests (requested→expired, accepted
     // unpaid→cancelled) so admins never act on dead rows — the same pass the
     // cook and customer dashboards run before rendering.
@@ -1753,11 +1932,16 @@ exports.getAdminBookings = async (req, res, next) => {
     } catch {
       reviewByBookingId = {};
     }
-    res.json(
+    return sendList(
+      res,
       bookings.map((b) => {
         const obj = b.toObject ? b.toObject() : b;
+        // Admin list never carries customer OTPs (bulk leak surface).
+        delete obj.serviceOtp;
         return { ...obj, review: reviewByBookingId[b._id.toString()] || null };
-      })
+      }),
+      pg,
+      () => Booking.countDocuments()
     );
   } catch (error) {
     next(error);

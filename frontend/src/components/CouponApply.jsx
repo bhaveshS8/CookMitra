@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Tag, CheckCircle2, X, Loader2 } from "lucide-react";
 import API from "../api/axios";
 import { formatCurrency } from "../utils/constants";
+import { AnalyticsEvents, track } from "../utils/analytics";
 
 // "Have a Coupon Code?" — enter → Apply → instant discount + final amount.
 // Props: amount (pre-discount fee), serviceType, onApplied(result|null).
@@ -43,6 +44,11 @@ const CouponApply = ({ amount, serviceType, onApplied }) => {
       };
       setApplied(result);
       onApplied?.(result);
+      track(AnalyticsEvents.COUPON_APPLIED, {
+        coupon_code: result.code,
+        discount: Number(result.discount) || 0,
+        amount: Number(amount) || 0,
+      });
     } catch (err) {
       const status = err.response?.status;
       const msg =

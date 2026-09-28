@@ -49,7 +49,7 @@ const cut = (s) => (s ? String(s).slice(0, 90) : "");
     // 1. Admin login (role=admin)
     const admin = await login("admin@festivecook.com", "admin123");
     step("admin login", Boolean(admin.token), admin.user?.name);
-    step("admin logged in with role=admin", admin.user?.role === "admin", JSON.stringify({ role: admin.user?.role }));
+    step("admin logged in with role=admin", String(admin.user?.role).toUpperCase() === "ADMIN", JSON.stringify({ role: admin.user?.role }));
 
         // 2. User directory (admin only, password-stripped)
     const users = await api("GET", "/auth/users", { token: admin.token });

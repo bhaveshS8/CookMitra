@@ -91,7 +91,15 @@ const connectDB = async () => {
         // ignores what doesn't apply.
         serverSelectionTimeoutMS: SERVER_SELECTION_TIMEOUT_MS,
         socketTimeoutMS: 45000,
-        maxPoolSize: Number(process.env.MONGO_MAX_POOL_SIZE || 10),
+        // Pool sizing: the driver queues queries once the pool is saturated, so
+        // a 10-connection pool serialises a traffic spike (1000 concurrent
+        // users) into long waits + serverSelection timeouts. 50 is a safe
+        // default for a single API instance against Atlas M10+/free-tier limits;
+        // raise it (e.g. 100) only if the Atlas cluster tier allows it.
+        maxPoolSize: Number(process.env.MONGO_MAX_POOL_SIZE || 50),
+        // Keep one warm connection so the first request after an idle spell
+        // doesn't pay the full TCP+TLS handshake.
+        minPoolSize: Number(process.env.MONGO_MIN_POOL_SIZE || 1),
       });
       console.log(
         `MongoDB connected: ${conn.connection.host} / db "${conn.connection.name}"`

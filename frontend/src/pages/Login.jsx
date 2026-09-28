@@ -31,6 +31,7 @@ const Login = () => {
   const showToast = useShowToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+
   // ?next=… is set when login interrupted a booking — customers return to it.
   const next = safeNextPath(searchParams.get("next"));
   const registerTo = next ? `/register?next=${encodeURIComponent(next)}` : "/register";
@@ -45,10 +46,12 @@ const Login = () => {
     setError("");
 
     try {
-      const user = await dispatch(
-        loginUser({ email: formData.email, password: formData.password })
+      const { user } = await dispatch(
+        loginUser({ email: formData.email, password: formData.password, rememberMe })
       ).unwrap();
+
       showToast(`Welcome back, ${user.name}!`, "success");
+
       if (user.role === "cook") {
         navigate("/dashboard/cook-bookings");
       } else if (user.role === "admin") {
@@ -69,7 +72,6 @@ const Login = () => {
 
   return (
     <div className="login-split">
-      {/* Left showcase panel */}
       <aside className="login-showcase">
         <div className="login-showcase-glow login-showcase-glow-1" />
         <div className="login-showcase-glow login-showcase-glow-2" />
@@ -95,7 +97,7 @@ const Login = () => {
               <span className="login-perk-icon">
                 <CalendarCheck size={17} />
               </span>
-              Live booking tracking & history
+              Live booking updates & history
             </li>
             <li className="login-perk-item">
               <span className="login-perk-icon">
@@ -126,7 +128,6 @@ const Login = () => {
         </div>
       </aside>
 
-      {/* Right form panel */}
       <div className="login-form-side">
         <div className="login-card">
           <div className="login-card-header">
@@ -179,9 +180,13 @@ const Login = () => {
             <div className="booking-form-group">
               <div className="login-label-row">
                 <label htmlFor="login-password">Password</label>
-                <button type="button" className="login-link-btn" tabIndex={-1}>
+                <Link
+                  to={formData.email ? `/forgot-password?email=${encodeURIComponent(formData.email)}` : "/forgot-password"}
+                  className="login-link-btn"
+                  tabIndex={-1}
+                >
                   Forgot password?
-                </button>
+                </Link>
               </div>
               <div className="input-with-icon password-input-wrapper">
                 <Lock size={18} className="input-icon-prefix" />
@@ -238,7 +243,15 @@ const Login = () => {
             <span>or</span>
           </div>
 
-          <GoogleSignInButton text="signin_with" onError={setError} next={next} />
+          <GoogleSignInButton
+            text="signin_with"
+            onError={setError}
+            next={next}
+          />
+
+          <div className="auth-google-role-note">
+            New here? Join with Google — account type will be set during setup.
+          </div>
 
           <div className="auth-footer-prompt">
             Don&apos;t have an account yet? <Link to={registerTo}>Create an account</Link>

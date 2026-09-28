@@ -149,13 +149,13 @@ const stubFindOne = (doc) => () => Q(doc);
       finally { Coupon.create = oC; }
     }
     {
-      // Duplicate code (Mongo 11000) → friendly 400.
+      // Duplicate code (Mongo 11000) → friendly 409.
       const oC = Coupon.create;
       Coupon.create = async () => { const err = new Error("dup"); err.code = 11000; throw err; };
       const r = makeRes();
       try {
         await couponCtrl.createCoupon({ body: { code: "BAPPA20", percent: 20 }, user: { id: "admin1" } }, r, next);
-        check("duplicate code → 400", r.statusCode === 400 && /already exists/i.test(r.body.message || ""), `s=${r.statusCode}`);
+        check("duplicate code → 409", r.statusCode === 409 && /already exists/i.test(r.body.message || ""), `s=${r.statusCode}`);
       } catch (e) { check("duplicate code", false, e.message); }
       finally { Coupon.create = oC; }
     }
@@ -212,11 +212,19 @@ const stubFindOne = (doc) => () => Q(doc);
     console.log("\n═══ COUPON ACTIVE LIST ═══");
     {
       const oF = Coupon.find;
-      Coupon.find = stubFind([makeCoupon(), makeCoupon({ code: "FESTIVE15", percent: 15 })]);
+      let seenFilter = null;
+      Coupon.find = (f) => { seenFilter = f; return stubFind([makeCoupon(), makeCoupon({ code: "FESTIVE15", percent: 15 })])(); };
       const r = makeRes();
       try {
         await couponCtrl.listActiveCoupons({}, r, next);
         check("active list → 200 array", r.statusCode === 200 && Array.isArray(r.body) && r.body.length === 2, `s=${r.statusCode}`);
+        const dumped = JSON.stringify(seenFilter || {});
+        check(
+          "active list filters active + valid + under-limit",
+          seenFilter?.active === true &&
+            /validTo/.test(dumped) && /usageLimit|usedCount/.test(dumped),
+          dumped.slice(0, 120)
+        );
       } catch (e) { check("active list", false, e.message); }
       finally { Coupon.find = oF; }
     }

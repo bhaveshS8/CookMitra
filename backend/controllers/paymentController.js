@@ -54,12 +54,15 @@ exports.createOrder = async (req, res, next) => {
       return res.status(400).json({ message: "Invalid time slot" });
     }
     const hours = (endMin - startMin) / 60;
-    if (hours < 0.5 || hours > 12) {
-      return res.status(400).json({ message: "Service hours must be between 0.5 and 12" });
+    // Generic (pre-booking) orders must use the same whole-hour launch slabs
+    // as booking creation — otherwise the gateway charges rate x hours while
+    // the booking later settles a flat slab price (e.g. 2h = 349).
+    if (!Number.isInteger(hours) || hours < 1 || hours > 4) {
+      return res.status(400).json({ message: "Sessions run 1–4 whole hours" });
     }
     if (durationHours != null && durationHours !== "") {
       const stated = Number(durationHours);
-      if (!Number.isFinite(stated) || Math.abs(stated - hours) > 0.001) {
+      if (!Number.isInteger(stated) || stated !== hours) {
         return res.status(400).json({ message: "Duration does not match the selected time slot" });
       }
     }
@@ -93,7 +96,14 @@ exports.createOrder = async (req, res, next) => {
       }
       fullFee = Math.max(1, Math.round(Number(bookingForOrder.amount) || 0));
     } else {
-      fullFee = Math.round(Number(cookProfile.rate) * hours);
+      // No booking yet: charge the same launch slab the booking will settle.
+      // Uses the slab price (199/349/499/649), NOT rate x hours — the legacy
+      // rate field is no longer a price and must never set gateway amounts.
+      const { slabPriceForDuration } = require("../utils/pricing");
+      fullFee = slabPriceForDuration(hours);
+      if (fullFee == null) {
+        return res.status(400).json({ message: "Sessions run 1–4 whole hours" });
+      }
     }
     const amountPaise = fullFee * 100;
 
@@ -141,7 +151,6 @@ exports.createOrder = async (req, res, next) => {
       amountPaise,
       currency: order.currency,
       hours,
-      hourlyRate: cookProfile.rate,
       fullFee,
       keyId,
     });
@@ -210,7 +219,8 @@ exports.handleWebhook = async (req, res) => {
         ...(booking.payment?.toObject ? booking.payment.toObject() : booking.payment || {}),
         razorpayOrderId: orderId,
         razorpayPaymentId: paymentId,
-        razorpaySignature: "webhook_reconciled_no_signature",
+        razorpaySignature: "",
+        webhookReconciled: true,
         status: "paid",
         paidAmount: booking.amount,
         paidAt: new Date(),
@@ -273,7 +283,9 @@ exports.verifyPayment = async (req, res, next) => {
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
       .update(`${razorpay_order_id}|${razorpay_payment_id}`)
       .digest("hex");
-    res.json({ verified: expected === razorpay_signature });
+    const a = Buffer.from(String(expected), "utf8");
+    const b = Buffer.from(String(razorpay_signature), "utf8");
+    res.json({ verified: a.length === b.length && crypto.timingSafeEqual(a, b) });
   } catch (error) {
     next(error);
   }

@@ -2,6 +2,7 @@ import React from "react";
 import { Link, useParams } from "react-router-dom";
 import { useFetch } from "../hooks/useFetch";
 import AdminDocViewer from "../components/AdminDocViewer";
+import AdminDocUpload from "../components/AdminDocUpload";
 import { formatCurrency, formatDate, SERVICE_DETAILS } from "../utils/constants";
 import {
   ArrowLeft,
@@ -118,7 +119,7 @@ const BookingCard = ({ booking }) => (
 
 const AdminCookProfile = () => {
   const { id } = useParams();
-  const { data, loading, error } = useFetch(`/cooks/admin-overview/${id}`);
+  const { data, loading, error, refetch } = useFetch(`/cooks/admin-overview/${id}`);
 
   if (loading) {
     return (
@@ -179,7 +180,7 @@ const AdminCookProfile = () => {
             </span>
           </h1>
           <p style={{ color: "var(--slate-600)", margin: 0 }}>
-            {profile.experienceYears || 0} yrs experience • {formatCurrency(profile.rate)}/hr •{" "}
+            {profile.experienceYears || 0} yrs experience • {formatCurrency(profile.rate)}/hr (legacy rack rate — bookings use slab pricing) •{" "}
             {profile.serviceArea || "No service area set"} • ★ {avgRating || 0} (
             {profile.rating?.count ?? reviews.length} reviews)
           </p>
@@ -192,7 +193,7 @@ const AdminCookProfile = () => {
           <div className="booking-metadata-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
             <div className="meta-field">
               <label>
-                <Wallet size={13} style={{ verticalAlign: "-2px" }} /> Total Earned
+                <Wallet size={13} style={{ verticalAlign: "-2px" }} /> Total Earned (paid only)
               </label>
               <span style={{ color: "var(--primary)", fontWeight: 800, fontSize: "1.25rem" }}>
                 {formatCurrency(summary?.totalEarnings)}
@@ -276,9 +277,9 @@ const AdminCookProfile = () => {
               <span>{(profile.specialties || []).join(", ") || "—"}</span>
             </div>
           </div>
-          {profile.bio && (
+          {(profile.skills || profile.bio) && (
             <p style={{ fontSize: "0.9rem", color: "var(--slate-600)", margin: "0.75rem 0 0" }}>
-              {profile.bio}
+              {profile.skills || profile.bio}
             </p>
           )}
         </div>
@@ -301,6 +302,21 @@ const AdminCookProfile = () => {
               })),
             ]}
           />
+
+          {/* Admin can attach files the cook sent over email/WhatsApp */}
+          <div
+            style={{
+              marginTop: "1rem",
+              borderTop: "1px dashed var(--slate-200)",
+              paddingTop: "1rem",
+            }}
+          >
+            <AdminDocUpload
+              cookId={profile._id}
+              current={profile}
+              onUploaded={refetch}
+            />
+          </div>
         </div>
       </div>
 

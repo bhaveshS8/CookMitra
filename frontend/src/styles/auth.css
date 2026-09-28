@@ -8,27 +8,39 @@
   grid-template-columns: 0.9fr 1.1fr;
   gap: 0;
   min-height: calc(100vh - 68px);
-  background: var(--bg-body);
+  background:
+    radial-gradient(1200px 450px at 20% 0%, rgba(249, 169, 76, 0.16), transparent 58%),
+    radial-gradient(800px 420px at 100% 100%, rgba(194, 65, 12, 0.14), transparent 52%),
+    linear-gradient(135deg, #f7efe7 0%, #f2e1d0 28%, #f6efe8 100%);
 }
 
 .login-showcase {
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(760px 460px at 20% 0%, rgba(255, 166, 54, 0.4), transparent 60%),
-    radial-gradient(520px 420px at 92% 88%, rgba(232, 89, 12, 0.42), transparent 62%),
-    linear-gradient(155deg, #190b03 0%, #3d1606 48%, #5f1f08 100%);
+    radial-gradient(680px 440px at 12% 0%, rgba(192, 120, 57, 0.38), transparent 58%),
+    radial-gradient(720px 500px at 90% 100%, rgba(251, 191, 36, 0.11), transparent 56%),
+    linear-gradient(150deg, #1d120d 0%, #2b1b14 38%, #130d09 100%);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 3rem 1.5rem;
+  border-right: 1px solid rgba(255,255,255,0.08);
 }
 .login-showcase-glow { position: absolute; border-radius: 50%; filter: blur(60px); pointer-events: none; }
-.login-showcase-glow-1 { width: 300px; height: 300px; top: -70px; left: 8%; background: rgba(251, 191, 36, 0.4); }
-.login-showcase-glow-2 { width: 360px; height: 360px; right: -80px; bottom: 8%; background: rgba(255, 110, 30, 0.34); }
+.login-showcase-glow-1 { width: 320px; height: 320px; top: -70px; left: 8%; background: rgba(251, 191, 36, 0.24); }
+.login-showcase-glow-2 { width: 380px; height: 380px; right: -90px; bottom: 8%; background: rgba(234, 88, 12, 0.24); }
 
-.login-showcase-inner { position: relative; z-index: 1; max-width: 420px; }
+.login-showcase-inner {
+  position: relative;
+  z-index: 1;
+  max-width: 420px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
 .login-brand {
   display: inline-flex;
   align-items: center;
@@ -36,16 +48,24 @@
   font-weight: 800;
   font-size: 1.15rem;
   color: #fff;
-  margin-bottom: 2.2rem;
+  margin-bottom: 1.8rem;
+  letter-spacing: -0.02em;
+  text-shadow: 0 4px 14px rgba(251, 191, 36, 0.16);
 }
 .login-showcase-title {
-  font-size: 2rem;
+  font-size: clamp(2.2rem, 3vw, 3rem);
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
   color: #fff;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.6rem;
+  line-height: 1.06;
 }
-.login-showcase-sub { color: rgba(255, 255, 255, 0.8); font-size: 1rem; margin-bottom: 1.6rem; }
+.login-showcase-sub {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 1rem;
+  margin-bottom: 1.6rem;
+  max-width: 30ch;
+}
 
 .login-perks { list-style: none; padding: 0; margin: 0 0 1.6rem; display: flex; flex-direction: column; gap: 0.8rem; }
 .login-perk-item { display: flex; align-items: center; gap: 0.6rem; color: rgba(255, 255, 255, 0.9); font-weight: 600; font-size: 0.95rem; }
@@ -113,22 +133,30 @@
 
 /* Login card */
 .login-card {
+  width: min(100%, 470px);
   max-width: 470px;
   margin: 0 auto;
-  background: #fff;
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-lg);
-  border: 1px solid var(--border-subtle);
-  padding: 2.4rem 2rem;
+  background: linear-gradient(180deg, rgba(255, 251, 246, 0.98), rgba(246, 236, 226, 0.96));
+  border-radius: 26px;
+  box-shadow: 0 28px 70px -30px rgba(75, 44, 28, 0.46), 0 14px 36px -22px rgba(176, 88, 39, 0.35);
+  border: 1px solid rgba(183, 102, 48, 0.28);
+  padding: 2.2rem 1.8rem;
+  backdrop-filter: blur(8px);
+  color: #3a2717;
 }
 @media (max-width: 400px) {
   .login-card { padding: 1.5rem 1rem; }
   .auth-card-modern { padding: 1.5rem 1rem; }
 }
-.login-card-header { text-align: center; margin-bottom: 1.6rem; }
+.login-card-header { text-align: center; margin-bottom: 1.5rem; }
 .login-card-header h1,
-.login-card-header h2 { font-size: 1.5rem; margin-bottom: 0.3rem; }
-.login-card-header p { color: var(--slate-500); font-size: 0.9rem; margin: 0; }
+.login-card-header h2 {
+  font-size: clamp(1.8rem, 2vw, 2.1rem);
+  margin-bottom: 0.35rem;
+  letter-spacing: -0.02em;
+  color: #2d1b12;
+}
+.login-card-header p { color: rgba(88, 60, 40, 0.8); font-size: 0.9rem; margin: 0; }
 .login-mobile-brand {
   display: none;
   justify-content: center;
@@ -136,16 +164,33 @@
   gap: 0.6rem;
   font-weight: 800;
   margin-bottom: 1.6rem;
+  color: #2d1b12;
 }
+.login-mobile-brand .brand-accent { color: #b86f3c; }
 .login-form-side {
   display: grid;
   grid-template-columns: 1fr;
   align-items: center;
   justify-items: center;
-  padding: 2.5rem 1.5rem;
+  padding: clamp(1.8rem, 3vw, 2.8rem) 1.5rem;
+  width: 100%;
+  background:
+    radial-gradient(420px 260px at 14% 10%, rgba(243, 188, 115, 0.18), transparent 58%),
+    linear-gradient(180deg, rgba(255, 248, 241, 0.72), rgba(247, 235, 220, 0.82));
 }
-.login-submit { width: 100%; }
+.login-submit {
+  width: 100%;
+  margin-top: 0.25rem;
+  min-height: 52px;
+}
 .login-error { margin-bottom: 0.75rem; }
+.auth-google-role-note {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+  color: rgba(88, 60, 40, 0.7);
+  text-align: center;
+  line-height: 1.5;
+}
 .login-secure-note {
   display: inline-flex;
   align-items: center;
@@ -158,10 +203,17 @@
 .auth-footer-prompt {
   text-align: center;
   font-size: 0.92rem;
-  color: var(--slate-600);
-  margin-top: 1.1rem;
+  color: rgba(61, 42, 28, 0.8);
+  margin-top: 1.2rem;
 }
-.auth-footer-prompt a { font-weight: 700; }
+.auth-footer-prompt a {
+  font-weight: 700;
+  color: #a7501f;
+}
+
+.auth-footer-prompt a:hover {
+  color: #7d3a12;
+}
 .role-hint { font-size: 0.82rem; color: var(--slate-500); }
 
 /* ---- Google sign-in ---- */
@@ -181,19 +233,22 @@
   content: "";
   flex: 1;
   height: 1px;
-  background: var(--border-subtle, #e5e7eb);
+  background: linear-gradient(90deg, transparent, rgba(142, 86, 43, 0.4), transparent);
 }
 .google-btn-wrapper {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
-/* Make the official Google button fill the card width */
+/* The official Google button takes a fixed pixel width (see width="320" in
+ * GoogleSignInButton.jsx — GSI rejects percentage widths and logs
+ * "Provided button width is invalid"). Never force its iframe to 100% via
+ * CSS; keep the pixel width and centre it instead. */
 .google-btn-wrapper > div {
-  width: 100% !important;
+  display: flex;
+  justify-content: center;
 }
 .google-btn-wrapper iframe {
-  width: 100% !important;
   margin: 0 auto;
 }
 .google-btn-loading {

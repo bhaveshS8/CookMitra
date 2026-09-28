@@ -1,6 +1,7 @@
 const Coupon = require("../models/Coupon");
 const Booking = require("../models/Booking");
 const { normalizeCode, rejectionReason, computeDiscount } = require("../utils/coupons");
+const { paginationParams, applyPagination, sendList } = require("../utils/pagination");
 
 // POST /api/coupons/validate — preview a coupon against an order amount.
 // Auth required (per-user limits need the user). Never mutates usage.
@@ -50,24 +51,43 @@ exports.validateCoupon = async (req, res, next) => {
 exports.listActiveCoupons = async (req, res, next) => {
   try {
     const now = new Date();
-    const coupons = await Coupon.find({
-      active: true,
-      $and: [
-        { $or: [{ validFrom: null }, { validFrom: { $lte: now } }] },
-        { $or: [{ validTo: null }, { validTo: { $gte: now } }] },
-        {
-          $or: [
-            { usageLimit: null },
-            { $expr: { $lt: ["$usedCount", "$usageLimit"] } },
-          ],
-        },
-      ],
-    })
-      .select(
-        "code description discountType percent flatAmount maxDiscount minOrder firstBookingOnly validTo"
-      )
-      .sort({ percent: -1 });
-    res.json(coupons);
+    const pg = paginationParams(req);
+    const coupons = await applyPagination(
+      Coupon.find({
+        active: true,
+        $and: [
+          { $or: [{ validFrom: null }, { validFrom: { $lte: now } }] },
+          { $or: [{ validTo: null }, { validTo: { $gte: now } }] },
+          {
+            $or: [
+              { usageLimit: null },
+              { $expr: { $lt: ["$usedCount", "$usageLimit"] } },
+            ],
+          },
+        ],
+      })
+        .select(
+          "code description discountType percent flatAmount maxDiscount minOrder firstBookingOnly validTo"
+        )
+        .sort({ percent: -1 }),
+      pg
+    );
+    // Total must count the whole active set, not just the returned page.
+    const countActive = () =>
+      Coupon.countDocuments({
+        active: true,
+        $and: [
+          { $or: [{ validFrom: null }, { validFrom: { $lte: now } }] },
+          { $or: [{ validTo: null }, { validTo: { $gte: now } }] },
+          {
+            $or: [
+              { usageLimit: null },
+              { $expr: { $lt: ["$usedCount", "$usageLimit"] } },
+            ],
+          },
+        ],
+      });
+    return sendList(res, coupons, pg, countActive);
   } catch (error) {
     next(error);
   }
@@ -76,25 +96,29 @@ exports.listActiveCoupons = async (req, res, next) => {
 // GET /api/coupons — admin: every coupon with usage stats.
 exports.listCoupons = async (req, res, next) => {
   try {
-    const coupons = await Coupon.find().sort({ createdAt: -1 });
-    res.json(coupons);
+    const pg = paginationParams(req);
+    const coupons = await applyPagination(Coupon.find().sort({ createdAt: -1 }), pg);
+    return sendList(res, coupons, pg, () => Coupon.countDocuments());
   } catch (error) {
     next(error);
   }
 };
 
-// POST /api/coupons — admin: create a coupon.
+// POST /api/coupons — admin: create a coupon. Usage accounting is
+// server-owned: usedCount/usedBy can never be set at creation (update strips
+// them too) — otherwise promo history could be forged.
 exports.createCoupon = async (req, res, next) => {
   try {
+    const { usedCount, usedBy, ...body } = req.body;
     const coupon = await Coupon.create({
-      ...req.body,
+      ...body,
       code: normalizeCode(req.body.code),
       createdBy: req.user.id,
     });
     res.status(201).json(coupon);
   } catch (error) {
     if (error?.code === 11000) {
-      return res.status(400).json({ message: "A coupon with this code already exists" });
+      return res.status(409).json({ message: "A coupon with this code already exists" });
     }
     next(error);
   }
@@ -116,7 +140,7 @@ exports.updateCoupon = async (req, res, next) => {
     res.json(coupon);
   } catch (error) {
     if (error?.code === 11000) {
-      return res.status(400).json({ message: "A coupon with this code already exists" });
+      return res.status(409).json({ message: "A coupon with this code already exists" });
     }
     next(error);
   }

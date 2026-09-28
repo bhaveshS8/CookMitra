@@ -48,11 +48,13 @@ const CookProfile = () => {
   }
 
   const handleBookingSubmit = (booking) => {
-    showToast(`Booking request sent! Status: ${booking.status.toUpperCase()}`, "success");
+    const status = booking?.status ? String(booking.status).toUpperCase() : "";
+    showToast(`Booking request sent!${status ? ` Status: ${status}` : ""}`, "success");
   };
 
-  const avgRating = cook?.rating?.average || 5.0;
   const reviewCount = cook?.rating?.count || 0;
+  // Never fabricate a rating: unreviewed cooks show "New".
+  const avgRating = reviewCount > 0 ? Number(cook?.rating?.average) || 0 : null;
 
   return (
     <div className="cook-profile-page-container">
@@ -92,18 +94,24 @@ const CookProfile = () => {
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-              <div className="star-rating-display">
-                {[...Array(5)].map((_, i) => (
-                  <Star
-                    key={i}
-                    size={16}
-                    fill={i < Math.round(avgRating) ? "#f59e0b" : "none"}
-                    color={i < Math.round(avgRating) ? "#f59e0b" : "#cbd5e1"}
-                  />
-                ))}
-              </div>
-              <strong style={{ color: "var(--slate-800)" }}>{avgRating.toFixed(1)}</strong>
-              <span style={{ color: "var(--slate-500)", fontSize: "0.9rem" }}>({reviewCount} reviews)</span>
+              {avgRating == null ? (
+                <span style={{ color: "var(--slate-500)", fontSize: "0.9rem" }}>New cook — no reviews yet</span>
+              ) : (
+                <>
+                  <div className="star-rating-display">
+                    {[...Array(5)].map((_, i) => (
+                      <Star
+                        key={i}
+                        size={16}
+                        fill={i < Math.round(avgRating) ? "#f59e0b" : "none"}
+                        color={i < Math.round(avgRating) ? "#f59e0b" : "#cbd5e1"}
+                      />
+                    ))}
+                  </div>
+                  <strong style={{ color: "var(--slate-800)" }}>{avgRating.toFixed(1)}</strong>
+                  <span style={{ color: "var(--slate-500)", fontSize: "0.9rem" }}>({reviewCount} reviews)</span>
+                </>
+              )}
             </div>
           </div>
 
@@ -123,7 +131,7 @@ const CookProfile = () => {
           <div className="profile-card-block">
             <h2>About {cook?.user?.name}</h2>
             <p style={{ lineHeight: 1.7, color: "var(--slate-700)", fontSize: "1rem" }}>
-              {cook?.bio || "A passionate home chef devoted to keeping authentic festive culinary traditions alive. Specializing in traditional recipes prepared with hand-ground spices, pure ghee, and immense dedication."}
+              {cook?.skills || cook?.bio || "A passionate home chef devoted to keeping authentic festive culinary traditions alive. Specializing in traditional recipes prepared with hand-ground spices, pure ghee, and immense dedication."}
             </p>
           </div>
 

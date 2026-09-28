@@ -42,3 +42,19 @@ services:
       # not needed. Set this only if you host the frontend elsewhere.
       # - key: CLIENT_URL
       #   sync: false
+      # ---- Scale knobs (optional; sensible defaults ship in code) ----
+      # Mongo pool per instance (default 50) and per-IP rate limits
+      # (defaults: 300/min general, 100/15min auth, 30/15min payments).
+      # - key: MONGO_MAX_POOL_SIZE
+      #   value: "50"
+      # - key: RATE_LIMIT_GENERAL
+      #   value: "300"
+      # Shared rate-limit store. Counters are in memory per instance, so N
+      # replicas multiply every bucket by N. The buckets named here are backed
+      # by a small MongoDB collection instead (no Redis needed), which keeps
+      # the security-critical ones exact across the fleet.
+      # Default "auth,strict"; use "all" to share every bucket (heavier).
+      # - key: RATE_LIMIT_SHARED
+      #   value: "auth,strict"
+      # NOTE: the server writes uploads to local disk, so multiple
+      # instances need a shared/object store (S3/R2) before scaling out.

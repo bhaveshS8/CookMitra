@@ -8,8 +8,8 @@ const FRONTEND_BASE_URL = (
   "http://localhost:3000"
 ).replace(/\/$/, "");
 
-const buildTrackingUrl = (bookingId) =>
-  bookingId ? `${FRONTEND_BASE_URL}/track/${bookingId}` : null;
+const bookingUrl = (bookingId) =>
+  bookingId ? `${FRONTEND_BASE_URL}/bookings/${bookingId}` : null;
 
 const normalizeIndianMobile = (phone) => {
   const digits = String(phone || "").replace(/\D/g, "");
@@ -37,7 +37,7 @@ const buildBookingWhatsAppUrl = ({ cookPhone, customerName, customerPhone, booki
     `Date: ${dateStr} | Time: ${booking?.startTime || ""} - ${booking?.endTime || ""}`,
     `Venue: ${booking?.address || ""}`,
   ];
-  if (mapsLink) lines.push(`Live location: ${mapsLink}`);
+  if (mapsLink) lines.push(`Venue pin: ${mapsLink}`);
   if (booking?.guests) lines.push(`Guests: ${booking.guests}`);
   if (booking?.durationHours) lines.push(`Duration: ${booking.durationHours} hrs`);
   if (booking?.selectedItems?.length) lines.push(`Dishes: ${booking.selectedItems.join(", ")}`);
@@ -49,18 +49,14 @@ const buildBookingWhatsAppUrl = ({ cookPhone, customerName, customerPhone, booki
 };
 
 // Build a wa.me link targeting the CUSTOMER's own WhatsApp: sends their order
-// details + the cook's live location (when shared) so the user can track the
-// cook. Returns null when the customer has no valid number.
+// details + booking confirmation (cook name/phone, venue pin). Cook live
+// location tracking was removed — no live pins or tracking links here.
+// Returns null when the customer has no valid number.
 // After the cook ACCEPTS, this is the "booked" confirmation containing:
-// cook name, cook phone number, cook live-location maps link + site tracking link.
-const buildCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone, cookLocation, booking, trackingUrl }) => {
+// cook name, cook phone number and the venue pin.
+const buildCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone, booking }) => {
   const mobile = normalizeIndianMobile(customerPhone);
   if (!mobile) return null;
-
-  const cookMapsLink =
-    cookLocation?.lat != null && cookLocation?.lng != null
-      ? `https://www.google.com/maps?q=${cookLocation.lat},${cookLocation.lng}`
-      : null;
 
   const venueMapsLink =
     booking?.location?.lat != null && booking?.location?.lng != null
@@ -71,8 +67,6 @@ const buildCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone, cookLoca
 
   const isConfirmed = ["accepted", "confirmed", "in_progress"].includes(booking?.status);
   const isPaid = booking?.payment?.status === "paid";
-  const trackLink =
-    trackingUrl || (booking?._id ? buildTrackingUrl(booking._id) : null);
 
   const header = isPaid
     ? "*Cook Mitra Booking Confirmed \u2014 Payment Received* \u2705"
@@ -89,13 +83,7 @@ const buildCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone, cookLoca
     `Service hours: ${booking?.startTime || ""} - ${booking?.endTime || ""}${booking?.durationHours ? ` (${booking.durationHours} hrs)` : ""}`,
     `Venue: ${booking?.address || ""}`,
   ];
-  if (trackLink) lines.push(`Live tracking link: ${trackLink}`);
   if (venueMapsLink) lines.push(`Your venue pin: ${venueMapsLink}`);
-  if (cookMapsLink) {
-    lines.push(`Cook's live location: ${cookMapsLink}`);
-  } else {
-    lines.push("Cook's live location: will be shared here once the cook is on the way.");
-  }
   if (booking?.guests) lines.push(`Guests: ${booking.guests}`);
   if (booking?.durationHours) lines.push(`Duration: ${booking.durationHours} hrs`);
   if (booking?.selectedItems?.length) lines.push(`Dishes: ${booking.selectedItems.join(", ")}`);
@@ -110,7 +98,7 @@ const buildCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone, cookLoca
 // sent right after the customer's payment succeeds (cook already accepted),
 // so the cook receives the customer's name, phone number and venue location
 // (address + GPS pin) in one tap. Returns null for invalid cook numbers.
-const buildCookJobSheetWhatsAppUrl = ({ cookPhone, customerName, customerPhone, booking, trackingUrl }) => {
+const buildCookJobSheetWhatsAppUrl = ({ cookPhone, customerName, customerPhone, booking }) => {
   const mobile = normalizeIndianMobile(cookPhone);
   if (!mobile) return null;
 
@@ -146,8 +134,6 @@ const buildCookJobSheetWhatsAppUrl = ({ cookPhone, customerName, customerPhone, 
   if (booking?.selectedItems?.length) lines.push(`Dishes: ${booking.selectedItems.join(", ")}`);
   if (booking?.notes) lines.push(`Notes: ${booking.notes}`);
   if (booking?._id) lines.push(`Booking ID: ${booking._id}`);
-  const trackLink = trackingUrl || (booking?._id ? buildTrackingUrl(booking._id) : null);
-  if (trackLink) lines.push(`Live tracking: ${trackLink}`);
   lines.push("The customer has PAID. Please reach the venue on time.");
 
   return `https://wa.me/91${mobile}?text=${encodeURIComponent(lines.join("\n"))}`;
@@ -190,7 +176,7 @@ const buildReviewWhatsAppUrl = ({ customerPhone, cookName, booking, reviewUrl })
   if (!mobile) return null;
 
   const dateStr = booking?.date ? new Date(booking.date).toLocaleDateString("en-IN") : "";
-  const link = reviewUrl || (booking?._id ? buildTrackingUrl(booking._id).replace("/track/", "/bookings/") : null);
+  const link = reviewUrl || bookingUrl(booking?._id);
 
   const lines = [
     "*Cook Mitra: How was your meal? Please rate your cook* ⭐",
@@ -206,4 +192,4 @@ const buildReviewWhatsAppUrl = ({ customerPhone, cookName, booking, reviewUrl })
   return `https://wa.me/91${mobile}?text=${encodeURIComponent(lines.join("\n"))}`;
 };
 
-module.exports = { normalizeIndianMobile, buildBookingWhatsAppUrl, buildCustomerWhatsAppUrl, buildCookJobSheetWhatsAppUrl, buildHoursCompleteWhatsAppUrl, buildReviewWhatsAppUrl, buildTrackingUrl, FRONTEND_BASE_URL };
+module.exports = { normalizeIndianMobile, buildBookingWhatsAppUrl, buildCustomerWhatsAppUrl, buildCookJobSheetWhatsAppUrl, buildHoursCompleteWhatsAppUrl, buildReviewWhatsAppUrl, bookingUrl, FRONTEND_BASE_URL };

@@ -1,11 +1,15 @@
 const Notification = require("../models/Notification");
+const { paginationParams, applyPagination, sendList } = require("../utils/pagination");
 
 exports.getNotifications = async (req, res, next) => {
   try {
-    const notifications = await Notification.find({ user: req.user.id }).sort({
-      createdAt: -1,
-    });
-    res.json(notifications);
+    const filter = { user: req.user.id };
+    const pg = paginationParams(req);
+    const notifications = await applyPagination(
+      Notification.find(filter).sort({ createdAt: -1 }),
+      pg
+    );
+    return sendList(res, notifications, pg, () => Notification.countDocuments(filter));
   } catch (error) {
     next(error);
   }

@@ -13,6 +13,7 @@ const {
   rejectionReason,
   computeDiscount,
 } = require("./utils/coupons");
+const { INITIAL_COUPONS, RETIRED_COUPON_CODES } = require("./utils/couponCatalog");
 
 let failures = 0;
 const check = (name, ok, detail) => {
@@ -26,9 +27,9 @@ check("3h costs 499", slabPriceForDuration(3) === 499);
 check("5h has no slab", slabPriceForDuration(5) === null);
 check("halves have no slab", slabPriceForDuration(1.5) === null);
 check("isSlabDuration guards", isSlabDuration(4) === true && isSlabDuration(0) === false);
-check("commission is ~10%", COMMISSION_RATE === 0.1);
+check("commission is 25%", COMMISSION_RATE === 0.25);
 const split = splitPayout(449);
-check("449 splits 45/404", split.commission === 45 && split.cookPayout === 404, JSON.stringify(split));
+check("449 splits 112/337", split.commission === 112 && split.cookPayout === 337, JSON.stringify(split));
 
 // ── Flat coupons ────────────────────────────────────────────────────────────
 const flat50 = { discountType: "flat", flatAmount: 50, minOrder: 399 };
@@ -51,6 +52,62 @@ const scoped = { ...flat50, perUserLimit: null, usedBy: [], applicableServices: 
 check("wrong service rejected", rejectionReason(scoped, { amount: 499, serviceType: "cook_for_me" }) === "This coupon is not valid for the selected service.");
 check("right service passes", rejectionReason(scoped, { amount: 499, serviceType: "teach_me" }) === null);
 check("code normalized", normalizeCode(" welcome50 ") === "WELCOME50");
+
+// ── Coupon catalogue invariants ─────────────────────────────────────────────
+// These guard the class of bug where a shipped coupon can never be redeemed
+// (FESTIVE100 shipped with a ₹799 minimum against a ₹649 top slab) and the
+// promise that a discount never eats into the cook's 75% share.
+const SLABS = Object.values(LAUNCH_SLABS);
+const cache = {};
+
+for (const c of INITIAL_COUPONS) {
+  const label = `[${c.code}]`;
+  cache[c.code] = c;
+
+  // 1. At least one launch slab must actually qualify for the offer.
+  const eligible = SLABS.filter(
+    (slab) =>
+      rejectionReason({ ...c, active: true }, { amount: slab }) === null &&
+      computeDiscount(c, slab) > 0
+  );
+  check(
+    `${label} redeemable on a launch slab`,
+    eligible.length > 0,
+    eligible.length ? `slabs ${eligible.join(", ")}` : `min order ₹${c.minOrder} exceeds top slab ₹${Math.max(...SLABS)}`
+  );
+
+  // 2. The discount must fit inside the platform's 25% commission on the
+  //    cheapest eligible slab — otherwise the cook silently funds the promo.
+  if (eligible.length > 0) {
+    const cheapest = Math.min(...eligible);
+    const discount = computeDiscount(c, cheapest);
+    const commission = splitPayout(cheapest).commission;
+    check(
+      `${label} discount fits platform commission`,
+      discount <= commission,
+      `₹${discount} off ₹${cheapest} vs ₹${commission} commission`
+    );
+  }
+
+  // 3. Percent coupons must be capped, or deep slabs get over-discounted.
+  if (c.discountType === "percent") {
+    check(`${label} percent coupon has a cap`, c.maxDiscount != null, `maxDiscount=${c.maxDiscount}`);
+  }
+}
+
+check(
+  "catalogue codes are unique",
+  new Set(INITIAL_COUPONS.map((c) => c.code)).size === INITIAL_COUPONS.length
+);
+check(
+  "retired codes never overlap the catalogue",
+  RETIRED_COUPON_CODES.every((code) => !cache[code]),
+  RETIRED_COUPON_CODES.filter((code) => cache[code]).join(", ")
+);
+check(
+  "at least one coupon ships active",
+  INITIAL_COUPONS.some((c) => c.active === true)
+);
 
 console.log(failures === 0 ? "ALL TESTS PASSED" : failures + " FAILURES");
 process.exit(failures === 0 ? 0 : 1);

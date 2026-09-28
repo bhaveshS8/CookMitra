@@ -5,12 +5,15 @@ const validate = require("../middleware/validate");
 const { auth, authorize } = require("../middleware/auth");
 const {
   getAvailability,
+  searchAvailability,
   getMySlots,
   setAvailability,
   removeAvailability,
 } = require("../controllers/availabilityController");
 
 router.get("/my", auth, authorize("cook"), getMySlots);
+// Batched search MUST sit above "/:cookId" or "search" parses as a cook id.
+router.get("/search", searchAvailability);
 router.get("/:cookId", getAvailability);
 
 router.post(

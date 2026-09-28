@@ -105,6 +105,7 @@ const couponSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-couponSchema.index({ active: 1, validTo: 1 });
+// Covers the public active-list filter (validFrom/validTo/usageLimit).
+couponSchema.index({ active: 1, validFrom: 1, validTo: 1 });
 
 module.exports = mongoose.model("Coupon", couponSchema);

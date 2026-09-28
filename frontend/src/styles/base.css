@@ -52,12 +52,12 @@
   --radius-lg: 20px;
   --radius-xl: 28px;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(15, 23, 42, 0.07);
-  --shadow-md: 0 8px 20px -8px rgba(15, 23, 42, 0.16), 0 3px 8px -4px rgba(15, 23, 42, 0.07);
-  --shadow-lg: 0 24px 48px -16px rgba(15, 23, 42, 0.24), 0 10px 20px -10px rgba(15, 23, 42, 0.1);
-  --shadow-brand: 0 10px 26px -8px rgba(232, 89, 12, 0.5);
-  --shadow-amber: 0 12px 28px -10px rgba(245, 158, 11, 0.45);
+  /* Shadows — layered elevation: tight contact + soft ambient */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.08), 0 6px 16px -8px rgba(15, 23, 42, 0.12);
+  --shadow-md: 0 1px 2px rgba(15, 23, 42, 0.06), 0 6px 16px -6px rgba(15, 23, 42, 0.14), 0 16px 34px -14px rgba(15, 23, 42, 0.22);
+  --shadow-lg: 0 2px 4px rgba(15, 23, 42, 0.06), 0 12px 28px -10px rgba(15, 23, 42, 0.2), 0 30px 60px -20px rgba(15, 23, 42, 0.28);
+  --shadow-brand: 0 2px 4px rgba(154, 52, 18, 0.25), 0 12px 28px -8px rgba(232, 89, 12, 0.55);
+  --shadow-amber: 0 2px 4px rgba(146, 64, 14, 0.2), 0 14px 30px -10px rgba(245, 158, 11, 0.5);
 
   /* Type */
   --font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Inter", Roboto, "Helvetica Neue", Arial, sans-serif;

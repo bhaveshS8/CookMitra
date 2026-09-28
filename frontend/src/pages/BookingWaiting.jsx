@@ -15,7 +15,9 @@ import { useShowToast } from "../store/hooks";
 import { SERVICE_DETAILS, formatDate } from "../utils/constants";
 
 const WINDOW_MS = 5 * 60 * 1000; // 5-minute acceptance window
-const POLL_MS = 4000;
+// Calmed for scale: 4s x 1000 waiting users ~= 250 rps sustained. 8s halves
+// that; visibility-change pause below stops background-tab polling entirely.
+const POLL_MS = 8000;
 const REDIRECT_S = 6;
 
 const FACTS = [
@@ -46,7 +48,7 @@ const SORRY_COPY = {
 
 // Snapshot of the dead request so "Find another cook" can land straight on
 // step 3 (venue + cook list) with the same date/slot, minus the cook who
-// didn't respond. CookOnDemand.jsx consumes this via location.state.
+// didn't respond. CookBooking.jsx consumes this via location.state.
 const toLocalDayStr = (d) => {
   if (!d) return "";
   const dt = d instanceof Date ? d : new Date(d);
@@ -98,6 +100,7 @@ const BookingWaiting = () => {
   const [redirectIn, setRedirectIn] = useState(REDIRECT_S);
   const handledRef = useRef(false);
   const aliveRef = useRef(true);
+  const pollRef = useRef(null);
 
   const load = useCallback(async () => {
     try {
@@ -136,12 +139,33 @@ const BookingWaiting = () => {
   useEffect(() => {
     aliveRef.current = true;
     load();
-    const poll = setInterval(load, POLL_MS);
+    // Pause polling while the tab is hidden — background tabs otherwise keep
+    // hammering the API for users who switched away mid-wait.
+    const startPoll = () => {
+      stopPoll();
+      pollRef.current = setInterval(() => {
+        if (!document.hidden) load();
+      }, POLL_MS);
+    };
+    const stopPoll = () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = null;
+    };
+    const onVis = () => {
+      if (document.hidden) stopPoll();
+      else {
+        load();
+        startPoll();
+      }
+    };
+    startPoll();
+    document.addEventListener("visibilitychange", onVis);
     const tick = setInterval(() => setNow(Date.now()), 1000);
     const facts = setInterval(() => setFactIdx((i) => (i + 1) % FACTS.length), 5200);
     return () => {
       aliveRef.current = false;
-      clearInterval(poll);
+      stopPoll();
+      document.removeEventListener("visibilitychange", onVis);
       clearInterval(tick);
       clearInterval(facts);
     };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { logout } from "../store/authSlice";
@@ -41,6 +41,9 @@ const Navbar = () => {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  // Interval handle for the unread-notifications poll (cleared on unmount and
+  // while the tab is hidden).
+  const pollRef = useRef(null);
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -95,10 +98,31 @@ const Navbar = () => {
       }
     };
     fetchUnread();
-    const id = setInterval(fetchUnread, 30000);
+    // Calmed for scale: 30s -> 60s + hidden-tab pause. The badge is
+    // best-effort; the Notifications page is the source of truth.
+    const startPoll = () => {
+      stopPoll();
+      pollRef.current = setInterval(() => {
+        if (!document.hidden) fetchUnread();
+      }, 60000);
+    };
+    const stopPoll = () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = null;
+    };
+    const onVis = () => {
+      if (document.hidden) stopPoll();
+      else {
+        fetchUnread();
+        startPoll();
+      }
+    };
+    startPoll();
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       cancelled = true;
-      clearInterval(id);
+      stopPoll();
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, [user]);
 
@@ -146,6 +170,15 @@ const Navbar = () => {
                 <ChefHat size={16} />
                 Book a Cook
               </NavLink>
+              {/* Guests browse event booking; customers reach it from their
+                  Events dashboard page (nav-link below) to avoid two "Events"
+                  buttons side by side. */}
+              {!user && (
+                <NavLink to="/events" className="btn btn-outline btn-sm">
+                  <Calendar size={17} />
+                  Events
+                </NavLink>
+              )}
 
               <div className="nav-divider"></div>
             </>
@@ -162,6 +195,18 @@ const Navbar = () => {
                 >
                   <Calendar size={17} />
                   My Bookings
+                </NavLink>
+              )}
+
+              {user.role === "customer" && (
+                <NavLink
+                  to="/dashboard/event-bookings"
+                  className={({ isActive }) =>
+                    isActive ? "nav-link active" : "nav-link"
+                  }
+                >
+                  <Calendar size={17} />
+                  Events
                 </NavLink>
               )}
 
@@ -256,8 +301,19 @@ const Navbar = () => {
           )}
         </div>
 
-        {/* Mobile actions: bell + menu toggle (visible on small screens only) */}
+        {/* Mobile actions: avatar + bell + menu toggle (small screens only) */}
         <div className="navbar-mobile-actions">
+          {user && (
+            <Link
+              to={profilePath}
+              className="nav-icon-btn mobile-avatar"
+              title="Go to my profile"
+              aria-label={`Go to my profile (${user.name})`}
+              onClick={closeMobile}
+            >
+              <NavAvatar name={user.name} photo={cookPhoto} />
+            </Link>
+          )}
           {user && (user.role === "customer" || user.role === "cook") && (
             <NavLink
               to="/dashboard/notifications"
@@ -302,6 +358,14 @@ const Navbar = () => {
                 <ChefHat size={18} />
                 Book a Cook
               </NavLink>
+              <NavLink
+                to="/events"
+                className="btn btn-outline btn-block"
+                onClick={closeMobile}
+              >
+                <Calendar size={18} />
+                {user ? "Book an Event Cook" : "Events"}
+              </NavLink>
             </>
           )}
 
@@ -317,6 +381,19 @@ const Navbar = () => {
                 >
                   <Calendar size={18} />
                   My Bookings
+                </NavLink>
+              )}
+
+              {user.role === "customer" && (
+                <NavLink
+                  to="/dashboard/event-bookings"
+                  className={({ isActive }) =>
+                    isActive ? "nav-link active" : "nav-link"
+                  }
+                  onClick={closeMobile}
+                >
+                  <Calendar size={18} />
+                  Events
                 </NavLink>
               )}
 

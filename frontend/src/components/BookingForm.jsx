@@ -4,14 +4,18 @@ import API from "../api/axios";
 import { useDispatch, useSelector } from "react-redux";
 import { updateUser } from "../store/authSlice";
 import { useShowToast, useSiteLocation } from "../store/hooks";
+import { AnalyticsEvents, track } from "../utils/analytics";
 import { formatCurrency, localTodayStr, slabPriceForDuration, LAUNCH_SLAB_PRICES } from "../utils/constants";
 import { saveBookingDraft, loadBookingDraft, clearBookingDraft } from "../utils/bookingDraft";
 import CouponApply from "./CouponApply";
+import CustomCalendar from "./CustomCalendar";
 import {
   Calendar, CalendarDays, Clock, AlertCircle, Navigation,
   History, Copy, Check, ChefHat, Users, BookOpen, Scissors,
   MapPin, StickyNote, ArrowRight, ChevronLeft,
-  BadgePercent, ShieldCheck, Sparkles
+  BadgePercent, ShieldCheck, Sparkles, Minus, Plus,
+  Pencil, MapPinned, Wallet, Timer, PartyPopper, Sun,
+  Sunset, MoonStar
 } from "lucide-react";
 import LoginPromptModal from "./LoginPromptModal";
 
@@ -85,10 +89,10 @@ const nextNDays = (n) => {
 
 /* ── Config ──────────────────────────────────────────────────────────── */
 const SERVICE_OPTIONS = [
-  { value: "cook_for_me", label: "Cook for me", icon: ChefHat, desc: "Full meal prep" },
-  { value: "cook_with_me", label: "Cook with me", icon: Users, desc: "Cook together" },
-  { value: "teach_me", label: "Teach me", icon: BookOpen, desc: "Masterclass" },
-  { value: "preparation_help", label: "Prep help", icon: Scissors, desc: "Chop & fry" },
+  { value: "cook_for_me", label: "Cook for me", icon: ChefHat, desc: "Full meal, you relax", tag: "Most booked" },
+  { value: "cook_with_me", label: "Cook with me", icon: Users, desc: "Cook together", tag: null },
+  { value: "teach_me", label: "Teach me", icon: BookOpen, desc: "1-on-1 masterclass", tag: null },
+  { value: "preparation_help", label: "Prep help", icon: Scissors, desc: "Chop, clean & fry", tag: "Quick" },
 ];
 
 const DURATION_OPTIONS = [1, 2, 3, 4];
@@ -111,6 +115,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
     society: "",
     landmark: "",
     city: "",
+    guests: "",
     notes: "",
   }));
   const [step, setStep] = useState(0);
@@ -128,6 +133,8 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [slotBusyError, setSlotBusyError] = useState("");
+  const [checkingSlot, setCheckingSlot] = useState(false);
   const [coords, setCoords] = useState(null);
   const [locMsg, setLocMsg] = useState("");
   const [resolvedCookUserId, setResolvedCookUserId] = useState(cookUserId || null);
@@ -223,6 +230,12 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
 
   const goNext = () => {
     if (step === 0 && !formData.serviceType) { setError("Select a service type"); scrollToError(); return; }
+    if (step === 0) {
+      track(AnalyticsEvents.BOOKING_START, {
+        service_type: formData.serviceType,
+        ...(cookId ? { cook_id: String(cookId) } : {}),
+      });
+    }
     if (step === 1) {
       if (!formData.date) { setError("Please choose a date"); scrollToError(); return; }
       if (formData.date < minDateStr) { setError("That date already passed — please pick today or a future date"); scrollToError(); return; }
@@ -230,10 +243,62 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
       if (!formData.startTime) { setError("Select a start time"); scrollToError(); return; }
       if (!derivedEndTime) { setError("That start + duration ends after 8 PM — pick an earlier start"); scrollToError(); return; }
       if (startInPast) { setError("That time already passed today — pick a later start"); scrollToError(); return; }
+      // A re-verified busy slot must not advance — pick another time.
+      if (slotBusyError) { setError(slotBusyError); scrollToError(); return; }
+      if (checkingSlot) { setError("Checking live availability — one moment…"); scrollToError(); return; }
     }
     setError("");
     setStep(step + 1);
   };
+
+  // Live per-cook check for the picked slot: the hour grid is static, but
+  // another customer may have booked this cook for the same hours since the
+  // page loaded. Re-verify the exact [startTime, endTime] is still free before
+  // enabling "Send Request", so a busy cook can never be booked from a stale
+  // card. Runs only on step 1 where the slot is picked.
+  useEffect(() => {
+    setSlotBusyError("");
+    if (step !== 1 || !hoursValid || !formData.startTime || !derivedEndTime || !formData.date) return;
+    const target = resolvedCookUserId || cookUserId || null;
+    if (!target) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      setCheckingSlot(true);
+      try {
+        const chk = await API.get(`/availability/${encodeURIComponent(target)}`, {
+          params: { date: formData.date, startTime: formData.startTime, endTime: derivedEndTime },
+        });
+        if (cancelled) return;
+        if (chk?.data && typeof chk.data === "object" && "free" in chk.data) {
+          if (chk.data.free !== true) {
+            setSlotBusyError(chk.data.reason || "This cook just got booked for those hours — please pick another time.");
+          }
+        } else {
+          // Legacy array shape fallback: confirm the picked start survives.
+          const list = Array.isArray(chk?.data?.slots) ? chk.data.slots : chk?.data || [];
+          if (Array.isArray(list)) {
+            const ok = list.some(
+              (o) => String(o.startTime) === String(formData.startTime) && String(o.endTime) === String(derivedEndTime)
+            );
+            if (!ok) setSlotBusyError("This cook just got booked for those hours — please pick another time.");
+          }
+        }
+      } catch (err) {
+        if (cancelled) return;
+        // A 4xx means the slot is invalid/gone — surface it. Network failures
+        // leave the flow enabled (the server re-checks at creation).
+        if (err?.response?.status >= 400 && err?.response?.status < 500) {
+          setSlotBusyError(err.response?.data?.message || "That slot is no longer free — please pick another time.");
+        }
+      } finally {
+        if (!cancelled) setCheckingSlot(false);
+      }
+    }, 350);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [step, hoursValid, formData.startTime, derivedEndTime, formData.date, formData.durationHours, resolvedCookUserId, cookUserId]);
 
   /* ── Map pin ── */
   const pinMapsUrl = coords?.lat != null && coords?.lng != null
@@ -255,6 +320,17 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
       formData.landmark.trim() ? `, Near ${formData.landmark.trim()}` : ""
     }${formData.city.trim() ? `, ${formData.city.trim()}` : ""}`;
 
+  /* ── Profile address (locked summary card + Edit button) ── */
+  const profileAddress = String(user?.address || "").trim();
+  const [addrEditing, setAddrEditing] = useState(false);
+  // Summary shown while locked: the composed form address (profile/saved/
+  // detected fill), falling back to the raw profile string.
+  const addrSummary =
+    [formData.flatNo, formData.society, formData.landmark ? `Near ${formData.landmark}` : "", formData.city]
+      .map((p) => String(p || "").trim())
+      .filter(Boolean)
+      .join(", ") || profileAddress;
+
   /* ── Saved locations ── */
   const [savedLoaded, setSavedLoaded] = useState(false);
   useEffect(() => {
@@ -270,10 +346,10 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
     if (user?.role !== "customer" || user?.address !== undefined) return;
     let cancelled = false;
     API.get("/auth/me")
-      .then((res) => { if (!cancelled) dispatch(updateUser({ name: res.data?.name, phone: res.data?.phone, address: res.data?.address })); })
+      .then((res) => { if (!cancelled) dispatch(updateUser({ name: res.data?.name, phone: res.data?.phone, address: res.data?.address ?? "" })); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [user?.role, user?.address]);
+  }, [user?.role, user?.address, dispatch]);
 
   const applySavedLocation = (idx) => {
     const saved = savedLocations[Number(idx)];
@@ -310,33 +386,47 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
     }
   };
 
+  // Auto-fill priority: profile address > most recent saved booking >
+  // (next effect) browser-detected location. A profile address also starts
+  // the form in "locked" mode (summary card + Edit button). An explicit pick
+  // from the saved-places dropdown always wins once made.
   useEffect(() => {
     if (autoFilled.current || !savedLoaded || user?.role !== "customer") return;
-    if (savedLocations.length > 0) {
-      autoFilled.current = true;
+    // Profile is still loading via /auth/me — wait so it can claim priority.
+    if (user?.address === undefined) return;
+    const fill = (src) =>
       setFormData((prev) => {
         if (prev.flatNo || prev.society || prev.landmark || prev.city) return prev;
-        const d = savedLocations[0].addressDetails || {};
-        return { ...prev, flatNo: d.flatNo || "", society: d.society || "", landmark: d.landmark || "", city: d.city || "" };
+        return {
+          ...prev,
+          flatNo: src.flatNo || "",
+          society: src.society || "",
+          landmark: src.landmark || "",
+          city: src.city || "",
+        };
       });
+    const profileAddr = String(user?.address || "").trim();
+    if (profileAddr) {
+      autoFilled.current = true;
+      // Split "Flat 402, Sunshine Society, Baner, Pune" into the form fields,
+      // same heuristic as applySavedLocation for unstructured addresses.
+      const parts = profileAddr.split(",").map((p) => p.trim()).filter(Boolean);
+      fill(
+        parts.length === 1
+          ? { society: parts[0] }
+          : parts.length === 2
+            ? { flatNo: parts[0], society: parts[1] }
+            : { flatNo: parts[0], society: parts.slice(1, -1).join(", "), city: parts[parts.length - 1] }
+      );
+      return;
+    }
+    if (savedLocations.length > 0) {
+      autoFilled.current = true;
+      fill(savedLocations[0].addressDetails || {});
       setSavedIdx("0");
       if (savedLocations[0].location?.lat != null) {
         setCoords({ lat: savedLocations[0].location.lat, lng: savedLocations[0].location.lng });
       }
-      return;
-    }
-    const profileAddress = user?.address?.trim();
-    if (profileAddress) {
-      autoFilled.current = true;
-      const parts = profileAddress.split(",").map((p) => p.trim()).filter(Boolean);
-      let flatNo = "", society = "", city = "";
-      if (parts.length === 1) society = parts[0];
-      else if (parts.length === 2) [flatNo, society] = parts;
-      else if (parts.length > 2) { flatNo = parts[0]; city = parts[parts.length - 1]; society = parts.slice(1, -1).join(", "); }
-      setFormData((prev) => {
-        if (prev.flatNo || prev.society || prev.landmark || prev.city) return prev;
-        return { ...prev, flatNo, society, city };
-      });
     }
   }, [savedLocations, savedLoaded, user?.role, user?.address]);
 
@@ -347,6 +437,9 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
   useEffect(() => {
     if (!siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
     if (autoFilled.current) return;
+    // Logged-in customers: hold off until the profile fetch settles so a
+    // profile address keeps priority over the browser-detected location.
+    if (user?.role === "customer" && user?.address === undefined) return;
     autoFilled.current = true;
     setFormData((prev) => {
       if (prev.flatNo || prev.society || prev.landmark || prev.city) return prev;
@@ -360,7 +453,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
     if (Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng)) {
       setCoords((c) => c || { lat: siteLocation.lat, lng: siteLocation.lng });
     }
-  }, [siteLocation?.city, siteLocation?.area, siteLocation?.state, siteLocation?.street, siteLocation?.lat, siteLocation?.lng]);
+  }, [siteLocation?.city, siteLocation?.area, siteLocation?.state, siteLocation?.street, siteLocation?.lat, siteLocation?.lng, user?.role, user?.address]);
 
   // Returning from login with an unfinished booking for THIS cook: restore
   // the filled fields + pin and land back on the confirm step. Runs once;
@@ -408,9 +501,34 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
     if (!formData.startTime || !derivedEndTime) { fail("Pick a start time"); return; }
     if (endsAfterServiceDay) { fail("Must end by 8 PM"); return; }
     if (startInPast) { fail("Time passed — pick later"); return; }
+    // Block submit on a re-verified busy slot (the check runs on step 1, but
+    // the slot can fill while the customer types the address on step 2).
+    if (slotBusyError) { fail(slotBusyError); return; }
+    if (checkingSlot) { fail("Checking live availability — one moment…"); return; }
+    // Final guard at submit: re-verify the exact window is still free so a
+    // stale review screen can never book a cook who just got booked.
+    try {
+      const chk = await API.get(`/availability/${encodeURIComponent(resolvedCookUserId)}`, {
+        params: { date: formData.date, startTime: formData.startTime, endTime: derivedEndTime },
+      });
+      if (chk?.data && typeof chk.data === "object" && "free" in chk.data && chk.data.free !== true) {
+        fail(chk.data.reason || "This cook just got booked for those hours — please pick another time.");
+        return;
+      }
+    } catch (chkErr) {
+      if (chkErr?.response?.status >= 400 && chkErr?.response?.status < 500) {
+        fail(chkErr.response?.data?.message || "That slot is no longer free — please pick another time.");
+        return;
+      }
+      // Network failure: fall through — the server re-checks at creation.
+    }
 
     if (!formData.flatNo.trim()) { fail("Enter flat / house number"); return; }
     if (!formData.society.trim()) { fail("Enter society / street"); return; }
+    if (!formData.city.trim()) { fail("Enter city / area"); return; }
+    if (formData.guests !== "" && (!Number.isInteger(Number(formData.guests)) || Number(formData.guests) < 1 || Number(formData.guests) > 500)) {
+      fail("Guests must be between 1 and 500"); return;
+    }
 
     setSubmitting(true); setError("");
     try {
@@ -430,6 +548,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
         },
         notes: formData.notes,
         selectedItems,
+        guests: formData.guests === "" ? undefined : Number(formData.guests),
         durationHours: serviceHours,
         couponCode: coupon?.code || "",
         amount: finalAmount,
@@ -437,6 +556,14 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
       if (coords) payload.location = coords;
       const res = await API.post("/bookings", payload);
       clearBookingDraft();
+      track(AnalyticsEvents.BOOKING_REQUESTED, {
+        booking_id: String(res.data?._id || ""),
+        service_type: formData.serviceType,
+        duration_hours: serviceHours,
+        amount: Number(finalAmount) || 0,
+        ...(coupon?.code ? { coupon_code: coupon.code } : {}),
+        ...(cookId ? { cook_id: String(cookId) } : {}),
+      });
       showToast("Request sent — slot held for 5 min.", "success", 7000);
       onSubmit?.(res.data);
       navigate(`/bookings/${res.data._id}/wait`);
@@ -457,61 +584,129 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
   const STEP_DESCS = ["What do you need?", "When should we come?", "Where & review"];
 
   /* ════════════════════════════════════════════════════════════════════ */
-  return (
-  <div className={`bk bk-modern bk-step-${step}`}>
+  const cookFirst = cookName ? String(cookName).split(" ")[0] : null;
+  const cookInitial = cookFirst ? cookFirst[0].toUpperCase() : "C";
+  const progressPct = ((step + 1) / STEP_TITLES.length) * 100;
 
-    {/* Header */}
+  const groupHours = (list) => {
+    const groups = [
+      { key: "morning", label: "Morning", hint: "8 am – 12 pm", icon: Sun },
+      { key: "afternoon", label: "Afternoon", hint: "12 – 4 pm", icon: Sunset },
+      { key: "evening", label: "Evening", hint: "4 – 8 pm", icon: MoonStar },
+    ];
+    const byKey = { morning: [], afternoon: [], evening: [] };
+    list.forEach((t) => {
+      const mins = hmToMinutes(t);
+      if (mins == null) { byKey.morning.push(t); return; }
+      const h = Math.floor(mins / 60);
+      if (h < 12) byKey.morning.push(t);
+      else if (h < 16) byKey.afternoon.push(t);
+      else byKey.evening.push(t);
+    });
+    return groups.map((g) => ({ ...g, times: byKey[g.key] })).filter((g) => g.times.length > 0);
+  };
+  const hourGroups = groupHours(hourOptions);
+
+  const savingFor = (h) => {
+    const price = LAUNCH_SLAB_PRICES[h];
+    if (price == null || h <= 1) return 0;
+    return Math.max(0, LAUNCH_SLAB_PRICES[1] * h - price);
+  };
+
+  const setGuests = (v) => {
+    const n = v === "" ? "" : Math.max(1, Math.min(500, Number(v) || 1));
+    setFormData((p) => ({ ...p, guests: n === "" ? "" : String(Math.round(n)) }));
+  };
+
+  return (
+  <div className={`bk bk-modern bk-v2 bk-step-${step}`}>
+   <div className="bk-shell">
+
+    {/* Header — cook identity + trust + live price */}
     <div className="bk-head">
-      <div className="bk-head-text">
-        <span className="bk-eyebrow">
-          <Sparkles size={12} /> Instant booking
-        </span>
-        <h2 className="bk-title">{cookName ? `Book ${String(cookName).split(" ")[0]}` : "Book your cook"}</h2>
-        <p className="bk-sub">
-          <ShieldCheck size={13} /> Verified home cook · No payment now — slot held 5 min
-        </p>
-      </div>
-      {slab != null && hoursValid && (
-        <div className="bk-head-price" aria-live="polite">
-          <span>{formData.durationHours} hr{Number(formData.durationHours) === 1 ? "" : "s"}</span>
-          <strong>{formatCurrency(finalAmount)}</strong>
+      <div className="bk-head-main">
+        <span className="bk-avatar" aria-hidden="true">{cookInitial}</span>
+        <div className="bk-head-text">
+          <span className="bk-eyebrow">
+            <Sparkles size={12} /> Instant booking · replies in ~5 min
+          </span>
+          <h2 className="bk-title">{cookFirst ? `Book ${cookFirst}` : "Book your cook"}</h2>
+          <p className="bk-sub">
+            <span className="bk-trust"><ShieldCheck size={13} /> Verified</span>
+            <span className="bk-dot" aria-hidden="true" />
+            <span>No payment now</span>
+            <span className="bk-dot" aria-hidden="true" />
+            <span>Free reschedule</span>
+          </p>
         </div>
-      )}
+      </div>
+      <div className="bk-head-price" aria-live="polite">
+        {slab != null && hoursValid ? (
+          <>
+            <span className="bk-head-price-label">{formData.durationHours} hr{Number(formData.durationHours) === 1 ? "" : "s"} · all-in</span>
+            <strong>{formatCurrency(finalAmount)}</strong>
+            {discount > 0 && <em className="bk-head-save">You save {formatCurrency(discount)}</em>}
+          </>
+        ) : (
+          <>
+            <span className="bk-head-price-label">Starting at</span>
+            <strong>{formatCurrency(LAUNCH_SLAB_PRICES[1])}</strong>
+            <em className="bk-head-save">Flat launch pricing</em>
+          </>
+        )}
+      </div>
     </div>
 
     {/* Error alert */}
     {error && (
       <div ref={errorRef} className="bk-error" role="alert">
-        <AlertCircle size={14} /> {error}
+        <span className="bk-error-icon"><AlertCircle size={15} /></span>
+        <span>{error}</span>
       </div>
     )}
 
-    {/* Step progress */}
-    <ol className="bk-steps-modern" aria-label="Booking progress">
-      {STEP_TITLES.map((title, i) => (
-        <li
-          key={title}
-          className={`bk-step-item ${i < step ? "done" : i === step ? "active" : ""}`}
-          aria-current={i === step ? "step" : undefined}
-        >
-          <span className="bk-step-num" aria-hidden="true">
-            {i < step ? <Check size={13} /> : i + 1}
-          </span>
-          <span className="bk-step-text">
-            <span className="bk-step-name">{title}</span>
-            <span className="bk-step-desc">{STEP_DESCS[i]}</span>
-          </span>
-          {i < STEP_TITLES.length - 1 && <span className="bk-step-link" aria-hidden="true" />}
-        </li>
-      ))}
-    </ol>
+    {/* Step progress — clickable to go back, with progress bar */}
+    <div className="bk-progress-wrap">
+      <ol className="bk-steps-modern" aria-label="Booking progress">
+        {STEP_TITLES.map((title, i) => {
+          const done = i < step;
+          const active = i === step;
+          const clickable = i < step;
+          return (
+            <li
+              key={title}
+              className={`bk-step-item ${done ? "done" : active ? "active" : ""} ${clickable ? "clickable" : ""}`}
+              aria-current={active ? "step" : undefined}
+            >
+              <button
+                type="button"
+                className="bk-step-btn"
+                onClick={() => clickable && setStep(i)}
+                disabled={!clickable}
+                aria-label={clickable ? `Go back to ${title}` : `${title}, step ${i + 1}`}
+              >
+                <span className="bk-step-num" aria-hidden="true">
+                  {done ? <Check size={13} /> : i + 1}
+                </span>
+                <span className="bk-step-text">
+                  <span className="bk-step-name">{title}</span>
+                  <span className="bk-step-desc">{STEP_DESCS[i]}</span>
+                </span>
+              </button>
+              {i < STEP_TITLES.length - 1 && <span className="bk-step-link" aria-hidden="true"><span className="bk-step-fill" style={{ width: done ? "100%" : "0%" }} /></span>}
+            </li>
+          );
+        })}
+      </ol>
+      <div className="bk-progress-bar" aria-hidden="true"><span style={{ width: `${progressPct}%` }} /></div>
+    </div>
 
     {/* Live recap once anything is picked */}
     {(step > 0 && (scheduleSummary || serviceLabel)) && (
       <div className="bk-livebar" aria-live="polite">
-        <span className="bk-livechip">{serviceLabel}</span>
-        {scheduleSummary && <span className="bk-livechip bk-livechip-strong">{scheduleSummary}</span>}
-        {slab != null && hoursValid && <span className="bk-livechip bk-livechip-price">{formatCurrency(slab)}</span>}
+        <span className="bk-livechip"><PartyPopper size={12} /> {serviceLabel}</span>
+        {scheduleSummary && <span className="bk-livechip bk-livechip-strong"><Timer size={12} /> {scheduleSummary}</span>}
+        {slab != null && hoursValid && <span className="bk-livechip bk-livechip-price"><Wallet size={12} /> {formatCurrency(finalAmount)}</span>}
       </div>
     )}
 
@@ -520,11 +715,15 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
       {/* ── Step 0: Service Type ── */}
       {step === 0 && (
         <div className="bk-card">
-          <div className="bk-card-label">
-            <ChefHat size={14} /> Which service do you need?
+          <div className="bk-card-head-row">
+            <div className="bk-card-label">
+              <span className="bk-label-icon"><ChefHat size={15} /></span>
+              <span>Which service do you need?</span>
+            </div>
+            <span className="bk-card-count">Step 1 of 3</span>
           </div>
-          <p className="bk-card-hint">Same launch price for every service — pick what fits today.</p>
-          <div className="bk-service-grid">
+          <p className="bk-card-hint">Same flat launch price for every service — pick what fits today. You can change this later.</p>
+          <div className="bk-service-grid" role="radiogroup" aria-label="Choose a service">
             {SERVICE_OPTIONS.map((opt) => {
               const Icon = opt.icon;
               const active = formData.serviceType === opt.value;
@@ -532,16 +731,27 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
                 <button
                   key={opt.value}
                   type="button"
+                  role="radio"
+                  aria-checked={active}
                   className={`bk-service-card ${active ? "active" : ""}`}
                   onClick={() => setFormData((p) => ({ ...p, serviceType: opt.value }))}
                   aria-pressed={active}
                 >
-                  <Icon size={17} />
-                  <span className="bk-service-label">{opt.label}</span>
-                  <span className="bk-service-desc">{opt.desc}</span>
+                  {opt.tag && <span className="bk-service-tag">{opt.tag}</span>}
+                  <span className="bk-service-icon"><Icon size={18} /></span>
+                  <span className="bk-service-body">
+                    <span className="bk-service-label">{opt.label}</span>
+                    <span className="bk-service-desc">{opt.desc}</span>
+                  </span>
+                  <span className="bk-service-check" aria-hidden="true"><Check size={13} /></span>
                 </button>
               );
             })}
+          </div>
+          <div className="bk-assure-row">
+            <span><ShieldCheck size={13} /> Verified cook</span>
+            <span><Clock size={13} /> 8 am – 8 pm</span>
+            <span><BadgePercent size={13} /> No hidden fees</span>
           </div>
         </div>
       )}
@@ -549,12 +759,16 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
       {/* ── Step 1: Date, Duration & Start Hour ── */}
       {step === 1 && (
         <>
-          {/* Date carousel */}
+          {/* Date */}
           <div className="bk-card">
-            <div className="bk-card-label">
-              <CalendarDays size={14} /> Which date?
+            <div className="bk-card-head-row">
+              <div className="bk-card-label">
+                <span className="bk-label-icon bk-tint-blue"><CalendarDays size={15} /></span>
+                <span>Which date?</span>
+              </div>
+              <span className="bk-card-count">Step 2 of 3</span>
             </div>
-            <div className="bk-date-row" role="group" aria-label="Pick a date">
+            <div className="bk-date-grid" role="group" aria-label="Pick a date">
               {dateDays.map((d) => {
                 const active = formData.date === d;
                 return (
@@ -569,81 +783,120 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
                     <span className="bk-date-day">{isToday(d) ? "Today" : fmtDateDay(d)}</span>
                     <span className="bk-date-num">{fmtDateNum(d)}</span>
                     <span className="bk-date-mon">{fmtDateMonth(d)}</span>
+                    {active && <span className="bk-date-tick" aria-hidden="true"><Check size={11} /></span>}
                   </button>
                 );
               })}
             </div>
             <div className="bk-date-manual">
-              <Calendar size={13} />
-              <input
-                type="date"
-                name="date"
-                className="bk-date-input"
+              <span className="bk-manual-icon"><Calendar size={14} /></span>
+              <span className="bk-manual-text">Need a later date?</span>
+              <CustomCalendar
                 value={formData.date}
                 min={minDateStr}
-                onChange={handleChange}
-                aria-label="Or pick another date"
+                onChange={(d) => setFormData((p) => ({ ...p, date: d }))}
               />
-              {formData.date && (
-                <span className="bk-date-picked">{fmtDateShort(formData.date)}</span>
-              )}
             </div>
           </div>
 
-          {/* Duration — launch pricing cells are the selector */}
+          {/* Duration — priced cards */}
           <div className="bk-card">
-            <div className="bk-card-label">
-              <Clock size={14} /> How long?
+            <div className="bk-card-head-row">
+              <div className="bk-card-label">
+                <span className="bk-label-icon bk-tint-amber"><Clock size={15} /></span>
+                <span>How long do you need?</span>
+              </div>
+              {derivedEndTime && formData.startTime && (
+                <span className="bk-ends-chip">Ends {fmtHour12(derivedEndTime)}</span>
+              )}
             </div>
             <div className="bk-price-strip" aria-label="Launch pricing">
               <span className="bk-price-badge">
-                <BadgePercent size={13} /> Launch pricing
+                <BadgePercent size={13} /> Launch pricing · save on longer sessions
               </span>
-              <div className="bk-price-cells">
+              <div className="bk-price-cells" role="radiogroup" aria-label="Choose duration">
                 {DURATION_OPTIONS.map((h) => {
                   const active = Number(formData.durationHours) === h;
+                  const save = savingFor(h);
+                  const perHr = Math.round(LAUNCH_SLAB_PRICES[h] / h);
                   return (
                     <button
                       key={h}
                       type="button"
+                      role="radio"
+                      aria-checked={active}
                       aria-pressed={active}
                       className={`bk-price-cell ${active ? "active" : ""}`}
                       onClick={() => setFormData((p) => ({ ...p, durationHours: String(h) }))}
-                      title={`Select ${h} hour${h !== 1 ? "s" : ""}`}
+                      title={`Select ${h} hour${h !== 1 ? "s" : ""} for ${formatCurrency(LAUNCH_SLAB_PRICES[h])}`}
                     >
-                      <span>{h} hr{h !== 1 ? "s" : ""}</span>
+                      {save > 0 && <span className="bk-save-flag">Save ₹{save}</span>}
+                      <span className="bk-price-hrs">{h} hr{h !== 1 ? "s" : ""}</span>
                       <strong>{formatCurrency(LAUNCH_SLAB_PRICES[h])}</strong>
+                      <span className="bk-price-per">₹{perHr}/hr</span>
+                      <span className="bk-price-check" aria-hidden="true"><Check size={12} /></span>
                     </button>
                   );
                 })}
               </div>
               <span className="bk-price-note">Flat rate · same for every cook &amp; service · no payment now</span>
             </div>
-            {derivedEndTime && (
-              <div className="bk-dur-end">
-                Ends <strong>{fmtHour12(derivedEndTime)}</strong>
-              </div>
-            )}
           </div>
 
-          {/* Start hour selector */}
+          {/* Start time — grouped, no sideways scroll */}
           <div className="bk-card">
-            <div className="bk-card-label">
-              <Clock size={14} /> What start time?
+            <div className="bk-card-head-row">
+              <div className="bk-card-label">
+                <span className="bk-label-icon bk-tint-green"><Timer size={15} /></span>
+                <span>What start time?</span>
+              </div>
+              {formData.startTime && derivedEndTime && (
+                <span className="bk-ends-chip bk-ends-strong">{fmtHour12(formData.startTime)} → {fmtHour12(derivedEndTime)}</span>
+              )}
             </div>
-            <p className="bk-card-hint">Service hours 8:00 am – 8:00 pm · tap a start, we show the end.</p>
-            <div className="bk-hour-select">
-              {hourOptions.map((t) => {
-                const active = formData.startTime === t;
+            <p className="bk-card-hint">Service hours 8:00 am – 8:00 pm · we show your end time automatically.</p>
+            <div className={`bk-checking ${checkingSlot ? "on" : ""}`} aria-live="polite">
+              <span className="bk-pulse-dot" aria-hidden="true" />
+              {checkingSlot ? "Checking live availability…" : slotBusyError ? "Needs attention" : formData.startTime ? "Slot looks free — we re-check at send" : "Pick a start time below"}
+            </div>
+            {slotBusyError && (
+              <div className="bk-slot-error" role="alert"><AlertCircle size={14} /> {slotBusyError}</div>
+            )}
+            <div className="bk-time-groups">
+              {hourGroups.map((g) => {
+                const GIcon = g.icon;
                 return (
-                  <button
-                    key={t}
-                    type="button"
-                    className={`bk-hour-btn ${active ? "active" : ""}`}
-                    onClick={() => setFormData((p) => ({ ...p, startTime: t }))}
-                  >
-                    {fmtHour12(t)}
-                  </button>
+                  <div key={g.key} className="bk-time-group">
+                    <div className="bk-time-group-head">
+                      <GIcon size={13} />
+                      <span>{g.label}</span>
+                      <em>{g.hint}</em>
+                    </div>
+                    <div className="bk-hour-grid" role="group" aria-label={`${g.label} start times`}>
+                      {g.times.map((t) => {
+                        const active = formData.startTime === t;
+                        return (
+                          <button
+                            key={t}
+                            type="button"
+                            aria-pressed={active}
+                            className={`bk-hour-btn ${active ? "active" : ""}`}
+                            onClick={() => {
+                              setFormData((p) => ({ ...p, startTime: t }));
+                              track(AnalyticsEvents.SLOT_SELECTED, {
+                                date: formData.date,
+                                start_time: t,
+                                duration_hours: Number(formData.durationHours) || null,
+                                ...(cookId ? { cook_id: String(cookId) } : {}),
+                              });
+                            }}
+                          >
+                            {fmtHour12(t)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -651,39 +904,50 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
         </>
       )}
 
-      {/* ── Step 2: Address, Notes & Submit ── */}
+      {/* ── Step 2: Address, Details & Pay summary ── */}
       {step === 2 && (
         <>
           {/* Recap */}
           <div className="bk-card bk-recap">
-            <div className="bk-card-label">
-              <Check size={14} /> Your booking
+            <div className="bk-card-head-row">
+              <div className="bk-card-label">
+                <span className="bk-label-icon bk-tint-green"><Check size={15} /></span>
+                <span>Your booking</span>
+              </div>
+              <span className="bk-card-count">Step 3 of 3 · almost done</span>
             </div>
             <div className="bk-recap-rows">
               <div className="bk-recap-row">
-                <span>{serviceLabel}{formData.date ? ` · ${fmtDateShort(formData.date)}` : ""}</span>
-                <button type="button" className="bk-recap-edit" onClick={() => setStep(0)}>Edit</button>
+                <span className="bk-recap-icon"><ChefHat size={14} /></span>
+                <span className="bk-recap-text">{serviceLabel}{formData.date ? ` · ${fmtDateShort(formData.date)}` : ""}</span>
+                <button type="button" className="bk-recap-edit" onClick={() => setStep(0)}><Pencil size={12} /> Edit</button>
               </div>
               <div className="bk-recap-row">
-                <span>
+                <span className="bk-recap-icon"><Clock size={14} /></span>
+                <span className="bk-recap-text">
                   {hoursValid ? `${formData.durationHours} hr${Number(formData.durationHours) === 1 ? "" : "s"}` : "Duration"}
                   {slab != null && hoursValid ? ` · ${formatCurrency(slab)}` : ""}
                   {formData.startTime ? ` · ${fmtHour12(formData.startTime)}${derivedEndTime ? ` → ${fmtHour12(derivedEndTime)}` : ""}` : ""}
                 </span>
-                <button type="button" className="bk-recap-edit" onClick={() => setStep(1)}>Edit</button>
+                <button type="button" className="bk-recap-edit" onClick={() => setStep(1)}><Pencil size={12} /> Edit</button>
               </div>
             </div>
           </div>
 
           {/* Address */}
           <div className="bk-card">
-            <div className="bk-card-label">
-              <MapPin size={14} /> Address
+            <div className="bk-card-head-row">
+              <div className="bk-card-label">
+                <span className="bk-label-icon bk-tint-amber"><MapPin size={15} /></span>
+                <span>Where should the cook come?</span>
+              </div>
             </div>
             {savedLocations.length > 0 && (
-              <div className="bk-saved-wrap">
-                <History size={14} />
+              <label className="bk-saved-wrap" htmlFor="bk-saved-select">
+                <History size={15} />
+                <span className="bk-saved-label">Saved places</span>
                 <select
+                  id="bk-saved-select"
                   className="bk-saved-select"
                   value={savedIdx}
                   onChange={(e) => applySavedLocation(e.target.value)}
@@ -695,92 +959,168 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
                     </option>
                   ))}
                 </select>
-              </div>
+              </label>
             )}
-            <div className="bk-addr-grid">
-              <input
-                type="text"
-                name="flatNo"
-                className="bk-addr-input"
-                placeholder="Flat / House *"
-                value={formData.flatNo}
-                onChange={handleChange}
-                required
-              />
-              <input
-                type="text"
-                name="society"
-                className="bk-addr-input"
-                placeholder="Society / Street *"
-                value={formData.society}
-                onChange={handleChange}
-                required
-              />
-              <input
-                type="text"
-                name="city"
-                className="bk-addr-input"
-                placeholder="City / Area"
-                value={formData.city}
-                onChange={handleChange}
-              />
-              <input
-                type="text"
-                name="landmark"
-                className="bk-addr-input"
-                placeholder="Landmark"
-                value={formData.landmark}
-                onChange={handleChange}
-              />
+            {profileAddress && !addrEditing ? (
+              <div className="bk-profile-addr">
+                <MapPin size={16} />
+                <div className="bk-profile-addr-text">
+                  <strong>Using your profile address</strong>
+                  <span>{addrSummary}</span>
+                </div>
+                <button
+                  type="button"
+                  className="bk-recap-edit"
+                  onClick={() => setAddrEditing(true)}
+                  aria-label="Edit address"
+                >
+                  <Pencil size={12} /> Edit
+                </button>
+              </div>
+            ) : (
+            <div className="bk-field-grid">
+              <div className="bk-field">
+                <label htmlFor="bk-flat">Flat / House no. *</label>
+                <input
+                  id="bk-flat"
+                  type="text"
+                  name="flatNo"
+                  className="bk-addr-input"
+                  placeholder="e.g. A-402, Sunshine Apartments"
+                  value={formData.flatNo}
+                  onChange={handleChange}
+                  autoComplete="street-address"
+                  required
+                />
+              </div>
+              <div className="bk-field">
+                <label htmlFor="bk-society">Society / Street *</label>
+                <input
+                  id="bk-society"
+                  type="text"
+                  name="society"
+                  className="bk-addr-input"
+                  placeholder="e.g. MG Road, Koregaon Park"
+                  value={formData.society}
+                  onChange={handleChange}
+                  autoComplete="address-line2"
+                  required
+                />
+              </div>
+              <div className="bk-field">
+                <label htmlFor="bk-city">City / Area *</label>
+                <input
+                  id="bk-city"
+                  type="text"
+                  name="city"
+                  className="bk-addr-input"
+                  placeholder="e.g. Pune"
+                  value={formData.city}
+                  onChange={handleChange}
+                  autoComplete="address-level2"
+                  required
+                />
+              </div>
+              <div className="bk-field">
+                <label htmlFor="bk-landmark">Landmark <span className="bk-opt">(optional)</span></label>
+                <input
+                  id="bk-landmark"
+                  type="text"
+                  name="landmark"
+                  className="bk-addr-input"
+                  placeholder="e.g. Near City Mall"
+                  value={formData.landmark}
+                  onChange={handleChange}
+                />
+              </div>
             </div>
-            {/* Auto-attached map pin (from detected location or saved entry) */}
-            <div className="bk-pin-bar">
+            )}
+            {/* Map pin status */}
+            <div className={`bk-pin-card ${pinMapsUrl ? "has-pin" : ""}`}>
+              <span className="bk-pin-avatar"><MapPinned size={15} /></span>
+              <span className="bk-pin-text">
+                {pinMapsUrl ? (locMsg || "Map pin attached — cook can navigate straight to you.") : "No map pin yet — your typed address is enough, pin helps the cook."}
+              </span>
               {pinMapsUrl && (
-                <>
-                  <button type="button" className="bk-pin-icon" onClick={handleCopyPin} title="Copy link">
+                <span className="bk-pin-actions">
+                  <button type="button" className="bk-pin-icon" onClick={handleCopyPin} title="Copy map link">
                     {copiedPin ? <Check size={14} /> : <Copy size={14} />}
                   </button>
-                  <a href={pinMapsUrl} target="_blank" rel="noreferrer" className="bk-pin-icon" title="Open Maps">
+                  <a href={pinMapsUrl} target="_blank" rel="noreferrer" className="bk-pin-icon" title="Open in Google Maps">
                     <Navigation size={14} />
                   </a>
-                </>
+                </span>
               )}
             </div>
-            {locMsg && <p className="bk-pin-msg">{locMsg}</p>}
           </div>
 
-          {/* Notes */}
+          {/* Details */}
           <div className="bk-card">
-            <div className="bk-card-label">
-              <StickyNote size={14} /> Notes
+            <div className="bk-card-head-row">
+              <div className="bk-card-label">
+                <span className="bk-label-icon bk-tint-blue"><StickyNote size={15} /></span>
+                <span>Party & food details</span>
+              </div>
             </div>
-            <textarea
-              name="notes"
-              className="bk-notes"
-              rows={3}
-              placeholder="Guests, dishes, dietary needs, spice level…"
-              value={formData.notes}
-              onChange={handleChange}
-            />
+            <div className="bk-field">
+              <label htmlFor="bk-guests">How many guests?</label>
+              <div className="bk-stepper">
+                <button type="button" className="bk-stepper-btn" onClick={() => setGuests(formData.guests === "" ? 1 : Number(formData.guests) - 1)} aria-label="Fewer guests" disabled={formData.guests !== "" && Number(formData.guests) <= 1}><Minus size={15} /></button>
+                <input
+                  id="bk-guests"
+                  type="number"
+                  name="guests"
+                  className="bk-addr-input bk-stepper-input"
+                  placeholder="e.g. 10"
+                  min={1}
+                  max={500}
+                  value={formData.guests ?? ""}
+                  onChange={handleChange}
+                />
+                <button type="button" className="bk-stepper-btn" onClick={() => setGuests(formData.guests === "" ? 2 : Number(formData.guests) + 1)} aria-label="More guests"><Plus size={15} /></button>
+              </div>
+              <span className="bk-field-hint">Helps the cook plan quantities. Leave blank if unsure.</span>
+            </div>
+            <div className="bk-field">
+              <label htmlFor="bk-notes">Dishes, diet & spice <span className="bk-opt">(optional)</span></label>
+              <textarea
+                id="bk-notes"
+                name="notes"
+                className="bk-notes"
+                rows={3}
+                maxLength={500}
+                placeholder="e.g. Paneer butter masala + jeera rice for 8, less spicy, one Jain meal…"
+                value={formData.notes}
+                onChange={handleChange}
+              />
+              <span className="bk-field-hint bk-count">{(formData.notes || "").length}/500</span>
+            </div>
           </div>
 
-          {/* Sticky footer with price breakdown and submit */}
-          <div className="bk-foot">
+          {/* Price + coupon + submit */}
+          <div className="bk-card bk-pay-card">
+            <div className="bk-card-head-row">
+              <div className="bk-card-label">
+                <span className="bk-label-icon bk-tint-green"><Wallet size={15} /></span>
+                <span>Price summary</span>
+              </div>
+              <span className="bk-pay-note">Pay after cook accepts</span>
+            </div>
             {slab != null && (
               <div className="bk-foot-estimate">
                 <div className="price-rows" style={{ flex: 1 }}>
                   <div className="price-row">
-                    <span>Service Price · {formData.durationHours} hr{Number(formData.durationHours) === 1 ? "" : "s"}</span>
+                    <span>Service · {formData.durationHours} hr{Number(formData.durationHours) === 1 ? "" : "s"} · {serviceLabel}</span>
                     <span>{formatCurrency(slab)}</span>
                   </div>
                   {coupon && (
                     <div className="price-row discount">
-                      <span>Coupon {coupon.code}</span>
+                      <span>Coupon {coupon.code} applied</span>
                       <span>−{formatCurrency(discount)}</span>
                     </div>
                   )}
                   <div className="price-row total">
-                    <span>Final Amount</span>
+                    <span>To pay after acceptance</span>
                     <strong>{formatCurrency(finalAmount)}</strong>
                   </div>
                 </div>
@@ -793,40 +1133,33 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
                 onApplied={setCoupon}
               />
             )}
-            <button type="submit" className="bk-submit" disabled={submitting}>
+            <button type="submit" className="bk-submit bk-submit-inline" disabled={submitting}>
               {submitting ? (
-                <span className="bk-submit-loading">Sending…</span>
+                <span className="bk-submit-loading"><span className="bk-spinner" aria-hidden="true" /> Sending…</span>
               ) : (
                 <>
-                  Send Request
+                  Send booking request · {slab != null ? formatCurrency(finalAmount) : ""}
                   <ArrowRight size={16} />
                 </>
               )}
             </button>
-            <p className="bk-foot-note">No payment now — slot held for 5 min while the cook decides.</p>
+            <p className="bk-foot-note"><ShieldCheck size={12} /> No payment now — slot held for 5 min while {cookFirst || "the cook"} decides. Free cancellation before acceptance.</p>
           </div>
         </>
       )}
       </div>
 
-      {/* Sticky footer */}
+      {/* Sticky action bar — one thumb-friendly place for Back / Continue / Send */}
       <div className="bk-stickybar">
         <div className="bk-sticky-summary" aria-live="polite">
-          {slab != null && hoursValid ? (
-            <>
-              <span>{scheduleSummary || serviceLabel}</span>
-              <strong>{formatCurrency(finalAmount)}</strong>
-            </>
-          ) : (
-            <>
-              <span>{step === 0 ? serviceLabel : scheduleSummary || "Pick your schedule"}</span>
-              <strong>{slab != null ? formatCurrency(slab) : "₹—"}</strong>
-            </>
-          )}
+          <span className="bk-sticky-text">
+            {step === 0 ? serviceLabel : step === 1 ? (scheduleSummary || "Pick date, length & time") : `Pay ${slab != null ? formatCurrency(finalAmount) : "—"} after acceptance`}
+          </span>
+          <strong className="bk-sticky-price">{slab != null && hoursValid ? formatCurrency(finalAmount) : slab != null ? formatCurrency(slab) : "₹—"}</strong>
         </div>
         <div className="bk-sticky-actions">
           {step > 0 && (
-            <button type="button" className="bk-back-btn" onClick={() => setStep(step - 1)} disabled={submitting}>
+            <button type="button" className="bk-back-btn" onClick={() => { setError(""); setStep(step - 1); }} disabled={submitting}>
               <ChevronLeft size={16} /> Back
             </button>
           )}
@@ -835,17 +1168,23 @@ const BookingForm = ({ cookId, cookUserId, cookName, onSubmit }) => {
               type="button"
               className="bk-next-btn"
               onClick={goNext}
-              disabled={submitting}
+              disabled={submitting || checkingSlot || Boolean(slotBusyError && step === 1)}
             >
-              Continue <ArrowRight size={16} />
+              {step === 0 ? `Continue with ${serviceLabel}` : "Continue"} <ArrowRight size={16} />
             </button>
           )}
           {step === 2 && (
-            <span className="bk-sticky-hint">Review &amp; tap “Send Request” above</span>
+            <button type="submit" className="bk-next-btn bk-send-btn" disabled={submitting || checkingSlot || Boolean(slotBusyError)}>
+              {submitting ? "Sending…" : (<>Send Request <ArrowRight size={16} /></>)}
+            </button>
           )}
         </div>
+        {step === 1 && derivedEndTime && (
+          <p className="bk-sticky-sub">{formData.date ? fmtDateShort(formData.date) : ""}{formData.date ? " · " : ""}{formData.startTime ? fmtHour12(formData.startTime) : ""}{derivedEndTime ? ` → ${fmtHour12(derivedEndTime)}` : ""} · {formData.durationHours || "?"} hr{Number(formData.durationHours) === 1 ? "" : "s"}</p>
+        )}
       </div>
     </form>
+   </div>
 
     <LoginPromptModal
       open={showLoginModal}

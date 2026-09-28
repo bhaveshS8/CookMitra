@@ -1,22 +1,22 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import API from "../api/axios";
 import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
-import ReviewForm from "../components/ReviewForm";
+import ReviewForm, { ReviewStars } from "../components/ReviewForm";
+import ComplaintForm from "../components/ComplaintForm";
 import {
-  formatCurrency,
   formatDate,
   mapsNavigateUrl,
   bookingWhatsAppUrl,
-  bookingCustomerWhatsAppUrl,
   bookingCookJobWhatsAppUrl,
   bookingRescheduleWhatsAppUrl,
   hoursCompleteWhatsAppUrl,
-  cookLiveMapsUrl,
   sessionEndDate,
+  effectiveServiceWindow,
   hasServiceHoursStarted,
   formatRemaining,
+  isReviewable,
   timeAgo,
   localTodayStr,
   SERVICE_DETAILS,
@@ -27,7 +27,6 @@ import {
   Clock,
   MapPin,
   Navigation,
-  ChefHat,
   Phone,
   MessageCircle,
   XCircle,
@@ -38,6 +37,9 @@ import {
   Receipt,
   History,
   User,
+  ShieldAlert,
+  Star,
+  Quote,
 } from "lucide-react";
 
 const BookingDetails = () => {
@@ -63,7 +65,7 @@ const BookingDetails = () => {
   const [reschedSaving, setReschedSaving] = useState(false);
   const [rsError, setRsError] = useState("");
 
-  const fetchDetails = async () => {
+  const fetchDetails = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -74,11 +76,11 @@ const BookingDetails = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [bookingId]);
 
   useEffect(() => {
     fetchDetails();
-  }, [bookingId]);
+  }, [fetchDetails]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
@@ -144,8 +146,9 @@ const BookingDetails = () => {
     return `${h}:${m[2]} ${ap}`;
   };
 
-  // Once the service hours begin, Cancel and Reschedule disappear — the
-  // session is under way and can no longer be moved or called off here.
+  // Once the service is under way — schedule reached OR cook verified the
+  // OTP — Cancel and Reschedule disappear; it can no longer be moved or
+  // called off here.
   const serviceStarted = hasServiceHoursStarted(booking);
   const canReschedule =
     user?.role === "customer" &&
@@ -234,6 +237,11 @@ const BookingDetails = () => {
       case "requested":
         return <span className="badge badge-amber">Awaiting Cook Acceptance</span>;
       case "accepted":
+        return (
+          <span className="badge badge-amber">
+            Accepted by Cook
+          </span>
+        );
       case "confirmed":
         return <span className="badge badge-blue">Confirmed & Scheduled</span>;
       case "in_progress":
@@ -244,6 +252,8 @@ const BookingDetails = () => {
         return <span className="badge badge-rose">Declined by Cook</span>;
       case "cancelled":
         return <span className="badge badge-slate">Cancelled</span>;
+      case "expired":
+        return <span className="badge badge-slate">Expired — Cook Didn't Respond</span>;
       default:
         return <span className="badge badge-slate">{status}</span>;
     }
@@ -251,10 +261,10 @@ const BookingDetails = () => {
 
   if (loading) {
     return (
-      <div className="dashboard-container">
+      <div className="bd-loading">
         <div className="loading-spinner-wrapper">
           <div className="spinner"></div>
-          <p style={{ color: "var(--slate-500)", fontWeight: 600 }}>Loading booking details...</p>
+          <p className="bd-mini-note">Loading booking details...</p>
         </div>
       </div>
     );
@@ -262,7 +272,7 @@ const BookingDetails = () => {
 
   if (error || !booking) {
     return (
-      <div className="dashboard-container">
+      <div className="bd-error">
         <Link
           to={
             user?.role === "cook"
@@ -271,8 +281,7 @@ const BookingDetails = () => {
                 ? "/admin"
                 : "/dashboard/my-bookings"
           }
-          className="back-link-bar"
-          style={{ marginBottom: "1rem" }}
+          className="back-link-bar bd-error-link"
         >
           <ArrowLeft size={16} />{" "}
           {user?.role === "cook"
@@ -291,16 +300,9 @@ const BookingDetails = () => {
   const serviceInfo = SERVICE_DETAILS[booking.serviceType] || {
     label: (booking.serviceType || "").replace(/_/g, " "),
   };
-  const cookLoc =
-    booking.cookLocation?.lat != null
-      ? booking.cookLocation
-      : booking.effectiveCookLocation?.lat != null
-        ? booking.effectiveCookLocation
-        : booking.cookLiveLocation?.lat != null
-          ? booking.cookLiveLocation
-          : null;
-  const trackUrl = cookLiveMapsUrl(cookLoc);
   const end = sessionEndDate(booking);
+  // Redefined window: after OTP start this is actual start → actual end.
+  const serviceWindow = effectiveServiceWindow(booking);
   const remainingLabel = end ? formatRemaining(end, now) : null;
   const isActive = ["requested", "accepted", "confirmed", "in_progress"].includes(booking.status);
   // OTP service-start state.
@@ -323,7 +325,7 @@ const BookingDetails = () => {
   });
   // After payment the cook needs the customer's name, number and location —
   // prefer the server-built job sheet link, fall back to the client builder.
-  const isPaid = booking.payment?.status === "paid";
+  const isPaid = booking?.payment?.status === "paid";
   const jobSheetWa = isPaid
     ? booking.cookWhatsappUrl ||
       bookingCookJobWhatsAppUrl({
@@ -333,13 +335,6 @@ const BookingDetails = () => {
         booking,
       })
     : null;
-  const waToSelf = bookingCustomerWhatsAppUrl({
-    customerPhone: user?.phone,
-    cookName: booking.cook?.name,
-    cookPhone: booking.cook?.phone,
-    cookLocation: cookLoc,
-    booking,
-  });
   const hoursWa =
     booking.hoursCompleted &&
     (booking.hoursCompleteWhatsappUrl ||
@@ -351,86 +346,138 @@ const BookingDetails = () => {
         customerName: user?.name,
       }));
 
-  return (
-    <div className="dashboard-container">
-      <Link
-        to={
-          user?.role === "cook"
-            ? "/dashboard/cook-bookings"
-            : user?.role === "admin"
-              ? "/admin"
-              : "/dashboard/my-bookings"
-        }
-        className="back-link-bar"
-        style={{ marginBottom: "1rem" }}
-      >
-        <ArrowLeft size={16} />{" "}
-        {user?.role === "cook"
-          ? "Back to Cook Dashboard"
-          : user?.role === "admin"
-            ? "Back to Admin"
-            : "Back to My Bookings"}
-      </Link>
+  // Journey tracker: where is this booking in its life? Note "accepted"
+  // means the cook said yes but payment may still be pending.
+  const journeySteps = [
+    { key: "requested", label: "Requested", hint: "Waiting for cook" },
+    {
+      key: "confirmed",
+      label: "Accepted",
+      hint: "Cook accepted",
+    },
+    { key: "in_progress", label: "In progress", hint: "Cooking now" },
+    { key: "completed", label: "Completed", hint: "Done · rate cook" },
+  ];
+  const journeyIdx =
+    { requested: 0, accepted: 1, confirmed: 1, in_progress: 2, completed: 3 }[booking?.status] ?? -1;
+  const journeyEndedBad = ["rejected", "cancelled", "expired"].includes(booking?.status);
+  const endedLabel =
+    booking?.status === "rejected"
+      ? "Declined by cook"
+      : booking?.status === "cancelled"
+        ? "Cancelled"
+        : booking?.status === "expired"
+          ? "Expired"
+          : "";
 
-      {/* Header */}
-      <div className="dashboard-header-row">
-        <div>
-          <span className="badge badge-festive" style={{ marginBottom: "0.5rem" }}>
-            <Sparkles size={14} /> Booking Details
-          </span>
-          <h1>{serviceInfo.label}</h1>
-          <p style={{ color: "var(--slate-600)", margin: 0 }}>
-            Booking #{booking._id?.substring(18)} • Booked {booking.createdAt ? timeAgo(booking.createdAt) : ""}
-          </p>
-        </div>
-        <div>{getStatusBadge(booking.status)}</div>
+  return (
+    <div className="bd-wrap">
+      <div className="bd-back">
+        <Link
+          to={
+            user?.role === "cook"
+              ? "/dashboard/cook-bookings"
+              : user?.role === "admin"
+                ? "/admin"
+                : "/dashboard/my-bookings"
+          }
+          className="back-link-bar"
+        >
+          <ArrowLeft size={16} />{" "}
+          {user?.role === "cook"
+            ? "Back to Cook Dashboard"
+            : user?.role === "admin"
+              ? "Back to Admin"
+              : "Back to My Bookings"}
+        </Link>
       </div>
 
-      {/* Arrival / hours banners */}
-      {booking.cookArrived && (
-        <div
-          style={{
-            display: "flex", alignItems: "center", gap: "0.5rem",
-            background: "var(--accent-emerald-light, #ecfdf5)",
-            border: "1px solid var(--accent-emerald, #10b981)",
-            borderRadius: "10px", padding: "0.65rem 0.9rem",
-            marginBottom: "0.75rem", fontSize: "0.88rem", fontWeight: 600,
-          }}
-        >
-          <CheckCircle2 size={18} style={{ color: "var(--accent-emerald, #10b981)", flexShrink: 0 }} />
+      {/* Hero */}
+      <div className="bd-hero">
+        <div className="bd-hero-top">
+          <span className="bd-eyebrow">
+            <Sparkles size={12} /> Booking details
+          </span>
+          {getStatusBadge(booking.status)}
+        </div>
+        <h1 className="bd-title">{serviceInfo.label}</h1>
+        <p className="bd-sub">
+          Booking #{booking._id?.substring(18)} • Booked {booking.createdAt ? timeAgo(booking.createdAt) : ""}
+        </p>
+        <div className="bd-hero-cookline">
+          <span className="bd-hero-cook-avatar" aria-hidden="true">
+            {booking.cook?.name?.[0]?.toUpperCase() || "C"}
+          </span>
+          <span>Hosted by <strong>{booking.cook?.name || "your assigned cook"}</strong></span>
+        </div>
+        <div className="bd-hero-facts">
+          <span className="bd-fact-chip"><Calendar size={13} /> {formatDate(booking.date)}</span>
+          <span className="bd-fact-chip"><Clock size={13} /> {serviceWindow.startTime} – {serviceWindow.endTime}{booking.serviceStartedAt ? " (actual)" : ""}</span>
+          {booking.durationHours && (
+            <span className="bd-fact-chip">{booking.durationHours} hr{Number(booking.durationHours) === 1 ? "" : "s"}</span>
+          )}
+          {booking.guests && (
+            <span className="bd-fact-chip"><User size={13} /> {booking.guests} guest{Number(booking.guests) === 1 ? "" : "s"}</span>
+          )}
+          {!booking.hoursCompleted && isActive && remainingLabel && (
+            <span className="bd-fact-chip live"><Clock size={13} /> {remainingLabel}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Journey tracker */}
+      {!journeyEndedBad && journeyIdx >= 0 && (
+        <ol className="bd-journey" aria-label="Booking progress">
+          {journeySteps.map((s, i) => (
+            <li
+              key={s.key}
+              className={`bd-journey-step ${i < journeyIdx || booking.status === "completed" ? "done" : i === journeyIdx ? "current" : ""}`}
+              aria-current={i === journeyIdx ? "step" : undefined}
+            >
+              <span className="bd-journey-dot" aria-hidden="true">
+                {i < journeyIdx || booking.status === "completed" ? <CheckCircle2 size={14} /> : i + 1}
+              </span>
+              <span className="bd-journey-text">
+                <span className="bd-journey-name">{s.label}</span>
+                <span className="bd-journey-hint">{s.hint}</span>
+              </span>
+              {i < journeySteps.length - 1 && (
+                <span className={`bd-journey-link ${i < journeyIdx ? "done" : ""}`} aria-hidden="true" />
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+      {journeyEndedBad && (
+        <div className="bd-banner bad">
+          <XCircle size={18} />
           <span>
-            Your cook {booking.cook?.name ? `${booking.cook.name} ` : ""}has reached your location
-            {booking.cookArrivedAt ? ` • ${timeAgo(booking.cookArrivedAt)}` : ""}!
+            This booking {endedLabel.toLowerCase()}
+            {booking.status === "rejected" ? " — try another cook or time." : " — the slot is free again."}
           </span>
         </div>
       )}
-      {booking.hoursCompleted && (
-        <div
-          style={{
-            display: "flex", alignItems: "center", gap: "0.5rem",
-            background: "#fef3c7", border: "1px solid #f59e0b",
-            borderRadius: "10px", padding: "0.65rem 0.9rem",
-            marginBottom: "0.75rem", fontSize: "0.88rem", fontWeight: 600,
-          }}
-        >
-          <BellRing size={18} style={{ color: "#b45309", flexShrink: 0 }} />
+
+      {/* NOTE: no arrival banner here by design — "cook has reached your
+          location" is delivered only as an in-app notification (type
+          "cook_arrived"), not on the booking details page. */}
+      {booking.hoursCompleted && !booking.review && (
+        <div className="bd-banner warn">
+          <BellRing size={18} />
           <span>Your cooking hours are complete! Please review your session below.</span>
+          {hoursWa && (
+            <a href={hoursWa} target="_blank" rel="noreferrer" className="btn btn-success btn-sm">
+              <MessageCircle size={15} /> Hours Done on WhatsApp
+            </a>
+          )}
         </div>
       )}
       {reschedNote && (
-        <div
-          style={{
-            display: "flex", alignItems: "center", gap: "0.5rem",
-            background: "#eff6ff", border: "1px solid #93c5fd",
-            borderRadius: "10px", padding: "0.65rem 0.9rem",
-            marginBottom: "0.75rem", fontSize: "0.88rem", fontWeight: 600,
-            color: "#1e40af", flexWrap: "wrap",
-          }}
-        >
-          <Clock size={18} style={{ color: "#2563eb", flexShrink: 0 }} />
-          <span>⏰ Time changed — {reschedNote}. Duration and fee unchanged.</span>
+        <div className="bd-banner info">
+          <Clock size={18} />
+          <span>{reschedNote}. Session length unchanged.</span>
           {user?.role === "customer" && reschedWa && (
-            <a href={reschedWa} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm" style={{ marginLeft: "auto" }}>
+            <a href={reschedWa} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">
               <MessageCircle size={15} /> Send update to cook
             </a>
           )}
@@ -439,15 +486,15 @@ const BookingDetails = () => {
 
       {/* Reschedule panel (customer moves upcoming bookings; duration fixed) */}
       {reschedOpen && canReschedule && (
-        <div className="profile-card-block" style={{ marginBottom: "1.25rem" }}>
-          <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <Calendar size={18} style={{ color: "var(--primary)" }} /> Move to a new time
+        <div className="bd-card bd-reschedule-card">
+          <h3 className="bd-card-head">
+            <Calendar size={18} /> Move to a new time
           </h3>
-          <p style={{ margin: "0 0 0.75rem", color: "var(--slate-600)", fontSize: "0.88rem" }}>
+          <p className="bd-rs-hint">
             Session stays {booking.durationHours} hr{Number(booking.durationHours) === 1 ? "" : "s"} — only the date and start
-            time change, so the fee and any payment stay exactly as they are. Your cook is notified instantly.
+            time change. Your cook is notified instantly.
           </p>
-          <div className="booking-metadata-grid" style={{ marginBottom: "0.75rem" }}>
+          <div className="bd-rs-grid">
             <div className="meta-field">
               <label>New date</label>
               <input
@@ -466,9 +513,9 @@ const BookingDetails = () => {
             <div className="meta-field">
               <label>New start time</label>
               {startsLoading ? (
-                <span style={{ fontSize: "0.88rem", color: "var(--slate-500)" }}>Checking free times…</span>
+                <span className="bd-mini-note">Checking free times…</span>
               ) : freeStarts.length === 0 ? (
-                <span style={{ fontSize: "0.88rem", color: "var(--slate-500)" }}>
+                <span className="bd-mini-note">
                   No {booking.durationHours}-hr starts that day — try another date.
                 </span>
               ) : (
@@ -493,7 +540,7 @@ const BookingDetails = () => {
             </div>
           </div>
           {rsStart && (
-            <p style={{ fontSize: "0.88rem", color: "var(--slate-600)", margin: "0 0 0.75rem" }}>
+            <p className="bd-rs-pick">
               New slot: <strong>{rsDate} · {fmtSlot12(rsStart)} – {fmtSlot12(addHours(rsStart, booking.durationHours))}</strong>
             </p>
           )}
@@ -502,7 +549,7 @@ const BookingDetails = () => {
               <AlertCircle size={16} /> {rsError}
             </div>
           )}
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          <div className="bd-rs-actions">
             <button
               type="button"
               className="btn btn-primary btn-sm"
@@ -526,64 +573,101 @@ const BookingDetails = () => {
       {/* Service-start OTP: customer shows it, cook enters it. The hours
           below only start counting once the code is verified. */}
       {showOtpCard && (
-        <div
-          className="profile-card-block"
-          style={{ marginBottom: "1.25rem", textAlign: "center", border: "2px dashed var(--primary)" }}
-        >
-          <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem" }}>
-            <Clock size={18} style={{ color: "var(--primary)" }} /> Your service-start code
+        <div className="bd-card bd-otp bd-otp-card">
+          <h3 className="bd-card-head center">
+            <Clock size={18} /> Your service-start code
           </h3>
           <div
-            style={{
-              fontSize: "2.4rem", fontWeight: 800, letterSpacing: "0.35em",
-              color: "var(--primary-800)", margin: "0.25rem 0 0.5rem", paddingLeft: "0.35em",
-            }}
+            className="bd-otp-code"
             aria-label={`Your service start code is ${booking.serviceOtp}`}
           >
             {booking.serviceOtp}
           </div>
-          <p style={{ margin: 0, fontSize: "0.88rem", color: "var(--slate-600)" }}>
+          <p className="bd-otp-sub">
             Share this 4-digit code with {booking.cook?.name || "your cook"} when they arrive —
             your cooking hours start counting only after they enter it.
           </p>
         </div>
       )}
 
-      {booking.serviceStartedAt && sessionLive && (
-        <div
-          style={{
-            display: "flex", alignItems: "center", gap: "0.5rem",
-            background: "var(--accent-emerald-light, #ecfdf5)",
-            border: "1px solid var(--accent-emerald, #10b981)",
-            borderRadius: "10px", padding: "0.65rem 0.9rem",
-            marginBottom: "0.75rem", fontSize: "0.88rem", fontWeight: 600,
-          }}
-        >
-          <CheckCircle2 size={18} style={{ color: "var(--accent-emerald, #10b981)", flexShrink: 0 }} />
-          <span>
-            Service started {startedAtLabel}
-            {end ? ` • ends about ${formatRemaining(end, now)}` : ""} — hours are being counted.
-          </span>
-        </div>
-      )}
+      {booking.serviceStartedAt && sessionLive && !booking.hoursCompleted && (() => {
+        const remaining = end ? formatRemaining(end, now) : null;
+        const overdue = !!(end && end.getTime() < now);
+        return (
+          <div className={`bd-clock${overdue ? " is-overdue" : " is-live"}`} role="status">
+            <div className="bd-clock-head">
+              <span className="bd-clock-dot" aria-hidden="true" />
+              <strong>{overdue ? "Running over time" : "Service in progress"}</strong>
+              {remaining && <span className="bd-clock-remaining">{remaining}</span>}
+            </div>
+            <div className="bd-clock-meta">
+              <span>Started {startedAtLabel}</span>
+              {serviceWindow.endTime && <span>Ends {serviceWindow.endTime}</span>}
+            </div>
+            <p className="bd-clock-sub">
+              {overdue
+                ? "The booked hours have ended — please wrap up the session."
+                : "Hours are being counted."}
+            </p>
+          </div>
+        );
+      })()}
+
+      {/* Service timings: actual OTP clock when the service started, else
+          the scheduled slot (covers old bookings from before the OTP clock).
+          Hidden for requests that never became a service. */}
+      {(booking.serviceStartedAt ||
+        ["in_progress", "completed"].includes(booking.status) ||
+        booking.hoursCompleted) && (() => {
+        const started = !!booking.serviceStartedAt;
+        const startLabel = started
+          ? startedAtLabel
+          : `${formatDate(booking.date)} • ${booking.startTime || ""}`;
+        const endLabel = started && booking.serviceEndsAt
+          ? new Date(booking.serviceEndsAt).toLocaleString("en-IN", {
+              day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
+            })
+          : `${formatDate(booking.date)} • ${booking.endTime || ""}`;
+        return (
+          <div className="bd-card bd-timings-card">
+            <h3 className="bd-card-head">
+              <Clock size={18} /> Service Timings
+            </h3>
+            <div className="bd-facts">
+              <div className="bd-fact">
+                <span className="bd-fact-icon"><Clock size={16} /></span>
+                <div className="bd-fact-body"><label>Service {started ? "started" : "scheduled"}</label><span>{startLabel || "—"}</span></div>
+              </div>
+              <div className="bd-fact">
+                <span className="bd-fact-icon"><CheckCircle2 size={16} /></span>
+                <div className="bd-fact-body"><label>Service {started ? "ended" : "ends"}</label><span>{endLabel || "—"}</span></div>
+              </div>
+            </div>
+            <p className="bd-mini-note">
+              {started
+                ? "Actual clock from OTP verification — not the slot estimate."
+                : "Scheduled slot — actual times appear once the cook verifies your OTP."}
+            </p>
+          </div>
+        );
+      })()}
 
       {showOtpForm && (
-        <div className="profile-card-block" style={{ marginBottom: "1.25rem" }}>
-          <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <Clock size={18} style={{ color: "var(--primary)" }} /> Start service with customer OTP
+        <div className="bd-card bd-cook-card">
+          <h3 className="bd-card-head">
+            <Clock size={18} /> Start service with customer OTP
           </h3>
-          <p style={{ margin: "0 0 0.75rem", color: "var(--slate-600)", fontSize: "0.88rem" }}>
+          <p className="bd-otp-desc">
             Ask {booking.customer?.name || "the customer"} for the 4-digit code on their booking —
             entering it marks your arrival and starts the {booking.durationHours}-hour clock.
           </p>
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+          <div className="bd-otp-row">
             <input
               type="text"
               inputMode="numeric"
               pattern="[0-9]*"
               maxLength={4}
-              className="form-control"
-              style={{ maxWidth: 140, textAlign: "center", fontSize: "1.3rem", fontWeight: 800, letterSpacing: "0.25em" }}
+              className="form-control bd-otp-input"
               placeholder="••••"
               value={otpInput}
               onChange={(e) => {
@@ -615,38 +699,32 @@ const BookingDetails = () => {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1.25rem" }}>
-        {/* Cook card */}
-        <div className="profile-card-block">
-          <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <ChefHat size={18} style={{ color: "var(--primary)" }} /> Your Cook
-          </h3>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.9rem", marginBottom: "1rem" }}>
-            <div
-              style={{
-                width: 56, height: 56, borderRadius: "50%",
-                background: "var(--primary-gradient)", color: "#fff",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                fontSize: "1.4rem", fontWeight: 800, flexShrink: 0,
-              }}
-            >
-              {booking.cook?.name?.[0]?.toUpperCase() || "C"}
-            </div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: "1.05rem" }}>{booking.cook?.name || "Assigned Cook"}</div>
-              <div style={{ fontSize: "0.85rem", color: "var(--slate-500)" }}>
-                {[booking.cookServiceArea && `${booking.cookServiceArea}`, booking.cookRate != null && `${formatCurrency(booking.cookRate)}/hr`]
-                  .filter(Boolean)
-                  .join(" • ") || "Verified cook"}
-              </div>
-              {booking.cook?.phone && (
-                <div style={{ fontSize: "0.85rem", color: "var(--slate-600)", display: "flex", alignItems: "center", gap: "0.35rem", marginTop: "0.2rem" }}>
-                  <Phone size={13} /> {booking.cook.phone}
-                </div>
-              )}
-            </div>
+      {/* Booking summary: cook + order in one card
+          (session facts live in the hero chips above) */}
+      <div className="bd-card">
+        <h3 className="bd-card-head">
+          <Receipt size={18} /> Booking Summary
+        </h3>
+
+        {/* Cook */}
+        <div className="bd-cook">
+          <div className="bd-cook-avatar" aria-hidden="true">
+            {booking.cook?.name?.[0]?.toUpperCase() || "C"}
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+          <div>
+            <div className="bd-cook-name">{booking.cook?.name || "Assigned Cook"}</div>
+            <div className="bd-cook-sub">
+              {booking.cookServiceArea || "Verified cook"}
+            </div>
+            {booking.cook?.phone && (
+              <div className="bd-cook-phone">
+                <Phone size={13} /> {booking.cook.phone}
+              </div>
+            )}
+          </div>
+        </div>
+        {(booking.cook?.phone || user?.role !== "cook" || jobSheetWa || waToCook) && (
+          <div className="bd-row-actions">
             {booking.cook?.phone && (
               <a href={`tel:${booking.cook.phone}`} className="btn btn-outline btn-sm">
                 <Phone size={15} /> Call
@@ -658,175 +736,62 @@ const BookingDetails = () => {
               </a>
             )}
           </div>
-        </div>
-
-        {/* Session card */}
-        <div className="profile-card-block">
-          <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <Calendar size={18} style={{ color: "var(--primary)" }} /> Session
-          </h3>
-          <div className="booking-metadata-grid">
-            <div className="meta-field">
-              <label>Date</label>
-              <span>{formatDate(booking.date)}</span>
-            </div>
-            <div className="meta-field">
-              <label>Time</label>
-              <span>{booking.startTime} - {booking.endTime}</span>
-            </div>
-            <div className="meta-field">
-              <label>Duration</label>
-              <span>{booking.durationHours ? `${booking.durationHours} hrs` : "—"}</span>
-            </div>
-            <div className="meta-field">
-              <label>Guests</label>
-              <span>{booking.guests || "—"}</span>
-            </div>
-          </div>
-          {!booking.hoursCompleted && isActive && remainingLabel && (
-            <div style={{ fontSize: "0.85rem", color: "var(--slate-600)", display: "flex", alignItems: "center", gap: "0.4rem" }}>
-              <Clock size={15} /> Cooking time: {remainingLabel}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Venue card */}
-      <div className="profile-card-block" style={{ marginTop: "1.25rem" }}>
-        <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <MapPin size={18} style={{ color: "var(--primary)" }} /> Venue
-        </h3>
-        <p style={{ margin: "0 0 0.75rem", color: "var(--slate-700)" }}>{booking.address}</p>
-        {(booking.addressDetails?.flatNo || booking.addressDetails?.society || booking.addressDetails?.landmark || booking.addressDetails?.city) && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.75rem" }}>
-            {booking.addressDetails.flatNo && <span className="badge badge-slate">Flat: {booking.addressDetails.flatNo}</span>}
-            {booking.addressDetails.society && <span className="badge badge-slate">{booking.addressDetails.society}</span>}
-            {booking.addressDetails.landmark && <span className="badge badge-slate">Near {booking.addressDetails.landmark}</span>}
-            {booking.addressDetails.city && <span className="badge badge-slate">{booking.addressDetails.city}</span>}
-          </div>
         )}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-          {mapsNavigateUrl(booking) && (
-            <a href={mapsNavigateUrl(booking)} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">
-              <Navigation size={15} /> Open in Google Maps
-            </a>
-          )}
-          {trackUrl && (
-            <a href={trackUrl} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">
-              <Navigation size={15} /> Track Cook's Live Location
-            </a>
-          )}
-          <Link to={`/track/${booking._id}`} className="btn btn-primary btn-sm">
-            <Navigation size={15} /> Live Track
-          </Link>
-        </div>
-      </div>
 
-      {/* Order + payment */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "1.25rem", marginTop: "1.25rem" }}>
-        <div className="profile-card-block">
-          <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <User size={18} style={{ color: "var(--primary)" }} /> Your Order
-          </h3>
-          {booking.selectedItems?.length > 0 ? (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "0.75rem" }}>
-              {booking.selectedItems.map((item, i) => (
-                <span key={i} className="badge badge-amber">{item}</span>
-              ))}
-            </div>
-          ) : (
-            <p style={{ color: "var(--slate-500)", fontSize: "0.9rem" }}>No dishes listed.</p>
-          )}
-          {booking.notes && (
-            <div style={{ fontSize: "0.88rem", color: "var(--slate-600)", background: "var(--slate-50)", padding: "0.6rem 0.9rem", borderRadius: "var(--radius-sm)" }}>
-              <strong>Notes:</strong> {booking.notes}
-            </div>
-          )}
-        </div>
-
-        <div className="profile-card-block">
-          <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <Receipt size={18} style={{ color: "var(--primary)" }} /> Payment
-          </h3>
-          {Number(booking.slabPrice) > 0 && (
-            <div className="price-rows" style={{ marginBottom: "0.75rem" }}>
-              <div className="price-row">
-                <span>Service Price · {booking.durationHours} hr{Number(booking.durationHours) === 1 ? "" : "s"}</span>
-                <span>{formatCurrency(booking.slabPrice)}</span>
+        {/* Order (only when there is something in it) */}
+        {(booking.selectedItems?.length > 0 || booking.notes) && (
+          <>
+            <hr className="bd-sec-div" />
+            <h4 className="bd-sec-head">
+              <User size={15} /> Your Order
+            </h4>
+            {booking.selectedItems?.length > 0 && (
+              <div className="bd-dishes">
+                {booking.selectedItems.map((item, i) => (
+                  <span key={i} className="badge badge-amber">{item}</span>
+                ))}
               </div>
-              {booking.couponCode ? (
-                <div className="price-row discount">
-                  <span>Coupon {booking.couponCode}</span>
-                  <span>−{formatCurrency(booking.discount)}</span>
-                </div>
-              ) : null}
-            </div>
-          )}
-          {user?.role === "cook" && Number(booking.cookPayout) > 0 && (
-            <div style={{ fontSize: "0.85rem", color: "var(--slate-600)", background: "var(--slate-50)", padding: "0.55rem 0.85rem", borderRadius: "var(--radius-sm)", marginBottom: "0.75rem" }}>
-              Your payout (90%): <strong style={{ color: "var(--accent-emerald)" }}>{formatCurrency(booking.cookPayout)}</strong>
-            </div>
-          )}
-          <div className="booking-metadata-grid">
-            <div className="meta-field">
-              <label>{booking.payment?.status === "paid" && booking.payment?.razorpayPaymentId ? "Total Paid" : "Amount Due"}</label>
-              <span style={{ color: "var(--primary)", fontWeight: 800 }}>
-                {booking.payment?.status === "paid" && booking.payment?.razorpayPaymentId
-                  ? formatCurrency(booking.payment.paidAmount || 0)
-                  : `${formatCurrency(booking.amount)} (pending — no payment ID yet)`}
-              </span>
-            </div>
-            <div className="meta-field">
-              <label>Status</label>
-              <span>
-                {booking.payment?.status === "paid" && booking.payment?.razorpayPaymentId
-                  ? <span className="badge badge-emerald">Paid ✓</span>
-                  : <span className="badge badge-slate">{booking.payment?.status || "—"}</span>}
-              </span>
-            </div>
-          </div>
-          {booking.payment?.razorpayPaymentId && (
-            <div style={{ fontSize: "0.82rem", color: "var(--slate-500)" }}>
-              Payment ID: {booking.payment.razorpayPaymentId}
-              {booking.payment?.paidAt ? ` • ${timeAgo(booking.payment.paidAt)}` : ""}
-            </div>
-          )}
-          {booking.payment?.refundStatus && booking.payment.refundStatus !== "none" && (
-            <div style={{ marginTop: "0.6rem", fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.45rem", flexWrap: "wrap" }}>
-              {booking.payment.refundStatus === "processed" && (
-                <span className="badge badge-emerald">Refund processed ✓</span>
-              )}
-              {booking.payment.refundStatus === "pending" && (
-                <span className="badge badge-amber">Refund processing…</span>
-              )}
-              {booking.payment.refundStatus === "failed" && (
-                <span className="badge badge-rose">Refund failed — contact support</span>
-              )}
-              {booking.payment.refundStatus === "manual" && (
-                <span className="badge badge-slate">Refund settled manually</span>
-              )}
-              {booking.payment.refundAmount > 0 && (
-                <span style={{ color: "var(--slate-600)", fontWeight: 700 }}>
-                  {formatCurrency(booking.payment.refundAmount)}
-                  {booking.payment?.refundedAt ? ` • ${timeAgo(booking.payment.refundedAt)}` : ""}
-                </span>
-              )}
+            )}
+            {booking.notes && (
+              <p className="bd-note">
+                <strong>Notes:</strong> {booking.notes}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Venue card — hidden for customers ("user"): they already know their
+          own address. Cooks (and admins) still see it to navigate to the
+          customer's location. */}
+      {user?.role !== "customer" && (
+        <div className="bd-card bd-summary-card">
+          <h3 className="bd-card-head">
+            <MapPin size={18} /> Venue
+          </h3>
+          <p className="bd-venue-addr">{booking.address}</p>
+          {mapsNavigateUrl(booking) && (
+            <div className="bd-row-actions">
+              <a href={mapsNavigateUrl(booking)} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">
+                <Navigation size={15} /> {user?.role === "cook" ? "Go to Customer Location" : "Open in Google Maps"}
+              </a>
             </div>
           )}
         </div>
-      </div>
+      )}
 
-      {/* Timeline */}
-      {booking.statusHistory?.length > 0 && (
-        <div className="profile-card-block" style={{ marginTop: "1.25rem" }}>
-          <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
-            <History size={18} style={{ color: "var(--primary)" }} /> Status Timeline
+      {/* Timeline (admin only — hidden on customer/cook logins; customers
+          still see the reschedule banner above when the time was moved) */}
+      {booking.statusHistory?.length > 0 && user?.role === "admin" && (
+        <div className="bd-card bd-venue-card">
+          <h3 className="bd-card-head">
+            <History size={18} /> Status Timeline
           </h3>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <div className="bd-tl-list">
             {booking.statusHistory.map((h, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.88rem" }}>
+              <div key={i} className="bd-tl-row">
                 <span className="badge badge-slate">{String(h.status).replace(/_/g, " ").toUpperCase()}</span>
-                <span style={{ color: "var(--slate-500)" }}>
+                <span className="bd-tl-meta">
                   {h.timestamp ? new Date(h.timestamp).toLocaleString() : ""}
                   {h.note ? ` • ${h.note}` : ""}
                 </span>
@@ -836,9 +801,11 @@ const BookingDetails = () => {
         </div>
       )}
 
-      {/* Actions */}
-      <div className="booking-item-card" style={{ marginTop: "1.25rem" }}>
-        <div className="booking-actions-row">
+      {/* Actions — one of each: move, cancel. Rendered only when at least
+          one applies, so completed/cancelled/expired bookings never show an
+          empty bar. Contextual shares live in their banners. */}
+      {(canReschedule || (isActive && !serviceStarted && user?.role !== "admin")) && (
+        <div className="bd-actionbar">
           {canReschedule && (
             <button
               className="btn btn-outline btn-sm"
@@ -857,30 +824,58 @@ const BookingDetails = () => {
                   : "Cancel Booking"}
             </button>
           )}
-          {waToSelf && (
-            <a href={waToSelf} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">
-              <MessageCircle size={16} /> My WhatsApp
-            </a>
-          )}
-          {hoursWa && (
-            <a href={hoursWa} target="_blank" rel="noreferrer" className="btn btn-success btn-sm">
-              <MessageCircle size={16} /> Hours Done on WhatsApp
-            </a>
-          )}
-          <Link to={`/track/${booking._id}`} className="btn btn-outline btn-sm">
-            <Navigation size={16} /> Live Track Cook
-          </Link>
         </div>
-          {booking.status === "completed" && user?.role === "customer" && (
-            <ReviewForm bookingId={booking._id} existingReview={booking.review} onSubmitted={fetchDetails} />
-          )}
-          {booking.status === "completed" && booking.review && user?.role !== "customer" && (
-            <div style={{ marginTop: "1rem", padding: "1rem", background: "var(--slate-50)", border: "1px solid var(--slate-200)", borderRadius: "var(--radius-lg)", fontSize: "0.9rem" }}>
-              <strong>Customer rating: {booking.review.rating}/5</strong>
-              {booking.review.comment && <div style={{ marginTop: "0.3rem", color: "var(--slate-600)" }}>{booking.review.comment}</div>}
+      )}
+      {(isReviewable(booking) || booking.review) && user?.role === "customer" && (
+        <div className="bd-card bd-timeline-card">
+          <h3 className="bd-card-head">
+            <Star size={18} /> {booking.review ? "Your review" : "Rate your cook"}
+          </h3>
+          <ReviewForm
+            bookingId={booking._id}
+            existingReview={booking.review}
+            onSubmitted={fetchDetails}
+            variant="bare"
+          />
+        </div>
+      )}
+      {/* Cook-only: report an issue about this customer to the admin. */}
+      {user?.role === "cook" && booking.customer && (
+        <div className="bd-card bd-review-card">
+          <h3 className="bd-card-head">
+            <ShieldAlert size={18} /> Report an issue
+          </h3>
+          <p className="bd-rs-hint">
+            Faced a problem with {booking.customer?.name || "this customer"}? Tell our team — we review every complaint.
+          </p>
+          <ComplaintForm bookingId={booking._id} customerName={booking.customer?.name} />
+        </div>
+      )}
+      {booking.status === "completed" && booking.review && user?.role !== "customer" && (
+        <div className="review-card review-card--cook">
+          <div className="review-card-head">
+            <span className="review-card-badge">
+              <Star size={16} />
+            </span>
+            <div className="review-card-headtext">
+              <strong>Customer rating</strong>
+              {booking.review.createdAt && (
+                <span className="review-card-date">{formatDate(booking.review.createdAt)}</span>
+              )}
+            </div>
+          </div>
+          <div className="review-card-score">
+            <ReviewStars value={booking.review.rating} size={20} />
+            <span className="review-card-num">{booking.review.rating}/5</span>
+          </div>
+          {booking.review.comment && (
+            <div className="review-card-comment">
+              <Quote size={14} />
+              <p>“{booking.review.comment}”</p>
             </div>
           )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

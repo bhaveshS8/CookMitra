@@ -11,10 +11,10 @@ const {
   getMyProfile,
   createCookProfile,
   updateCookProfile,
-  updateMyLiveLocation,
   updateApprovalStatus,
   getAvailableSlots,
   uploadCookDocs,
+  adminUploadCookDocs,
   toggleAvailability,
 } = require("../controllers/cookController");
 
@@ -40,19 +40,27 @@ router.post(
   },
   uploadCookDocs
 );
-router.patch(
-  "/me/location",
-  auth,
-  authorize("cook"),
-  [
-    body("lat").isFloat({ min: -90, max: 90 }).withMessage("Invalid latitude"),
-    body("lng").isFloat({ min: -180, max: 180 }).withMessage("Invalid longitude"),
-    body("accuracy").optional().isFloat({ min: 0, max: 100000 }).withMessage("Invalid accuracy"),
-  ],
-  validate,
-  updateMyLiveLocation
-);
 router.get("/admin-overview/:id", auth, authorize("admin"), getCookAdminOverview);
+// Admin uploads verification docs on behalf of a cook (e.g. files received
+// over email/WhatsApp). Declared above "/:id" like the self-upload route.
+router.post(
+  "/:id/upload-docs",
+  auth,
+  authorize("admin"),
+  (req, res, next) => {
+    cookDocUpload.fields([
+      { name: "aadhar", maxCount: 1 },
+      { name: "pan", maxCount: 1 },
+      { name: "photo", maxCount: 1 },
+    ])(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({ message: err.message || "File upload failed" });
+      }
+      next();
+    });
+  },
+  adminUploadCookDocs
+);
 router.get("/:id", getCook);
 
 router.post(
@@ -61,7 +69,8 @@ router.post(
   authorize("cook"),
   [
     body("bio").optional().trim(),
-    body("rate").isNumeric().withMessage("Rate must be a number"),
+    body("skills").optional().trim(),
+    body("rate").optional().isNumeric().withMessage("Rate must be a number"),
     body("serviceTypes")
       .isArray({ min: 1 })
       .withMessage("At least one service type is required"),

@@ -48,17 +48,8 @@ const bookingSchema = new mongoose.Schema(
       lat: { type: Number, min: -90, max: 90 },
       lng: { type: Number, min: -180, max: 180 },
     },
-    // Snapshot of the cook's live location shared for this booking, so the
-    // customer can track/navigate to the cook on WhatsApp + Google Maps.
-    cookLocation: {
-      lat: { type: Number, min: -90, max: 90 },
-      lng: { type: Number, min: -180, max: 180 },
-      // GPS fix radius in metres (null when shared from a saved pin).
-      accuracy: { type: Number, min: 0, max: 100000 },
-      updatedAt: { type: Date },
-    },
-    // Arrival: set when the cook reaches the venue (auto-detected from GPS
-    // or marked manually). Drives the "cook has arrived" user notification.
+    // Arrival: set when the cook marks themselves arrived at the venue
+    // (manual tap). Drives the "cook has arrived" user notification.
     cookArrived: { type: Boolean, default: false },
     cookArrivedAt: { type: Date },
     // Service-start OTP: a 4-digit code generated per order. Shown on the
@@ -67,6 +58,10 @@ const bookingSchema = new mongoose.Schema(
     // before verification — always strip from cook-facing serializers.
   serviceOtp: { type: String },
   serviceOtpGeneratedAt: { type: Date },
+  // Brute-force guard for the 4-digit OTP: wrong attempts are counted and
+  // the code locks for 15 minutes after 10 failures (reset on success).
+  serviceOtpAttempts: { type: Number, default: 0, min: 0 },
+  serviceOtpLockedUntil: { type: Date },
   serviceStartedAt: { type: Date },
   serviceEndsAt: { type: Date },
     // Cooking-hours completion: set once the session end time passes while
@@ -97,7 +92,7 @@ const bookingSchema = new mongoose.Schema(
     slabPrice: { type: Number, default: 0 },
     couponCode: { type: String, default: "", trim: true, uppercase: true },
     discount: { type: Number, default: 0 },
-    // Platform ~10% of the final amount; the cook earns the rest.
+    // Platform 25% of the final amount; the cook earns the rest (75%).
     commission: { type: Number, default: 0 },
     cookPayout: { type: Number, default: 0 },
     // Prepaid fee via Razorpay — collected BEFORE booking is created.
@@ -127,6 +122,11 @@ const bookingSchema = new mongoose.Schema(
       // True for dev-gated test checkouts (no real money). Lets test
       // payments be told apart from real gateway payments later.
       testMode: { type: Boolean, default: false },
+      // True when paid via webhook reconciliation (no checkout signature
+      // exists). A real boolean beats a sentinel signature string, which a
+      // future `if (payment.razorpaySignature)` check would misread as proof
+      // of a verified checkout triple.
+      webhookReconciled: { type: Boolean, default: false },
     },
     // 5-minute confirmation windows:
     // - requestExpiresAt: the cook must accept within 5 minutes of the
@@ -164,5 +164,8 @@ const bookingSchema = new mongoose.Schema(
 bookingSchema.index({ customer: 1, status: 1 });
 bookingSchema.index({ cook: 1, status: 1 });
 bookingSchema.index({ cook: 1, date: 1, startTime: 1, endTime: 1 });
+// Hot read paths: "today's bookings" scans and status-sorted dashboards.
+bookingSchema.index({ date: 1, status: 1 });
+bookingSchema.index({ status: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Booking", bookingSchema);

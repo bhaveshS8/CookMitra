@@ -1,0 +1,303 @@
+/* ==========================================================================
+   Notifications page â€” scoped under .notif-page so it never affects the
+   shared dashboard/bookings classes it reuses.
+   Desktop matches the old inline styles; phones rebuild the card so the
+   icon, message, and "Mark read" button all stay readable and thumb-friendly,
+   and the Mark-read button is a full-width tap target under the content.
+   ========================================================================== */
+
+.notif-page .notif-item {
+  padding: 0.6rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--border-subtle);
+  background: #fff;
+  transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+}
+.notif-page .notif-item.is-read {
+  background: #fff;
+  border-color: var(--border-subtle);
+  box-shadow: none;
+}
+.notif-page .notif-item.is-unread {
+  background: #fff;
+  border-color: var(--primary-soft, #ffe6d4);
+  box-shadow: 0 1px 0 rgba(255, 165, 0, 0.15) inset;
+}
+.notif-page .notif-item.is-unread .notif-icon {
+  background: var(--primary-light);
+  border-color: var(--primary-soft, #ffd9b3);
+  color: var(--primary);
+}
+.notif-page .notif-item.is-unread .notif-icon svg {
+  color: var(--primary);
+}
+.notif-page .notif-meta-row .badge {
+  font-size: 0.66rem;
+  font-weight: 700;
+  padding: 0.14rem 0.5rem;
+  border-radius: 99px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  line-height: 1.4;
+  transition: transform 0.12s ease;
+}
+.notif-page .notif-item:hover .notif-meta-row .badge {
+  transform: scale(1.02);
+}
+.notif-page .notif-item.is-unread .badge-festive {
+  background: var(--primary-soft, #ffe6d4);
+  color: var(--primary-700, #b45309);
+  border: 1px solid var(--primary-soft-border, #ffd2a8);
+}
+.notif-page .notif-item.is-unread .badge-amber {
+  background: var(--accent-amber-light, #fef3c7);
+  color: var(--accent-amber-dark, #92400e);
+  border: 1px solid var(--accent-amber-border, #fcd34d);
+}
+.notif-page .notif-item-row {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+}
+.notif-page .notif-icon {
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.notif-page .notif-icon svg {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+}
+.notif-page .notif-item:hover .notif-icon {
+  transform: scale(1.04);
+  box-shadow: 0 4px 10px -4px rgba(15, 23, 42, 0.18);
+}
+.notif-page .notif-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+.notif-page .notif-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+  margin: 0;
+}
+.notif-page .notif-ago {
+  font-size: 0.7rem;
+  color: var(--slate-400);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin-left: auto;
+}
+.notif-page .notif-message {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--slate-800);
+  font-weight: 500;
+  overflow-wrap: break-word;
+  line-height: 1.4;
+}
+.notif-page .notif-item.is-unread .notif-message {
+  font-weight: 600;
+}
+.notif-page .notif-timestamp {
+  font-size: 0.66rem;
+  color: var(--slate-400);
+  margin-top: 0.05rem;
+  min-width: 100%;
+  letter-spacing: 0.01em;
+}
+
+/* When the timestamp is omitted (new notifications), the body column still
+   gets a stable min-width so the message text keeps a comfortable line length. */
+.notif-page .notif-mark-read {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: 0.15rem;
+}
+.notif-page .notif-mark-read .btn {
+  min-height: 32px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 99px;
+  background: transparent;
+  color: var(--slate-400);
+  border: 1px solid var(--border-subtle);
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, transform 0.12s ease;
+}
+.notif-page .notif-mark-read .btn:hover {
+  background: var(--primary-soft, #fff1e0);
+  color: var(--primary-700, #b45309);
+  border-color: var(--primary-soft-border, #ffc89a);
+}
+.notif-page .notif-mark-read .btn:active {
+  transform: scale(0.97);
+}
+.notif-page .notif-mark-read .btn:focus-visible {
+  outline: 3px solid var(--primary-glow, #ffedd5);
+  outline-offset: 2px;
+}
+.notif-page .notif-mark-read .btn svg {
+  width: 13px;
+  height: 13px;
+  margin-right: 0.3rem;
+  flex: 0 0 auto;
+}
+.notif-page .notif-item.is-unread .notif-mark-read .btn {
+  color: var(--primary-700, #b45309);
+  border-color: var(--primary-soft-border, #ffd2a8);
+}
+.notif-page .notif-item.is-unread .notif-mark-read .btn:hover {
+  background: var(--primary-soft, #fff1e0);
+}
+
+.notif-page .dashboard-header-row h1 { font-size: 1.7rem; }
+
+.notif-page .tabs-navigation-bar {
+  justify-content: center;
+  gap: 0.4rem;
+}
+.notif-page .tab-btn {
+  text-align: center;
+  justify-content: center;
+  align-items: center;
+  white-space: nowrap;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.notif-page .notif-header {
+  gap: 1rem;
+  align-items: center;
+}
+.notif-page .notif-page-title {
+  margin: 0;
+  font-size: 1.7rem;
+  font-weight: 800;
+  color: var(--slate-900);
+  letter-spacing: -0.01em;
+}
+
+/* ---- Phones (â‰¤560px): keep the modern compact card, just tighten it ---- */
+@media (max-width: 560px) {
+  .notif-page {
+    --notif-icon-size: 36px;
+    --notif-body-gap: 0.55rem;
+  }
+
+  .notif-page .dashboard-header-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.7rem;
+  }
+  .notif-page .dashboard-header-row .btn { justify-content: center; }
+
+  .notif-page .tabs-navigation-bar {
+    margin-bottom: 0.9rem;
+    justify-content: center;
+    gap: 0.35rem;
+  }
+  .notif-page .tab-btn {
+    flex: 1 1 0;
+    text-align: center;
+    padding: 0.4rem 0.7rem;
+    min-height: 36px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .notif-page .notif-item {
+    padding: 0.55rem 0.75rem;
+    border-radius: 12px;
+  }
+  .notif-page .notif-item-row {
+    gap: var(--notif-body-gap);
+    align-items: flex-start;
+  }
+  .notif-page .notif-icon {
+    width: var(--notif-icon-size);
+    height: var(--notif-icon-size);
+    min-width: var(--notif-icon-size);
+  }
+  .notif-page .notif-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+  .notif-page .notif-body {
+    gap: 0.14rem;
+    min-width: 0;
+  }
+  .notif-page .notif-meta-row {
+    gap: 0.3rem;
+    flex-wrap: wrap;
+  }
+  .notif-page .notif-ago {
+    font-size: 0.66rem;
+    margin-left: auto;
+  }
+  .notif-page .notif-message {
+    font-size: 0.84rem;
+    line-height: 1.35;
+  }
+  .notif-page .notif-timestamp {
+    font-size: 0.62rem;
+  }
+  .notif-page .notif-meta-row .badge {
+    font-size: 0.62rem;
+    padding: 0.12rem 0.45rem;
+  }
+
+  .notif-page .notif-mark-read {
+    margin-top: 0.1rem;
+  }
+  .notif-page .notif-mark-read .btn {
+    padding: 0.18rem 0.6rem;
+    min-height: 28px;
+    font-size: 0.68rem;
+  }
+  .notif-page .notif-mark-read .btn svg {
+    width: 12px;
+    height: 12px;
+    margin-right: 0.25rem;
+  }
+}
+
+/* Subtle divider so the stack reads as a clean modern list without heavy borders or extra spacing. */
+.notif-page .notif-item:not(:last-child) {
+  margin-bottom: 0.35rem;
+  border-bottom: 1px solid #eef2f6;
+  padding-bottom: 0.45rem;
+}
+.notif-page .notif-item:last-child {
+  margin-bottom: 0;
+}
+.notif-page .notif-item-row > .notif-icon {
+  margin-top: 0.04rem;
+}
+
+/* ---- Small phones ---- */
+@media (max-width: 380px) {
+  .notif-page .notif-meta-row { gap: 0.25rem; }
+  .notif-page .notif-ago { margin-left: 0; flex-basis: 100%; margin-top: 0.25rem; }
+  .notif-page .notif-item-row { flex-wrap: wrap; }
+  .notif-page .notif-message { font-size: 0.88rem; }
+}

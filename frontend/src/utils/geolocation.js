@@ -197,29 +197,42 @@ export const searchLocations = async (query, limit = 5) => {
 
 // Approximate city from the network IP — no browser permission needed, so it
 // can run on page open as a non-blocking hint until the user shares precise
-// GPS or picks a place manually. Tries BigDataCloud, then ipapi.co.
-// Returns { city, state, label } or null.
+// GPS or picks a place manually. Uses ipwho.is (primary) + geojs.io (backup).
+// Both are keyless, HTTPS, and send `Access-Control-Allow-Origin: *`, unlike
+// the previous providers (BigDataCloud ip-geolocation-full needs an API key
+// and answers 403 without one; ipapi.co answers 403/CORS-less when its free
+// quota is exceeded) — both of which spammed the console with 403 / CORS /
+// ERR_FAILED errors on the live site.
+// Returns { city, state, country, label } or null. Never throws.
+// NOTE: providers are tried sequentially (not Promise.all) so a failing
+// provider can't leave a dangling fetch that logs network errors after we
+// already resolved.
 export const fetchIpLocation = async () => {
+  // Primary: https://ipwho.is/ -> { city, region, country, success }
   try {
-    const r = await fetch("https://api.bigdatacloud.net/data/ip-geolocation-full?localityLanguage=en");
+    const r = await fetch("https://ipwho.is/");
     if (r.ok) {
       const d = await r.json();
-      const locality = d.location || {};
-      const city = locality.city || locality.localityName || d.city || "";
-      const state = locality.principalSubdivision || "";
-      if (city || state) return { city, state, label: formatLocationLabel({ city, state }) };
+      if (d && d.success !== false) {
+        const city = d.city || "";
+        const state = d.region || "";
+        const country = d.country || "";
+        if (city || state) return { city, state, country, label: formatLocationLabel({ city, state }) };
+      }
     }
   } catch {
     // fall through to the backup provider
   }
+  // Backup: https://get.geojs.io/v1/ip/geo.json -> { city, region, country }
   try {
-    const r2 = await fetch("https://ipapi.co/json/");
+    const r2 = await fetch("https://get.geojs.io/v1/ip/geo.json");
     if (!r2.ok) return null;
     const d2 = await r2.json();
     const city = d2.city || "";
     const state = d2.region || "";
+    const country = d2.country || d2.country_name || "";
     if (!city && !state) return null;
-    return { city, state, label: formatLocationLabel({ city, state }) };
+    return { city, state, country, label: formatLocationLabel({ city, state }) };
   } catch {
     return null;
   }

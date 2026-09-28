@@ -90,22 +90,29 @@
 .testimonial-info h4 { color: #fff; margin: 0; font-size: 0.95rem; }
 .testimonial-info p { color: rgba(255, 255, 255, 0.6); font-size: 0.8rem; margin: 0; }
 
-/* CTA banner */
+/* CTA banner — base */
 .cta-banner {
   position: relative;
   overflow: hidden;
-  text-align: center;
-  background: var(--primary-depth);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-brand);
-  padding: 3.2rem 1.5rem;
-  max-width: 1000px;
+  max-width: 1120px;
   margin: 4rem auto 0;
 }
-.cta-banner h2 { color: #fff; font-size: 1.75rem; margin-bottom: 0.6rem; }
-.cta-banner p { color: rgba(255, 255, 255, 0.85); max-width: 52ch; margin: 0 auto 1.5rem; }
+.cta-cook-wrap { padding: 0 1.5rem; }
+.cta-cook-wrap .cta-banner { margin-left: auto; margin-right: auto; }
 
-/* Cook CTA — badge, perks, high-contrast actions on the orange banner */
+/* Cook CTA — modern split card: copy left, earnings proof right */
+.cta-cook {
+  text-align: left;
+  background:
+    radial-gradient(700px 320px at 12% 0%, rgba(255, 176, 32, 0.35), transparent 60%),
+    radial-gradient(600px 300px at 95% 100%, rgba(0, 0, 0, 0.28), transparent 60%),
+    linear-gradient(135deg, #ea580c 0%, #c2410c 55%, #7c2d12 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 0;
+}
+.cta-cook > *:not(.cta-cook-glow):not(.cta-cook-pattern) { position: relative; z-index: 1; }
 .cta-cook-glow {
   position: absolute;
   border-radius: 50%;
@@ -126,7 +133,28 @@
   right: -100px;
   background: rgba(0, 0, 0, 0.25);
 }
-.cta-cook > *:not(.cta-cook-glow) { position: relative; }
+.cta-cook > *:not(.cta-cook-glow):not(.cta-cook-pattern) { position: relative; z-index: 1; }
+.cta-cook-pattern {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.5;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.22) 1.4px, transparent 1.6px);
+  background-size: 22px 22px;
+  mask-image: linear-gradient(115deg, #000 20%, transparent 65%);
+  -webkit-mask-image: linear-gradient(115deg, #000 20%, transparent 65%);
+  pointer-events: none;
+}
+.cta-cook-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 2rem;
+  align-items: center;
+  padding: 2.6rem 2.4rem;
+}
+.cta-cook-copy h2 { color: #fff; font-size: clamp(1.5rem, 2.6vw, 2rem); margin: 0 0 0.6rem; letter-spacing: -0.02em; line-height: 1.15; }
+.cta-cook-sub { color: rgba(255, 255, 255, 0.9); max-width: 52ch; margin: 0 0 1.4rem; font-size: 1rem; line-height: 1.6; }
+.cta-cook-sub strong { color: #fff; }
 .cta-cook-badge {
   display: inline-flex;
   align-items: center;
@@ -145,30 +173,43 @@
 .cta-cook-perks {
   list-style: none;
   padding: 0;
-  margin: 0 auto 1.75rem;
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 0.6rem;
+  margin: 0 0 1.6rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
 }
 .cta-cook-perks li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.cta-cook-perks li strong { display: block; font-size: 0.9rem; line-height: 1.2; }
+.cta-cook-perks li em { display: block; font-style: normal; font-size: 0.75rem; opacity: 0.85; font-weight: 500; }
+.cta-cook-perk-icon {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  border-radius: 12px;
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-  padding: 0.45rem 0.9rem;
-  border-radius: 99px;
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  color: #fff;
-  font-size: 0.86rem;
-  font-weight: 700;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--primary-700);
+  box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.4);
 }
 .cta-cook-actions {
   display: flex;
-  gap: 1rem;
-  justify-content: center;
+  gap: 0.8rem;
   align-items: center;
   flex-wrap: wrap;
+  margin-bottom: 0.9rem;
 }
 .cta-cook-btn-primary {
   background: #fff;
@@ -181,15 +222,43 @@
   color: var(--primary-800);
   filter: brightness(1.02);
 }
-.cta-cook-signin {
+.cta-cook-btn-ghost {
+  background: transparent;
   color: #fff;
-  font-weight: 700;
-  font-size: 0.92rem;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  text-decoration-color: rgba(255, 255, 255, 0.6);
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  box-shadow: none;
 }
-.cta-cook-signin:hover { color: #fff7ed; text-decoration-color: #fff; }
+.cta-cook-btn-ghost:hover { background: rgba(255, 255, 255, 0.14); color: #fff; border-color: #fff; }
+.cta-cook-note { margin: 0; font-size: 0.82rem; color: rgba(255, 255, 255, 0.8); }
+
+@media (max-width: 900px) {
+  .cta-cook-grid { grid-template-columns: 1fr; gap: 1.5rem; padding: 2rem 1.4rem; }
+  .cta-cook-perks { grid-template-columns: 1fr; }
+  .cta-cook-actions .btn { width: 100%; justify-content: center; }
+}
+
+/* Phones: compact cook CTA — less vertical height.
+   High-specificity banner selector beats the generic responsive.css
+   `.cta-banner` padding/margin (that layer loads later). */
+@media (max-width: 640px) {
+  .cta-cook-wrap { padding: 0 1rem; }
+  .cta-cook-wrap .cta-banner.cta-cook { margin-top: 2rem; padding: 0; }
+  .cta-cook-grid { gap: 1rem; padding: 1.4rem 1.1rem; }
+  .cta-cook-badge { font-size: 0.7rem; padding: 0.25rem 0.65rem; margin-bottom: 0.7rem; }
+  .cta-cook-copy h2 { font-size: 1.32rem; margin-bottom: 0.45rem; }
+  .cta-cook-sub { font-size: 0.88rem; line-height: 1.5; margin-bottom: 0.9rem; }
+  .cta-cook-perks { gap: 0.5rem; margin-bottom: 1rem; }
+  .cta-cook-perks li { padding: 0.5rem 0.65rem; gap: 0.55rem; border-radius: 12px; }
+  .cta-cook-perk-icon { width: 30px; height: 30px; min-width: 30px; border-radius: 10px; }
+  .cta-cook-perks li strong { font-size: 0.82rem; }
+  .cta-cook-perks li em { font-size: 0.7rem; }
+  .cta-cook-actions { gap: 0.55rem; margin-bottom: 0.6rem; }
+  .cta-cook-actions .btn { padding: 0.65rem 1rem; font-size: 0.88rem; border-radius: 12px; }
+  .cta-cook-note { font-size: 0.75rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cta-cook-glow { animation: none !important; }
+}
 
 /* Lead capture */
 .lead-section { max-width: 1200px; margin: 0 auto; padding: 4.2rem 1.5rem; }

@@ -14,7 +14,12 @@ services:
     #   - "27017:27017"
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-}
+        REACT_APP_GOOGLE_CLIENT_ID: ${REACT_APP_GOOGLE_CLIENT_ID:-}
+        REACT_APP_RAZORPAY_KEY_ID: ${REACT_APP_RAZORPAY_KEY_ID:-}
     restart: unless-stopped
     ports:
       - "5000:5000"

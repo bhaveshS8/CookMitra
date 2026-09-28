@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import aiCook2 from "../assets/carousel-2.png";
-import aiCook3 from "../assets/carousel-3.jpeg";
+import aiCook3 from "../assets/carousel-3.png";
 
 const AUTOPLAY_MS = 3500;
 

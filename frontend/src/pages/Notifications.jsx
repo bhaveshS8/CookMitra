@@ -5,7 +5,6 @@ import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
 import {
   Bell,
-  BellRing,
   CheckCheck,
   CheckCircle2,
   XCircle,
@@ -25,6 +24,7 @@ const TYPE_META = {
   booking_confirmed: { label: "Booking confirmed", icon: CheckCircle2, color: "var(--accent-blue)" },
   booking_completed: { label: "Booking completed", icon: CheckCheck, color: "var(--accent-emerald)" },
   booking_cancelled: { label: "Booking cancelled", icon: XCircle, color: "var(--slate-500)" },
+  booking_expired: { label: "Booking expired", icon: Clock, color: "var(--slate-500)" },
   service_started: { label: "Service started", icon: ChefHat, color: "var(--accent-emerald)" },
   booking_rescheduled: { label: "Booking rescheduled", icon: Calendar, color: "var(--accent-blue)" },
   cook_arrived: { label: "Cook arrived", icon: ChefHat, color: "var(--accent-emerald)" },
@@ -33,6 +33,13 @@ const TYPE_META = {
   profile_approved: { label: "Profile approved", icon: ShieldCheck, color: "var(--accent-emerald)" },
   profile_rejected: { label: "Profile needs attention", icon: AlertCircle, color: "#dc2626" },
   general: { label: "Update", icon: Bell, color: "var(--primary)" },
+};
+
+const showFullTimestamp = (iso) => {
+  if (!iso) return false;
+  const diff = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(diff / 86400000);
+  return days >= 7;
 };
 
 const timeAgo = (iso) => {
@@ -76,15 +83,23 @@ const Notifications = () => {
 
   useEffect(() => {
     fetchNotifications();
-    const id = setInterval(async () => {
+    // Calmed for scale: 30s -> 60s + hidden-tab pause (the Notification list is
+    // still refreshed immediately when the tab becomes visible again).
+    const poll = async () => {
+      if (document.hidden) return;
       try {
         const { data } = await API.get("/notifications");
         setNotifications(Array.isArray(data) ? data : []);
       } catch {
         // keep stale list on background poll failure
       }
-    }, 30000);
-    return () => clearInterval(id);
+    };
+    const id = setInterval(poll, 60000);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", poll);
+    };
   }, []);
 
   const handleMarkRead = async (id) => {
@@ -124,24 +139,15 @@ const Notifications = () => {
   const backLabel = user?.role === "cook" ? "Back to Cook Dashboard" : "Back to My Bookings";
 
   return (
-    <div className="dashboard-container">
+    <div className="dashboard-container notif-page">
       <Link to={backTo} className="back-link-bar" style={{ alignSelf: "flex-start" }}>
         <ArrowLeft size={16} /> {backLabel}
       </Link>
 
-      <div className="dashboard-header-row">
+      <div className="dashboard-header-row notif-header">
         <div>
-          <span className="badge badge-festive" style={{ marginBottom: "0.5rem" }}>
-            <BellRing size={14} />
-            {user?.role === "cook" ? "Cook Inbox" : "Customer Inbox"}
-          </span>
-          <h1>Notifications</h1>
-          <p style={{ color: "var(--slate-600)", margin: 0 }}>
-            {unreadCount > 0
-              ? `You have ${unreadCount} unread notification${unreadCount === 1 ? "" : "s"}.`
-              : "You're all caught up — new booking updates will appear here."}
-          </p>
-        </div>
+          <h1 className="notif-page-title">Notifications</h1>
+      </div>
         {unreadCount > 0 && (
           <button
             className="btn btn-outline btn-sm"
@@ -152,36 +158,6 @@ const Notifications = () => {
             {actioning === "all" ? "Marking..." : "Mark all as read"}
           </button>
         )}
-      </div>
-
-      <div className="dashboard-stats-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-        <div className="dashboard-stat-card">
-          <div className="stat-icon-wrapper" style={{ background: "var(--primary-light)", color: "var(--primary)" }}>
-            <Bell size={24} />
-          </div>
-          <div>
-            <div className="stat-metric-number">{notifications.length}</div>
-            <div className="stat-metric-title">Total received</div>
-          </div>
-        </div>
-        <div className="dashboard-stat-card">
-          <div className="stat-icon-wrapper" style={{ background: "var(--accent-amber-light)", color: "var(--accent-amber)" }}>
-            <BellRing size={24} />
-          </div>
-          <div>
-            <div className="stat-metric-number">{unreadCount}</div>
-            <div className="stat-metric-title">Unread</div>
-          </div>
-        </div>
-        <div className="dashboard-stat-card">
-          <div className="stat-icon-wrapper" style={{ background: "var(--accent-emerald-light)", color: "var(--accent-emerald)" }}>
-            <CheckCheck size={24} />
-          </div>
-          <div>
-            <div className="stat-metric-number">{notifications.length - unreadCount}</div>
-            <div className="stat-metric-title">Read</div>
-          </div>
-        </div>
       </div>
 
       <div className="tabs-navigation-bar">
@@ -215,36 +191,31 @@ const Notifications = () => {
             return (
               <div
                 key={n._id}
-                className="booking-item-card"
-                style={{
-                  borderLeft: n.read ? "1px solid var(--border-subtle)" : "4px solid var(--primary)",
-                  background: n.read ? "white" : "var(--primary-light, #fff7ed)",
-                }}
+                className={`booking-item-card notif-item ${n.read ? "is-read" : "is-unread"}`}
               >
-                <div style={{ display: "flex", gap: "0.9rem", alignItems: "flex-start", flexWrap: "wrap" }}>
-                  <div
-                    className="stat-icon-wrapper"
-                    style={{ background: "white", color: meta.color, border: "1px solid var(--border-subtle)", flexShrink: 0 }}
-                  >
+                <div className="notif-item-row">
+                  <div className="stat-icon-wrapper notif-icon" style={{ color: meta.color }}>
                     <Icon size={22} />
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.25rem" }}>
+                  <div className="notif-body">
+                    <div className="notif-meta-row">
                       <span className={`badge ${n.read ? "badge-slate" : "badge-festive"}`}>{meta.label}</span>
                       {!n.read && <span className="badge badge-amber">New</span>}
-                      <span style={{ fontSize: "0.78rem", color: "var(--slate-500)" }}>{timeAgo(n.createdAt)}</span>
+                      <span className="notif-ago">{timeAgo(n.createdAt)}</span>
                     </div>
-                    <p style={{ margin: 0, fontSize: "0.95rem", color: "var(--slate-800)", fontWeight: n.read ? 400 : 600 }}>
+                    <p className="notif-message">
                       {n.message}
                     </p>
-                    <div style={{ fontSize: "0.75rem", color: "var(--slate-400)", marginTop: "0.35rem" }}>
-                      {new Date(n.createdAt).toLocaleString("en-IN", {
-                        day: "numeric",
-                        month: "short",
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </div>
+                    {showFullTimestamp(n.createdAt) && (
+                      <div className="notif-timestamp">
+                        {new Date(n.createdAt).toLocaleString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                      </div>
+                    )}
                   </div>
                   {!n.read && (
                     <button
@@ -271,8 +242,8 @@ const Notifications = () => {
           <p style={{ fontSize: "0.95rem", color: "var(--slate-600)", marginBottom: "1rem" }}>
             {filter === "all" ? (
               <>
-                Booking requests, acceptances, arrivals, and reviews will show up here as soon as
-                there is activity on your account.
+                Booking requests, acceptances, arrivals, and reviews show up here as activity
+                happens on your account.
               </>
             ) : (
               <>Try a different filter — or check back after your next booking update.</>

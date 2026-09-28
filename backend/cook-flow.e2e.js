@@ -1,8 +1,8 @@
     // Live end-to-end test of COOK functionality against a running server.
 // Run: node backend/cook-flow.e2e.js  (server on localhost:5000, seeded via node seeds/seed.js).
-// Covers: own profile, public profile, create-profile guard, live-location sharing,
+// Covers: own profile, public profile, create-profile guard,
 // availability (my slots / set / delete / public), cook bookings dashboard, booking read,
-// accept, share-location, arrive, live tracking, reject, complete, customer review +
+// accept, manual arrive, reject, complete, customer review +
 // cook review lists, cook notifications, and role denial (cook cannot author reviews).
 const BASE = process.env.BASE_URL || "http://localhost:5000/api";
 // Safety: this script CREATES real users/bookings in the target database.
@@ -30,7 +30,7 @@ const cut = (s) => (s ? String(s).slice(0, 90) : "");
     // 1. Cook login (Priya is an approved cook)
     const cook = await login("priya@example.com", "password123");
     step("cook login", Boolean(cook.token), cook.user?.name);
-    step("cook logged in with role=cook", cook.user?.role === "cook", JSON.stringify({ role: cook.user?.role }));
+    step("cook logged in with role=cook", String(cook.user?.role).toUpperCase() === "COOK", JSON.stringify({ role: cook.user?.role }));
 
     // 2. Own profile (GET /cooks/me)
     const me = await api("GET", "/cooks/me", { token: cook.token });
@@ -59,9 +59,9 @@ const cut = (s) => (s ? String(s).slice(0, 90) : "");
     step("self-approve on create ignored (profile starts pending)", freshProfile.data?.approvalStatus === "pending", freshProfile.data?.approvalStatus);
     step("rating/user escalation ignored on create", freshProfile.data?.rating?.count === 0 && String(freshProfile.data?.user) === String(fresh.data.user.id), `rating=${JSON.stringify(freshProfile.data?.rating)} userOwn=${String(freshProfile.data?.user) === String(fresh.data.user.id)}`);
 
-    // 5. Cook shares live location (PATCH /cooks/me/location)
+    // 5. Live-location sharing was removed (PATCH /cooks/me/location gone).
     const loc = await api("PATCH", "/cooks/me/location", { token: cook.token, body: { lat: 12.9716, lng: 77.5946, accuracy: 12 } });
-    step("cook shares live location -> 200", loc.status === 200, `${loc.status} ${JSON.stringify(loc.data)?.slice(0, 60)}`);
+    step("cook live-location endpoint removed -> 404", loc.status === 404, `${loc.status}`);
 
     // 6. Cook views own slots (GET /availability/my)
     const mySlots = await api("GET", "/availability/my", { token: cook.token });
@@ -126,21 +126,20 @@ const cut = (s) => (s ? String(s).slice(0, 90) : "");
         // 14. Cook accepts the request (own booking, status requested -> accepted)
     const accepted = await api("PATCH", `/bookings/${bookingId1}/accept`, { token: cook.token });
     step("cook accepts booking -> 200 accepted", accepted.status === 200 && accepted.data?.status === "accepted", `${accepted.status} ${accepted.data?.status || cut(accepted.data)}`);
-    step("accepted booking has payment deadline + cookLocation snapshot", accepted.data?.paymentExpiresAt && accepted.data?.cookLocation?.lat != null, `${!!accepted.data?.paymentExpiresAt} ${!!accepted.data?.cookLocation}`);
+    step("accepted booking has payment deadline", !!accepted.data?.paymentExpiresAt, `${!!accepted.data?.paymentExpiresAt}`);
 
-    // 15. Cook shares live location on the active booking (no auto-arrive w/o venue pin)
+    // 15-16. Live location tracking was removed: the share + /live endpoints
+    // are gone (expect 404s), arrival is manual-only now.
     const share = await api("PATCH", `/bookings/${bookingId1}/cook-location`, { token: cook.token, body: { lat: 28.6139, lng: 77.209, accuracy: 20 } });
-    step("cook shares location on booking -> 200", share.status === 200, `${share.status} justArrived=${share.data?.justArrived}`);
-
-    // 16. Live tracking endpoint (cook owner) sees the cook location
+    step("cook-location endpoint removed -> 404", share.status === 404, `${share.status}`);
     const tracking = await api("GET", `/bookings/${bookingId1}/live`, { token: cook.token });
-    step("live tracking endpoint -> 200 with location", tracking.status === 200 && tracking.data?.effectiveCookLocation?.lat != null, `${tracking.status} ${tracking.data?.cookArrived ? "arrived" : "en route"}`);
+    step("live tracking endpoint removed -> 404", tracking.status === 404, `${tracking.status}`);
 
     // 17. Cook marks arrived (manual arrival; status stays accepted)
     const arrived = await api("PATCH", `/bookings/${bookingId1}/arrived`, { token: cook.token });
     step("cook marks arrived -> 200", arrived.status === 200, `${arrived.status}`);
-    const tracking2 = await api("GET", `/bookings/${bookingId1}/live`, { token: cook.token });
-    step("live tracking now shows cookArrived", tracking2.status === 200 && tracking2.data?.cookArrived === true, `${tracking2.status} ${tracking2.data?.cookArrived}`);
+    const detail2 = await api("GET", `/bookings/${bookingId1}`, { token: cook.token });
+    step("booking details now show cookArrived", detail2.status === 200 && detail2.data?.cookArrived === true, `${detail2.status} ${detail2.data?.cookArrived}`);
 
     // 18. 2nd booking (12:00) for the cook to REJECT
     const slot2 = (avail.data || []).find((o) => o.startTime === "12:00");

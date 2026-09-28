@@ -11,6 +11,7 @@ MERN monorepo: `backend/` (Express + MongoDB API, serves uploaded docs) and `fro
 - **Render Blueprint**: `render.yaml` for one-click hosting (works the same on Railway/Fly/any Node host).
 - **`.gitignore`**: secrets, `node_modules`, builds, logs, and runtime `uploads/` stay out of git.
 - **Node 18+ engines** pinned in both `package.json` files.
+- **CI/CD**: automated deployment pipeline via `Jenkinsfile` for zero-downtime Docker Compose deploys.
 
 ## Quick deploy (Docker Compose)
 

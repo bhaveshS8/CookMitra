@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /dashboard/
+Disallow: /bookings/
+
+Sitemap: https://cookmitra.in/sitemap.xml

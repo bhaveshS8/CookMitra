@@ -1,0 +1,98 @@
+/* ==========================================================================
+   COOKMITRA EVENTS — module styles + responsive pass.
+   Scoped under .events-page (wizard, details, my-events) and .event-admin
+   (admin managers) so the on-demand flow is never affected. Builds on the
+   shared system (booking.css / modern.css / responsive.css) and only adds
+   what the 5-step event flow, price review, and admin controls need.
+   Breakpoints mirror the app: 1024 tablet · 768 small tablet ·
+   640 phones · 560 compact phones · 400 small phones · 360 tiny phones.
+   ========================================================================== */
+
+/* ---- Assigned-cook card (details page) ---- */
+.event-cook-card { flex-wrap: nowrap; }
+
+/* ---- Admin assign row ---- */
+.event-assign-row .form-control { min-width: 0; }
+
+/* ---- Large tablet ---- */
+@media (max-width: 1024px) {
+  /* 5 steps need more air than the 3-step on-demand flow */
+  .events-page .od-steps-modern { gap: 0.3rem; }
+  .events-page .od-step-desc { font-size: 0.62rem; }
+  .events-page .od-step-link { margin: 0 0.35rem; }
+}
+
+/* ---- Small tablet ---- */
+@media (max-width: 768px) {
+  /* Assign controls take the row — no squeezed select next to buttons */
+  .event-admin .event-assign-row .form-control { max-width: none; width: 100%; flex: 1 1 100%; }
+  .event-admin .event-assign-row .btn { flex: 1 1 auto; min-height: 44px; }
+  /* Add/edit event form stacks full-width */
+  .event-admin form .form-control { flex: 1 1 200px; }
+}
+
+/* ---- Phones ---- */
+@media (max-width: 640px) {
+  /* 5-step stepper: compact — numbers + names only, no descriptions */
+  .events-page .od-step-desc { display: none; }
+  .events-page .od-steps-modern { gap: 0.1rem; }
+  .events-page .od-step-item { gap: 0.3rem; }
+  .events-page .od-step-num { width: 24px; height: 24px; font-size: 0.7rem; }
+  .events-page .od-step-name { font-size: 0.66rem; }
+  .events-page .od-step-link { margin: 0 0.25rem; min-width: 4px; }
+
+  /* Event pick cards already collapse to 1 column via the on-demand rule;
+     keep comfortable thumb targets */
+  .events-page .service-pick-card { min-height: 44px; }
+
+  /* Stepper inputs shrink instead of overflowing (guests / hours / cooks) */
+  .events-page .od-stepper .form-control { min-width: 0; flex: 1 1 auto; }
+
+  /* Sticky CTA: full-width, tall thumb target */
+  .events-page .od-stickybar .od-cta { min-height: 48px; }
+
+  /* 16px stops iOS Safari zooming the page on focus (all event inputs) */
+  .events-page .ondemand-form-card .form-control,
+  .event-admin .form-control { font-size: 16px; }
+
+  /* Assigned-cook card wraps instead of squeezing on narrow screens */
+  .event-cook-card { flex-wrap: wrap; }
+
+  /* Price-breakdown total row stays readable */
+  .events-page .booking-metadata-grid .meta-field span { overflow-wrap: anywhere; }
+
+  /* Admin: add/edit event form buttons go full-width */
+  .event-admin form .btn { flex: 1 1 100%; min-height: 44px; }
+}
+
+/* ---- Compact phones: hero already pins the price chip (≤560px block in
+   booking.css) — keep the events eyebrow clear of it and stack the
+   my-events hero CTA under the copy ---- */
+@media (max-width: 560px) {
+  .events-page .od-hero .btn { width: 100%; min-height: 46px; }
+  .events-page .od-livebar .btn { min-height: 40px; }
+}
+
+/* ---- Small phones: numbers-only stepper ----
+   5 names no longer fit at 360px — inactive steps collapse to their
+   numbered dots, the active step keeps its label for context. */
+@media (max-width: 400px) {
+  .events-page .od-step-item:not(.active) .od-step-text { display: none; }
+  .events-page .od-steps-modern { align-items: center; }
+  .events-page .od-step-link { margin: 0 0.2rem; }
+  .events-page .od-step-num { width: 22px; height: 22px; }
+  /* Active label ("Event" / "Details" / …) must never wrap mid-word */
+  .events-page .od-step-item.active .od-step-name { white-space: nowrap; }
+}
+
+/* ---- Tiny phones: never drop tap targets below ~40px ---- */
+@media (max-width: 360px) {
+  .events-page .od-stickybar .od-cta,
+  .event-admin .event-assign-row .btn { min-height: 44px; }
+}
+
+/* ---- Landscape phones: keep the wizard usable in short viewports ---- */
+@media (max-height: 500px) and (orientation: landscape) {
+  .events-page .od-hero { padding-top: 0.5rem; padding-bottom: 0.5rem; margin-bottom: 0.6rem; }
+  .events-page .od-steps-modern { margin-bottom: 0.6rem; }
+}

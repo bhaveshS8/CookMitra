@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
 import { googleLoginUser } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
+import { AnalyticsEvents, track } from "../utils/analytics";
 import { safeNextPath } from "../utils/bookingDraft";
 
 const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID;
@@ -70,8 +71,11 @@ const GoogleSignInButton = ({
     }
     setLoading(true);
     try {
-      const user = await dispatch(googleLoginUser({ idToken, role })).unwrap();
+      const { user } = await dispatch(googleLoginUser({ idToken, role })).unwrap();
       showToast(`Welcome${user?.name ? `, ${user.name}` : ""}!`, "success");
+      if (user?.role === "cook") {
+        track(AnalyticsEvents.COOK_SIGNUP_COMPLETE, { method: "google" });
+      }
       // Interrupted booking? Customers go straight back to it.
       const resumeTo = user?.role === "customer" ? safeNextPath(next) : null;
       navigate(resumeTo || getDashboardPath(user));
@@ -102,7 +106,7 @@ const GoogleSignInButton = ({
         shape="rectangular"
         theme="outline"
         size="large"
-        width="100%"
+        width="320"
       />
     </div>
   );

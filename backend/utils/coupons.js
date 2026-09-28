@@ -55,7 +55,9 @@ const computeDiscount = (coupon, amount) => {
   if (coupon.discountType === "flat") {
     raw = Math.round(Number(coupon.flatAmount) || 0);
   } else {
-    raw = Math.round((fullFee * Number(coupon.percent)) / 100);
+    // Guard corrupt data (missing percent → NaN → falsy checks pass and the
+    // booking settles ₹0): treat unparseable percent as no discount.
+    raw = Math.round((fullFee * Number(coupon.percent)) / 100) || 0;
   }
   const capped =
     coupon.maxDiscount != null

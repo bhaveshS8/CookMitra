@@ -26,8 +26,9 @@ const resetBooking = (overrides = {}) => {
     startTime: "10:00",
     endTime: "12:00",
     durationHours: 2,
-    status: "accepted",
+    status: "confirmed",
     statusHistory: [],
+    payment: { status: "paid", paidAmount: 499 },
     serviceOtp: "4321",
     serviceOtpGeneratedAt: new Date(),
     serviceStartedAt: null,
@@ -107,6 +108,13 @@ const call = (userId, role, body) => {
   resetBooking({ status: "requested" });
   r = await call("cook1", "cook", { otp: "4321" });
   check("requested refused with 400", r.status === 400, "s=" + r.status);
+
+  // 3b) Accepted but UNPAID booking cannot start the clock -> 400.
+  resetBooking({ status: "accepted", payment: { status: "pending", paidAmount: 0 } });
+  notificationLog.length = 0;
+  r = await call("cook1", "cook", { otp: "4321" });
+  check("accepted-unpaid refused with 400", r.status === 400, "s=" + r.status);
+  check("clock untouched on unpaid", !bookingDoc.serviceStartedAt, "");
 
   // 4) Already started -> idempotent 200, no duplicate history.
   resetBooking({ serviceStartedAt: new Date(), serviceEndsAt: new Date(Date.now() + 3600000), status: "in_progress" });

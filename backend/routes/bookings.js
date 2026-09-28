@@ -11,7 +11,6 @@ const {
   getCookBookings,
   getAdminBookings,
   getBookingById,
-  getBookingLiveTracking,
   acceptBooking,
   rejectBooking,
   completeBooking,
@@ -20,7 +19,6 @@ const {
   rescheduleBooking,
   startService,
   payBooking,
-  shareCookLocation,
   markCookArrived,
 } = require("../controllers/bookingController");
 
@@ -29,11 +27,13 @@ router.post(
   auth,
   authorize("customer"),
   [
-    body("cook").notEmpty().withMessage("Cook is required"),
+    body("cook").isMongoId().withMessage("Valid cook id is required"),
     body("serviceType")
       .isIn(["cook_for_me", "cook_with_me", "teach_me", "preparation_help"])
       .withMessage("Valid service type is required"),
-    body("date").isISO8601().withMessage("Valid date is required"),
+    // Date-only (YYYY-MM-DD): full datetimes are refused outright so a
+    // silently-dropped time/timezone component can never shift the day.
+    body("date").matches(/^\d{4}-\d{2}-\d{2}$/).withMessage("Valid date (YYYY-MM-DD) is required"),
     body("startTime").notEmpty().withMessage("Start time is required"),
     body("endTime").notEmpty().withMessage("End time is required"),
     body("address").trim().notEmpty().withMessage("Address is required"),
@@ -71,7 +71,6 @@ router.post(
 router.get("/my", auth, authorize("customer"), getMyBookings);
 router.get("/my/locations", auth, authorize("customer"), getMyLocations);
 router.get("/cook", auth, authorize("cook"), getCookBookings);
-router.get("/:id/live", auth, getBookingLiveTracking);
 router.get("/:id", auth, getBookingById);
 router.get("/", auth, authorize("admin"), getAdminBookings);
 router.patch("/:id/accept", auth, authorize("cook", "admin"), acceptBooking);
@@ -79,18 +78,6 @@ router.patch("/:id/accept", auth, authorize("cook", "admin"), acceptBooking);
 router.patch("/:id/pay", auth, authorize("customer"), payBooking);
 router.patch("/:id/reject", auth, authorize("cook", "admin"), rejectBooking);
 router.patch("/:id/complete", auth, authorize("cook", "admin"), completeBooking);
-router.patch(
-  "/:id/cook-location",
-  auth,
-  authorize("cook", "admin"),
-  [
-    body("lat").isFloat({ min: -90, max: 90 }).withMessage("Invalid latitude"),
-    body("lng").isFloat({ min: -180, max: 180 }).withMessage("Invalid longitude"),
-    body("accuracy").optional().isFloat({ min: 0, max: 100000 }).withMessage("Invalid accuracy"),
-  ],
-  validate,
-  shareCookLocation
-);
 router.patch("/:id/arrived", auth, authorize("cook", "admin"), markCookArrived);
 router.patch(
   "/:id/start-service",
@@ -109,7 +96,7 @@ router.patch(
   auth,
   authorize("customer"),
   [
-    body("date").isISO8601().withMessage("Valid date is required"),
+    body("date").matches(/^\d{4}-\d{2}-\d{2}$/).withMessage("Valid date (YYYY-MM-DD) is required"),
     body("startTime")
       .matches(/^(\d{1,2}):(\d{2})$/)
       .withMessage("Valid start time (HH:MM) is required"),

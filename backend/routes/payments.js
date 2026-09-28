@@ -10,14 +10,17 @@ router.post(
   auth,
   authorize("customer"),
   [
-    body("cook").notEmpty().withMessage("Cook is required"),
+    body("cook").isMongoId().withMessage("Valid cook id is required"),
     body("date").isISO8601().withMessage("Valid date is required"),
     body("startTime").notEmpty().withMessage("Start time is required"),
     body("endTime").notEmpty().withMessage("End time is required"),
     body("durationHours")
       .optional()
-      .isFloat({ min: 0.5, max: 12 })
-      .withMessage("Duration must be between 0.5 and 12 hours"),
+      // Same contract as booking creation — whole-hour 1–4 sessions.
+      // (createOrder recomputes hours from start/end anyway and rejects
+      // mismatches, so a looser validator here only invites confusion.)
+      .isInt({ min: 1, max: 4 })
+      .withMessage("Sessions run 1–4 hours"),
     body("bookingId")
       .optional()
       .isMongoId()

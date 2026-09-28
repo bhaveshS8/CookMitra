@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import API from "../api/axios";
+import API, { getStoredToken } from "../api/axios";
 import { useShowToast } from "../store/hooks";
 import { Upload, FileCheck, X, Camera } from "lucide-react";
 
@@ -37,7 +37,19 @@ const API_ORIGIN = resolveApiOrigin();
 export const resolveFileUrl = (url) => {
   if (!url) return "";
   if (/^https?:\/\//i.test(url)) return url;
-  return `${API_ORIGIN}${url.startsWith("/") ? url : `/${url}`}`;
+  const full = `${API_ORIGIN}${url.startsWith("/") ? url : `/${url}`}`;
+  // Identity docs (aadhar_*/pan_*) are access-controlled server-side via
+  // ?token= — <img>/<iframe> can't send auth headers. Public profile photos
+  // (photo_*) stay bare so they remain cacheable and shareable.
+  const base = String(url).split("/").pop().split("?")[0];
+  if (!url.startsWith("/uploads") || /^photo_/i.test(base)) return full;
+  try {
+    const token = getStoredToken();
+    if (token) return `${full}${full.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+  } catch {
+    // ignore — the server will answer 401 and the thumb degrades gracefully
+  }
+  return full;
 };
 
 const FIELD_TO_KEY = {
@@ -95,7 +107,7 @@ const CookDocUploads = ({
   };
 
   const fileInput = (field, accept, label) => (
-    <label className="btn btn-outline btn-sm" style={{ cursor: "pointer" }}>
+    <label className="btn btn-outline btn-sm cook-file-btn">
       {field === "photo" ? <Camera size={15} /> : <Upload size={15} />}{" "}
       {uploading[field] ? "Uploading..." : label}
       <input
@@ -112,17 +124,17 @@ const CookDocUploads = ({
   );
 
   return (
-    <div className="booking-form-group">
-      <label style={{ marginBottom: "0.75rem" }}>
+    <div className="cook-field">
+      <label className="cook-doc-group-label">
         Identity Verification{" "}
-        {requireDocs && <span style={{ color: "var(--primary)" }}>(Aadhaar & PAN required)</span>}
+        {requireDocs && <span className="cook-required">(Aadhaar & PAN required)</span>}
       </label>
 
       {/* Aadhaar Card */}
-      <div className="cook-doc-box">
+      <div className="cook-doc-card">
         <div className="cook-doc-head">
-          <strong style={{ fontSize: "0.92rem" }}>
-            Aadhaar Card {requireDocs && <span style={{ color: "#dc2626" }}>*</span>}
+          <strong>
+            Aadhaar Card {requireDocs && <span className="cook-required">*</span>}
           </strong>
           {aadharCardUrl && (
             <span className="badge badge-emerald">
@@ -154,10 +166,10 @@ const CookDocUploads = ({
       </div>
 
       {/* PAN Card */}
-      <div className="cook-doc-box">
+      <div className="cook-doc-card">
         <div className="cook-doc-head">
-          <strong style={{ fontSize: "0.92rem" }}>
-            PAN Card {requireDocs && <span style={{ color: "#dc2626" }}>*</span>}
+          <strong>
+            PAN Card {requireDocs && <span className="cook-required">*</span>}
           </strong>
           {panCardUrl && (
             <span className="badge badge-emerald">
@@ -189,10 +201,10 @@ const CookDocUploads = ({
       </div>
 
       {/* Profile Photo (optional) */}
-      <div className="cook-doc-box">
+      <div className="cook-doc-card">
         <div className="cook-doc-head">
-          <strong style={{ fontSize: "0.92rem" }}>
-            Profile Photo <span style={{ color: "var(--slate-400)", fontWeight: 500 }}>(optional)</span>
+          <strong>
+            Profile Photo <span className="cook-optional">(optional)</span>
           </strong>
           {photoUrl && (
             <span className="badge badge-emerald">
@@ -221,7 +233,7 @@ const CookDocUploads = ({
           )}
         </div>
       </div>
-      <p style={{ fontSize: "0.8rem", color: "var(--slate-500)", marginTop: "0.5rem" }}>
+      <p className="cook-doc-hint">
         Your Aadhaar and PAN are visible only to the admin for verification.
       </p>
     </div>

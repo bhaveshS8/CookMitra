@@ -1,10 +1,50 @@
-import React, { useState } from "react";
+import React, { useId, useMemo, useState } from "react";
 import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
-import { Star, CheckCircle, MessageSquare } from "lucide-react";
+import { Star, CheckCircle2, Loader2, Send, Quote, Sparkles, Check } from "lucide-react";
 
-const ReviewForm = ({ bookingId, existingReview, onSubmitted }) => {
+const RATING_META = {
+  1: { label: "Poor experience", tone: "bad" },
+  2: { label: "Could be better", tone: "warn" },
+  3: { label: "Good & tasty", tone: "info" },
+  4: { label: "Very good experience", tone: "good" },
+  5: { label: "Outstanding festive cooking!", tone: "great" },
+};
+
+const QUICK_TAGS = [
+  "Delicious food",
+  "On time",
+  "Clean & tidy",
+  "Great communication",
+  "Would book again",
+];
+
+const STARS = [1, 2, 3, 4, 5];
+
+/** Read-only star row (also used by the cook-side "Customer rating" card). */
+export const ReviewStars = ({ value = 0, size = 18 }) => (
+  <span className="rf-stars-static" aria-hidden="true">
+    {STARS.map((s) => (
+      <Star
+        key={s}
+        size={size}
+        fill={s <= value ? "#f59e0b" : "none"}
+        color={s <= value ? "#f59e0b" : "#cbd5e1"}
+      />
+    ))}
+  </span>
+);
+
+/**
+ * Customer rating form + submitted-review card.
+ * Props: bookingId, existingReview, onSubmitted, variant ("card" | "bare").
+ * "bare" drops the outer chrome so the host page/card provides the header.
+ */
+const ReviewForm = ({ bookingId, existingReview, onSubmitted, variant = "card" }) => {
   const showToast = useShowToast();
+  const bare = variant === "bare";
+  const commentId = useId();
+
   const [rating, setRating] = useState(existingReview?.rating || undefined);
   const [hoverRating, setHoverRating] = useState(0);
   const [comment, setComment] = useState("");
@@ -14,14 +54,39 @@ const ReviewForm = ({ bookingId, existingReview, onSubmitted }) => {
 
   const done = submitted || !!existingReview;
   const shownRating = submitted ? rating : existingReview?.rating || rating;
-  const shownComment = existingReview?.comment || (submitted ? comment : "");
+  const shownComment = existingReview?.comment || (submitted ? comment.trim() : "");
+  const shownDate = existingReview?.createdAt || (submitted ? new Date().toISOString() : null);
 
-  const ratingLabels = {
-    1: "Poor experience",
-    2: "Fair",
-    3: "Good & tasty",
-    4: "Very good experience",
-    5: "Outstanding festive cooking!",
+  const activeMeta = RATING_META[hoverRating || rating];
+  const doneMeta = RATING_META[shownRating];
+
+  // Quick tags toggle phrases in/out of the comment box (WYSIWYG — the
+  // textarea is the single source of truth for what gets submitted).
+  const activeTags = useMemo(
+    () => new Set(comment.split(",").map((p) => p.trim().toLowerCase()).filter(Boolean)),
+    [comment]
+  );
+  const isTagOn = (tag) => activeTags.has(tag.toLowerCase());
+
+  const toggleTag = (tag) =>
+    setComment((prev) => {
+      const parts = prev.split(",").map((p) => p.trim()).filter(Boolean);
+      const idx = parts.findIndex((p) => p.toLowerCase() === tag.toLowerCase());
+      if (idx >= 0) parts.splice(idx, 1);
+      else parts.push(tag);
+      return parts.join(", ");
+    });
+
+  // Arrow keys move the rating when a star is focused (radiogroup pattern,
+  // wrapping around at the ends).
+  const handleStarsKeyDown = (e) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const cur = rating || 0;
+    const next =
+      e.key === "ArrowRight" ? (cur % 5) + 1 : cur <= 1 ? 5 : cur - 1;
+    setRating(next);
+    setError("");
   };
 
   const handleSubmit = async (e) => {
@@ -32,7 +97,6 @@ const ReviewForm = ({ bookingId, existingReview, onSubmitted }) => {
     }
     setLoading(true);
     setError("");
-
     try {
       await API.post("/reviews", { booking: bookingId, rating, comment: comment.trim() });
       setSubmitted(true);
@@ -47,121 +111,153 @@ const ReviewForm = ({ bookingId, existingReview, onSubmitted }) => {
     }
   };
 
+  /* ---------- Submitted / existing review ---------- */
   if (done) {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "0.5rem",
-          padding: "1rem",
-          background: "var(--accent-emerald-light)",
-          color: "#065f46",
-          borderRadius: "var(--radius-md)",
-          fontWeight: 600,
-          marginTop: "1rem",
-          flexWrap: "wrap",
-        }}
-      >
-        <CheckCircle size={18} />
-        <span>Thank you for reviewing your cook!</span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem" }}>
-          {[1, 2, 3, 4, 5].map((s) => (
-            <Star key={s} size={16} fill={s <= shownRating ? "#f59e0b" : "none"} color={s <= shownRating ? "#f59e0b" : "#94a3b8"} />
-          ))}
-          <strong style={{ marginLeft: "0.3rem" }}>{shownRating}/5</strong>
-        </span>
+      <div className={`review-card${bare ? " review-card--bare" : ""}`}>
+        <div className="review-card-head">
+          <span className="review-card-badge">
+            <CheckCircle2 size={16} />
+          </span>
+          <div className="review-card-headtext">
+            <strong>{submitted ? "Review published — thank you!" : "Your review"}</strong>
+            {shownDate && (
+              <span className="review-card-date">
+                {new Date(shownDate).toLocaleDateString(undefined, {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="review-card-score">
+          <ReviewStars value={shownRating} size={20} />
+          <span className="review-card-num">{shownRating}/5</span>
+          {doneMeta && (
+            <span className={`review-card-label tone-${doneMeta.tone}`}>{doneMeta.label}</span>
+          )}
+        </div>
         {shownComment && (
-          <span style={{ width: "100%", fontWeight: 400, fontSize: "0.88rem" }}>“{shownComment}”</span>
+          <div className="review-card-comment">
+            <Quote size={14} />
+            <p>“{shownComment}”</p>
+          </div>
         )}
       </div>
     );
   }
 
+  /* ---------- Rating form ---------- */
   return (
-    <form
-      onSubmit={handleSubmit}
-      style={{
-        marginTop: "1.25rem",
-        padding: "1.5rem",
-        background: "var(--slate-50)",
-        border: "1px solid var(--slate-200)",
-        borderRadius: "var(--radius-lg)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
-        <MessageSquare size={18} style={{ color: "var(--primary)" }} />
-        <h4 style={{ fontSize: "1.05rem", margin: 0 }}>Leave a Cook Review</h4>
-      </div>
+    <div className={`review-form-container${bare ? " review-form-container--bare" : ""}`}>
+      <form className="review-form" onSubmit={handleSubmit} noValidate>
+        {!bare && (
+          <div className="review-form-head">
+            <span className="review-form-icon">
+              <Sparkles size={18} />
+            </span>
+            <div>
+              <h4 className="review-form-title">Rate your cook</h4>
+              <p className="review-form-sub">
+                Your feedback helps other customers book with confidence.
+              </p>
+            </div>
+          </div>
+        )}
 
-      {error && (
-        <div className="error-alert-banner" style={{ fontSize: "0.85rem", padding: "0.5rem 0.75rem" }}>
-          {error}
-        </div>
-      )}
+        {error && (
+          <div className="rf-error" role="alert">
+            {error}
+          </div>
+        )}
 
-      {/* Interactive Stars */}
-      <div style={{ marginBottom: "1rem" }}>
-        <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 700, color: "var(--slate-700)", marginBottom: "0.4rem" }}>
-          Your Rating
-        </label>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-          {[1, 2, 3, 4, 5].map((starVal) => {
-            const active = (hoverRating || rating || 0) >= starVal;
-            return (
-              <button
-                key={starVal}
-                type="button"
-                onClick={() => setRating(starVal)}
-                onMouseEnter={() => setHoverRating(starVal)}
-                onMouseLeave={() => setHoverRating(0)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  padding: 10,
-                  margin: -6,
-                  minWidth: 44,
-                  minHeight: 44,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  transition: "transform 0.1s ease",
-                }}
-                aria-label={`Rate ${starVal} out of 5`}
-              >
-                <Star
-                  size={26}
-                  fill={active ? "#f59e0b" : "none"}
-                  color={active ? "#f59e0b" : "#cbd5e1"}
-                />
-              </button>
-            );
-          })}
-          <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--slate-600)", marginLeft: "0.5rem" }}>
-            {ratingLabels[hoverRating || rating] || "Pick your rating"}
+        <div className="rf-rate">
+          <div
+            className="rf-stars"
+            role="radiogroup"
+            aria-label="Star rating"
+            onKeyDown={handleStarsKeyDown}
+          >
+            {STARS.map((starVal) => {
+              const active = (hoverRating || rating || 0) >= starVal;
+              return (
+                <button
+                  key={starVal}
+                  type="button"
+                  role="radio"
+                  aria-checked={rating === starVal}
+                  aria-label={`Rate ${starVal} out of 5`}
+                  className={`rf-star${active ? " rf-star--on" : ""}`}
+                  onClick={() => {
+                    setRating(starVal);
+                    setError("");
+                  }}
+                  onMouseEnter={() => setHoverRating(starVal)}
+                  onMouseLeave={() => setHoverRating(0)}
+                >
+                  <Star size={34} fill={active ? "currentColor" : "none"} />
+                </button>
+              );
+            })}
+          </div>
+          <span
+            className={`rf-rate-pill${activeMeta ? ` tone-${activeMeta.tone}` : ""}`}
+            aria-live="polite"
+          >
+            {activeMeta ? `${hoverRating || rating}★ · ${activeMeta.label}` : "Select a star rating"}
           </span>
         </div>
-      </div>
 
-      {/* Comments Area — optional written review */}
-      <div style={{ marginBottom: "1rem" }}>
-        <label style={{ display: "block", fontSize: "0.85rem", fontWeight: 700, color: "var(--slate-700)", marginBottom: "0.4rem" }}>
-          Share Your Experience <span style={{ fontWeight: 400, color: "var(--slate-500)" }}>(optional)</span>
-        </label>
-        <textarea
-          rows={3}
-          className="form-control"
-          placeholder="How was the flavor, cleanliness, timing, and preparation? (optional)"
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-        />
-      </div>
+        <div className="rf-field">
+          <div className="rf-label-row">
+            <label className="rf-label" htmlFor={commentId}>
+              Share your experience <span className="rf-optional">(optional)</span>
+            </label>
+            <span className="rf-count" aria-hidden="true">{comment.length}/500</span>
+          </div>
+          <div className="rf-tags">
+            {QUICK_TAGS.map((tag) => (
+              <button
+                key={tag}
+                type="button"
+                className={`rf-tag${isTagOn(tag) ? " rf-tag--on" : ""}`}
+                aria-pressed={isTagOn(tag)}
+                onClick={() => toggleTag(tag)}
+              >
+                {isTagOn(tag) && <Check size={12} />}
+                {tag}
+              </button>
+            ))}
+          </div>
+          <textarea
+            id={commentId}
+            rows={3}
+            maxLength={500}
+            className="form-control rf-textarea"
+            placeholder="How was the flavor, cleanliness, timing and preparation?"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+          />
+        </div>
 
-      <button type="submit" className="btn btn-primary btn-sm" disabled={loading || !rating}>
-        {loading ? "Submitting..." : "Submit Review"}
-      </button>
-    </form>
+        <div className="rf-actions">
+          <button type="submit" className="btn btn-primary" disabled={loading || !rating}>
+            {loading ? (
+              <>
+                <Loader2 size={16} className="rf-spin" /> Submitting…
+              </>
+            ) : (
+              <>
+                <Send size={16} /> {rating ? `Submit ${rating}★ review` : "Submit Review"}
+              </>
+            )}
+          </button>
+          {!rating && <span className="rf-hint">Select a star rating to continue</span>}
+        </div>
+      </form>
+    </div>
   );
 };
 

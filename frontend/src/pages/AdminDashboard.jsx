@@ -2,11 +2,18 @@ import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import API from "../api/axios";
 import { useFetch } from "../hooks/useFetch";
+import { normalizeRole } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
 import { formatCurrency, formatDate } from "../utils/constants";
 import AddCookModal from "../components/AddCookModal";
 import AdminDocViewer from "../components/AdminDocViewer";
+import AdminDocUpload from "../components/AdminDocUpload";
 import CouponManagement from "../components/CouponManagement";
+import EventBookingAdmin from "../components/EventBookingAdmin";
+import EventPricingManager from "../components/EventPricingManager";
+import EventTypeManager from "../components/EventTypeManager";
+import VisitStats from "../components/VisitStats";
+import AnalyticsPanel from "../components/AnalyticsPanel";
 import {
   ShieldAlert,
   Users,
@@ -16,8 +23,6 @@ import {
   X,
   CheckCircle2,
   AlertCircle,
-  Search,
-  Filter,
   MessageCircle,
   Tag,
   Trash2,
@@ -32,10 +37,16 @@ import {
   Eye,
   EyeOff,
   Copy,
+  Briefcase,
+  MapPin,
+  Wallet,
+  Clock,
+  XCircle,
+  BarChart3,
 } from "lucide-react";
+import { resolveFileUrl } from "../components/CookDocUploads";
 
-const AdminDashboard = () => {
-  const [activeTab, setActiveTab] = useState("cooks");
+const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("cooks");
 
   return (
     <div className="dashboard-container">
@@ -48,6 +59,11 @@ const AdminDashboard = () => {
           <p style={{ color: "var(--slate-600)", margin: 0 }}>
             Oversee cook verification, monitor marketplace bookings, and audit user accounts.
           </p>
+        </div>
+        <div>
+          <Link to="/admin/complaints" className="btn btn-outline btn-sm">
+            <ShieldAlert size={15} /> Cook Complaints
+          </Link>
         </div>
       </div>
 
@@ -64,6 +80,24 @@ const AdminDashboard = () => {
           onClick={() => setActiveTab("bookings")}
         >
           <Calendar size={17} /> Platform Bookings
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "event-bookings" ? "active" : ""}`}
+          onClick={() => setActiveTab("event-bookings")}
+        >
+          <Calendar size={17} /> Event Bookings
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "event-types" ? "active" : ""}`}
+          onClick={() => setActiveTab("event-types")}
+        >
+          <ChefHat size={17} /> Events
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "event-pricing" ? "active" : ""}`}
+          onClick={() => setActiveTab("event-pricing")}
+        >
+          <Tag size={17} /> Event Pricing
         </button>
         <button
           className={`tab-btn ${activeTab === "users" ? "active" : ""}`}
@@ -89,14 +123,31 @@ const AdminDashboard = () => {
         >
           <Tag size={17} /> Coupons
         </button>
+        <button
+          className={`tab-btn ${activeTab === "visits" ? "active" : ""}`}
+          onClick={() => setActiveTab("visits")}
+        >
+          <Eye size={17} /> Site Visits
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "analytics" ? "active" : ""}`}
+          onClick={() => setActiveTab("analytics")}
+        >
+          <BarChart3 size={17} /> Analytics
+        </button>
       </div>
 
       {activeTab === "cooks" && <CookManagement />}
       {activeTab === "bookings" && <BookingManagement />}
+      {activeTab === "event-bookings" && <EventBookingAdmin />}
+      {activeTab === "event-types" && <EventTypeManager />}
+      {activeTab === "event-pricing" && <EventPricingManager />}
       {activeTab === "users" && <UserManagement />}
       {activeTab === "admins" && <AdminManagement />}
       {activeTab === "leads" && <LeadManagement />}
       {activeTab === "coupons" && <CouponManagement />}
+      {activeTab === "visits" && <VisitStats />}
+      {activeTab === "analytics" && <AnalyticsPanel />}
     </div>
   );
 };
@@ -162,16 +213,27 @@ const CookManagement = () => {
       ) : filteredCooks.length > 0 ? (
         <div className="bookings-list-modern">
           {filteredCooks.map((cook) => (
-            <div key={cook._id} className="booking-item-card">
-              <div className="booking-item-top">
-                <div>
-                  <h3 style={{ margin: 0 }}>{cook.user?.name || "Cook Applicant"}</h3>
-                  <span style={{ fontSize: "0.85rem", color: "var(--slate-500)" }}>
-                    Email: {cook.user?.email} • Area: {cook.serviceArea}
-                  </span>
+            <div key={cook._id} className="admin-cook-card">
+              <div className="acc-head">
+                <div className="acc-ava">
+                  {cook.photoUrl ? (
+                    <img src={resolveFileUrl(cook.photoUrl)} alt={cook.user?.name || "Cook"} />
+                  ) : (
+                    (cook.user?.name || "C")[0].toUpperCase()
+                  )}
+                  <span
+                    className={`acc-ava-dot acc-dot-${cook.approvalStatus || "pending"}`}
+                    title={cook.approvalStatus}
+                  />
+                </div>
+                <div className="acc-id">
+                  <h3>{cook.user?.name || "Cook Applicant"}</h3>
+                  <p>
+                    <Mail size={12} /> {cook.user?.email}
+                  </p>
                 </div>
                 <span
-                  className={`badge ${
+                  className={`badge acc-badge ${
                     cook.approvalStatus === "approved"
                       ? "badge-emerald"
                       : cook.approvalStatus === "rejected"
@@ -179,32 +241,42 @@ const CookManagement = () => {
                       : "badge-amber"
                   }`}
                 >
-                  {cook.approvalStatus?.toUpperCase()}
+                  {cook.approvalStatus === "approved" ? (
+                    <CheckCircle2 size={13} />
+                  ) : cook.approvalStatus === "rejected" ? (
+                    <XCircle size={13} />
+                  ) : (
+                    <Clock size={13} />
+                  )}
+                  {cook.approvalStatus?.toUpperCase() || "PENDING"}
                 </span>
               </div>
 
-              <div className="booking-metadata-grid">
-                <div className="meta-field">
-                  <label>Experience</label>
-                  <span>{cook.experienceYears} Years</span>
-                </div>
-                <div className="meta-field">
-                  <label>Session Rate</label>
-                  <span style={{ color: "var(--primary)", fontWeight: 700 }}>
-                    {formatCurrency(cook.rate)}/hr
+              <div className="acc-chips">
+                <span className="acc-chip">
+                  <Briefcase size={13} /> {cook.experienceYears} yrs experience
+                </span>
+                <span className="acc-chip acc-chip-rate">
+                  <Wallet size={13} /> {formatCurrency(cook.rate)}/hr
+                </span>
+                {cook.serviceArea && (
+                  <span className="acc-chip">
+                    <MapPin size={13} /> {cook.serviceArea}
                   </span>
-                </div>
-                <div className="meta-field">
-                  <label>Specialties</label>
-                  <span>{cook.specialties?.join(", ") || "General"}</span>
-                </div>
+                )}
+                {(cook.specialties || []).slice(0, 3).map((s) => (
+                  <span key={s} className="acc-chip acc-chip-spec">
+                    <ChefHat size={13} /> {s}
+                  </span>
+                ))}
+                {(cook.specialties?.length || 0) > 3 && (
+                  <span className="acc-chip acc-chip-spec">
+                    +{cook.specialties.length - 3} more
+                  </span>
+                )}
               </div>
 
-              {cook.bio && (
-                <p style={{ fontSize: "0.9rem", color: "var(--slate-600)", margin: "0.5rem 0" }}>
-                  {cook.bio}
-                </p>
-              )}
+              {(cook.skills || cook.bio) && <p className="acc-bio">{cook.skills || cook.bio}</p>}
 
               {/* ID verification uploads — click a thumb to preview */}
               <AdminDocViewer
@@ -218,6 +290,21 @@ const CookManagement = () => {
                   })),
                 ]}
               />
+
+              {/* Admin can attach files the cook sent over email/WhatsApp */}
+              <div
+                style={{
+                  marginTop: "0.75rem",
+                  borderTop: "1px dashed var(--slate-200)",
+                  paddingTop: "0.75rem",
+                }}
+              >
+                <AdminDocUpload
+                  cookId={cook._id}
+                  current={cook}
+                  onUploaded={refetch}
+                />
+              </div>
 
               {cook.approvalStatus === "pending" && (
                 <div className="booking-actions-row">
@@ -278,6 +365,13 @@ const BookingManagement = () => {
       )
     )
       return;
+    if (
+      action === "cancel" &&
+      !window.confirm(
+        "Cancel this booking as admin? Paid bookings are refunded and the slot is released."
+      )
+    )
+      return;
     try {
       await API.patch(`/bookings/${bookingId}/${action}`);
       showToast(
@@ -285,8 +379,10 @@ const BookingManagement = () => {
           ? "Request accepted on behalf of the cook — the cook has been notified!"
           : action === "complete"
           ? "Service marked completed on behalf of the cook!"
+          : action === "cancel"
+          ? "Booking cancelled — slot released."
           : "Request declined on behalf of the cook — the cook has been notified!",
-        action === "accept" || action === "complete" ? "success" : "info"
+        action === "reject" ? "info" : "success"
       );
       refetch();
     } catch (err) {
@@ -433,6 +529,12 @@ const BookingManagement = () => {
                   >
                     <Check size={16} /> Mark Completed
                   </button>
+                  <button
+                    className="btn btn-danger-outline btn-sm"
+                    onClick={() => handleAction(booking._id, "cancel")}
+                  >
+                    <X size={16} /> Admin Cancel
+                  </button>
                   <Link to={`/bookings/${booking._id}`} className="btn btn-outline btn-sm">
                     View Details
                   </Link>
@@ -461,6 +563,10 @@ const BookingManagement = () => {
 const UserManagement = () => {
   const { data: users, loading, refetch } = useFetch("/auth/users");
   const showToast = useShowToast();
+
+  // The API stores spec-UPPERCASE roles (ADMIN/COOK/CUSTOMER) — normalize the
+  // whole list so the admin-protection check and role badge below work.
+  const list = (users || []).map((u) => ({ ...u, role: normalizeRole(u.role) }));
 
   const handleStatus = async (user, status) => {
     const blocking = status === "suspended";
@@ -511,6 +617,8 @@ const UserManagement = () => {
   const statusBadge = (status) =>
     status === "suspended" ? (
       <span className="badge badge-rose">Blocked</span>
+    ) : status === "inactive" ? (
+      <span className="badge badge-slate">Inactive</span>
     ) : (
       <span className="badge badge-emerald">{status || "Active"}</span>
     );
@@ -523,7 +631,7 @@ const UserManagement = () => {
           <div className="spinner"></div>
           <p>Loading users...</p>
         </div>
-      ) : users && users.length > 0 ? (
+      ) : list.length > 0 ? (
         <div style={{ background: "white", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-subtle)", overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.95rem" }}>
             <thead style={{ background: "var(--slate-50)", borderBottom: "1px solid var(--slate-200)" }}>
@@ -536,7 +644,7 @@ const UserManagement = () => {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
+              {list.map((u) => (
                 <tr key={u._id} style={{ borderBottom: "1px solid var(--slate-100)" }}>
                   <td style={{ padding: "1rem", fontWeight: 700 }}>{u.name}</td>
                   <td style={{ padding: "1rem", color: "var(--slate-600)" }}>{u.email}</td>
@@ -610,7 +718,7 @@ const AdminManagement = () => {
   const [createdCreds, setCreatedCreds] = useState(null);
   const [copied, setCopied] = useState("");
 
-  const admins = (users || []).filter((u) => u.role === "admin");
+  const admins = (users || []).filter((u) => normalizeRole(u.role) === "admin");
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -912,6 +1020,17 @@ const LeadManagement = () => {
     }
   };
 
+  const handleDelete = async (lead) => {
+    if (!window.confirm(`Delete enquiry from ${lead.name}? This cannot be undone.`)) return;
+    try {
+      await API.delete(`/leads/${lead._id}`);
+      showToast("Enquiry deleted", "success");
+      refetch();
+    } catch (err) {
+      showToast(err.response?.data?.message || "Delete failed", "error");
+    }
+  };
+
   return (
     <div>
       <h2 style={{ fontSize: "1.4rem", marginBottom: "1.5rem" }}>WhatsApp Enquiries</h2>
@@ -978,6 +1097,13 @@ const LeadManagement = () => {
                       <option value="converted">Converted</option>
                       <option value="closed">Closed</option>
                     </select>
+                    <button
+                      className="btn btn-danger-outline btn-sm"
+                      style={{ marginLeft: "0.5rem" }}
+                      onClick={() => handleDelete(lead)}
+                    >
+                      Delete
+                    </button>
                   </td>
                 </tr>
               ))}

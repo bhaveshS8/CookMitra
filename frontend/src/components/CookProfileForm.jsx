@@ -23,11 +23,10 @@ const CookProfileForm = ({
 }) => {
   const showToast = useShowToast();
   const [formData, setFormData] = useState({
-    bio: "",
+    skills: "",
     experienceYears: 0,
     specialties: "",
     serviceTypes: [],
-    rate: "",
     serviceArea: "",
     address: "",
     documents: [],
@@ -47,11 +46,10 @@ const CookProfileForm = ({
         const res = await API.get("/cooks/me");
         setExisting(res.data);
         setFormData({
-          bio: res.data.bio || "",
+          skills: res.data.skills || res.data.bio || "",
           experienceYears: res.data.experienceYears ?? 0,
           specialties: (res.data.specialties || []).join(", "),
           serviceTypes: res.data.serviceTypes || [],
-          rate: res.data.rate ?? "",
           serviceArea: res.data.serviceArea || "",
           address: res.data.address || "",
           documents: res.data.documents || [],
@@ -107,14 +105,16 @@ const CookProfileForm = ({
     setError("");
 
     const payload = {
-      bio: formData.bio,
-      experienceYears: Number(formData.experienceYears),
+      skills: formData.skills,
+      bio: formData.skills,
+      experienceYears: Number.isFinite(Number(formData.experienceYears))
+        ? Math.max(0, Number(formData.experienceYears))
+        : 0,
       specialties: formData.specialties
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
       serviceTypes: formData.serviceTypes,
-      rate: Number(formData.rate),
       serviceArea: formData.serviceArea,
       address: formData.address,
       aadharCardUrl: formData.aadharCardUrl,
@@ -157,15 +157,15 @@ const CookProfileForm = ({
   }
 
   return (
-    <div className="profile-card-block">
-      <div className="cook-setup-head">
+    <div className="cook-form-card">
+      <div className="cook-form-head">
         <ChefHat size={22} />
         <h1>{existing ? manageTitle : createTitle}</h1>
       </div>
 
       {showStatus && existing && (
-        <div style={{ marginBottom: "1.5rem" }}>
-          <span style={{ fontSize: "0.9rem", color: "var(--slate-500)", marginRight: 8 }}>
+        <div className="cook-verify-row">
+          <span className="cook-verify-label">
             Verification Status:
           </span>
           <span
@@ -189,49 +189,33 @@ const CookProfileForm = ({
       )}
 
       <form onSubmit={handleSubmit}>
-        <div className="booking-form-group">
-          <label>Chef Bio</label>
+        <div className="cook-field">
+          <label>Skills</label>
           <textarea
-            name="bio"
+            name="skills"
             rows={3}
             className="form-control"
-            value={formData.bio}
+            value={formData.skills}
             onChange={handleChange}
-            placeholder="Tell families about your home cooking background and signature festival sweets..."
+            placeholder="Tell families about your cooking skills and signature festival sweets..."
           />
         </div>
 
-        <div className="cook-form-grid-2">
-          <div className="booking-form-group">
-            <label>Experience (Years)</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              name="experienceYears"
-              className="form-control"
-              value={formData.experienceYears}
-              onChange={handleChange}
-              min="0"
-            />
-          </div>
-          <div className="booking-form-group">
-            <label>Hourly Rate (₹)</label>
-            <input
-              type="text"
-              inputMode="decimal"
-              pattern="[0-9]*[.]?[0-9]*"
-              name="rate"
-              className="form-control"
-              value={formData.rate}
-              onChange={handleChange}
-              min="0"
-              required
-            />
-          </div>
+        <div className="cook-field">
+          <label>Experience (Years)</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            name="experienceYears"
+            className="form-control"
+            value={formData.experienceYears}
+            onChange={handleChange}
+            min="0"
+          />
         </div>
 
-        <div className="booking-form-group">
+        <div className="cook-field">
           <label>Specialties (Comma-separated)</label>
           <input
             name="specialties"
@@ -242,7 +226,7 @@ const CookProfileForm = ({
           />
         </div>
 
-        <div className="booking-form-group">
+        <div className="cook-field">
           <label>Primary Service Area</label>
           <input
             name="serviceArea"
@@ -253,7 +237,7 @@ const CookProfileForm = ({
           />
         </div>
 
-        <div className="booking-form-group">
+        <div className="cook-field">
           <label>Home Address (visible to admin)</label>
           <textarea
             name="address"
@@ -274,8 +258,8 @@ const CookProfileForm = ({
           onUploadingChange={setUploadingDocs}
         />
 
-        <div className="booking-form-group">
-          <label style={{ marginBottom: "0.75rem" }}>
+        <div className="cook-field">
+          <label>
             Additional Documents (optional, visible to admin)
           </label>
           {(formData.documents || []).map((doc, i) => (
@@ -328,9 +312,9 @@ const CookProfileForm = ({
           </button>
         </div>
 
-        <div className="booking-form-group">
-          <label style={{ marginBottom: "0.75rem" }}>Services You Can Offer</label>
-          <div className="cook-service-toggles">
+        <div className="cook-field">
+          <label>Services You Can Offer</label>
+          <div className="cook-svc-grid">
             {SERVICE_OPTIONS.map((type) => {
               const isSelected = formData.serviceTypes.includes(type);
               const info = SERVICE_DETAILS[type] || { label: type.replace(/_/g, " ") };
@@ -339,7 +323,7 @@ const CookProfileForm = ({
                   key={type}
                   type="button"
                   onClick={() => toggleServiceType(type)}
-                  className={`cook-service-toggle${isSelected ? " selected" : ""}`}
+                  className={`cook-svc${isSelected ? " selected" : ""}`}
                   aria-pressed={isSelected}
                 >
                   <span>{info.label}</span>
@@ -352,9 +336,8 @@ const CookProfileForm = ({
 
         <button
           type="submit"
-          className="btn btn-primary btn-block btn-lg"
+          className="btn btn-primary btn-block btn-lg cook-form-submit"
           disabled={saving || uploadingDocs}
-          style={{ marginTop: "1.5rem" }}
         >
           {saving
             ? "Saving Details..."

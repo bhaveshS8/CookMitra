@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useFetch } from "../hooks/useFetch";
 import { useDispatch, useSelector } from "react-redux";
 import { registerUser } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
-import { formatCurrency, formatDate } from "../utils/constants";
+import { formatDate, isReviewable } from "../utils/constants";
 import API from "../api/axios";
 import heroImg from "../assets/hero.png";
 import DishCarousel from "../components/DishCarousel";
@@ -12,7 +11,6 @@ import HomeCoupons from "../components/HomeCoupons";
 import ReviewForm from "../components/ReviewForm";
 import {
   ArrowRight,
-  BadgeIndianRupee,
   CalendarClock,
   ChefHat,
   Users,
@@ -92,98 +90,39 @@ const TICKER_DISHES = [
 
 const DISMISSED_RATINGS_KEY = "home-rate-dismissed";
 
-// True when the booked service hours have ended: completed status, the
-// hours-complete flag, or the session end time is in the past.
-const serviceHoursEnded = (booking) => {
-  if (!booking) return false;
-  if (booking.status === "completed") return true;
-  if (booking.hoursCompleted) return true;
-  let end = null;
-  if (booking.serviceEndsAt || booking.sessionEnd) {
-    const d = new Date(booking.serviceEndsAt || booking.sessionEnd);
-    if (!Number.isNaN(d.getTime())) end = d;
-  } else if (booking.date && booking.endTime) {
-    const m = String(booking.endTime).match(/^(\d{1,2}):(\d{2})/);
-    if (m) {
-      const d = new Date(booking.date);
-      d.setHours(Number(m[1]), Number(m[2]), 0, 0);
-      if (!Number.isNaN(d.getTime())) end = d;
-    }
-  }
-  return !!end && Date.now() >= end.getTime();
-};
-
 // One rateable booking card: cook info + star rating (comment optional) +
 // per-card cross button to dismiss. Disappears once the rating is submitted.
 const PendingRatingCard = ({ booking, onRated, onDismiss }) => {
   return (
-    <div
-      style={{
-        position: "relative",
-        background: "#fff",
-        border: "1px solid var(--border-subtle, #e2e8f0)",
-        borderRadius: "14px",
-        padding: "1.1rem 1.2rem",
-        boxShadow: "var(--shadow-sm)",
-        minWidth: 280,
-        flex: "1 1 320px",
-        maxWidth: 520,
-      }}
-    >
+    <article className="hrc-card">
       <button
         type="button"
         onClick={() => onDismiss(booking._id)}
         aria-label={`Dismiss rating for ${booking.cook?.name || "cook"}`}
         title="Dismiss"
-        style={{
-          position: "absolute",
-          top: 8,
-          right: 8,
-          width: 30,
-          height: 30,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          borderRadius: "50%",
-          border: "1px solid var(--slate-200, #e2e8f0)",
-          background: "#fff",
-          cursor: "pointer",
-          color: "var(--slate-500)",
-        }}
+        className="hrc-x"
       >
         <X size={15} />
       </button>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.35rem", paddingRight: "2rem" }}>
-        <span
-          style={{
-            width: 42,
-            height: 42,
-            borderRadius: "50%",
-            background: "var(--primary-gradient)",
-            color: "#fff",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: 800,
-            fontSize: "1.1rem",
-            flexShrink: 0,
-          }}
-        >
+      <div className="hrc-card-head">
+        <span className="hrc-avatar" aria-hidden="true">
           {booking.cook?.name?.[0]?.toUpperCase() || <ChefHat size={18} />}
         </span>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: "0.98rem" }}>
-            How was {booking.cook?.name || "your cook"}?
-          </div>
-          <div style={{ fontSize: "0.8rem", color: "var(--slate-500)" }}>
-            {(booking.serviceType || "").replace(/_/g, " ")}
-            {booking.date ? ` • ${formatDate(booking.date)}` : ""}
-            {booking.startTime && booking.endTime ? ` • ${booking.startTime}–${booking.endTime}` : ""}
+        <div className="hrc-who">
+          <div className="hrc-name">How was {booking.cook?.name || "your cook"}?</div>
+          <div className="hrc-chips">
+            {(booking.serviceType || "").replace(/_/g, " ") && (
+              <span className="rf-chipmeta">{(booking.serviceType || "").replace(/_/g, " ")}</span>
+            )}
+            {booking.date && <span className="rf-chipmeta">{formatDate(booking.date)}</span>}
+            {booking.startTime && booking.endTime && (
+              <span className="rf-chipmeta">{booking.startTime}–{booking.endTime}</span>
+            )}
           </div>
         </div>
       </div>
-      <ReviewForm bookingId={booking._id} onSubmitted={() => onRated(booking._id)} />
-    </div>
+      <ReviewForm bookingId={booking._id} onSubmitted={() => onRated(booking._id)} variant="bare" />
+    </article>
   );
 };
 
@@ -220,20 +159,18 @@ const PendingCookRatings = () => {
   if (!user || user.role !== "customer") return null;
 
   const persistDismissed = (ids) => {
-    setDismissed(ids);
+    // Cap the list so it can't grow unbounded in localStorage.
+    const capped = [...new Set(ids)].slice(-100);
+    setDismissed(capped);
     try {
-      localStorage.setItem(DISMISSED_RATINGS_KEY, JSON.stringify(ids));
+      localStorage.setItem(DISMISSED_RATINGS_KEY, JSON.stringify(capped));
     } catch {
       // storage optional
     }
   };
 
   const rateable = (bookings || []).filter(
-    (b) =>
-      !b.review &&
-      !dismissed.includes(b._id) &&
-      !["cancelled", "rejected", "expired"].includes(b.status) &&
-      serviceHoursEnded(b)
+    (b) => !b.review && !dismissed.includes(b._id) && isReviewable(b)
   );
 
   const handleDismissOne = (id) => {
@@ -253,61 +190,101 @@ const PendingCookRatings = () => {
   if (rateable.length === 0) return null;
 
   return (
-    <section
-      aria-label="Rate your cook"
-      style={{
-        maxWidth: 1200,
-        margin: "1.5rem auto 0",
-        padding: "0 1.5rem",
-      }}
-    >
-      <div
-        style={{
-          position: "relative",
-          background: "linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)",
-          border: "1px solid #f59e0b",
-          borderRadius: "16px",
-          padding: "1.25rem 1.25rem 1.35rem",
-          boxShadow: "var(--shadow-sm)",
-        }}
-      >
+    <section aria-label="Rate your cook" className="hrc-section">
+      <span className="hrc-glow hrc-glow-a" aria-hidden="true" />
+      <span className="hrc-glow hrc-glow-b" aria-hidden="true" />
+      <div className="hrc-head">
+        <div>
+          <p className="hrc-eyebrow">
+            <Star size={13} /> Your feedback matters
+          </p>
+          <h2 className="hrc-title">
+            Rate your cook <span className="hrc-count">{rateable.length}</span>
+          </h2>
+          <p className="hrc-sub">
+            Your service hours are complete — tap the stars to rate. A written review is optional.
+          </p>
+        </div>
         <button
           type="button"
           onClick={handleDismissAll}
+          className="hrc-dismiss"
           aria-label="Dismiss all rating prompts"
-          title="Dismiss"
-          style={{
-            position: "absolute",
-            top: 10,
-            right: 10,
-            width: 32,
-            height: 32,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: "50%",
-            border: "1px solid #f59e0b",
-            background: "#fff",
-            cursor: "pointer",
-            color: "#92400e",
-          }}
+          title="Dismiss all"
         >
-          <X size={16} />
+          <X size={15} /> Dismiss all
         </button>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.3rem", paddingRight: "2.2rem" }}>
-          <Star size={20} fill="#f59e0b" color="#f59e0b" />
-          <h2 style={{ margin: 0, fontSize: "1.15rem" }}>Rate your cook</h2>
-        </div>
-        <p style={{ margin: "0 0 1rem", fontSize: "0.88rem", color: "#92400e" }}>
-          Your service hours are complete — tap the stars to rate. A written review is optional.
-        </p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem" }}>
-          {rateable.map((b) => (
-            <PendingRatingCard key={b._id} booking={b} onRated={handleRated} onDismiss={handleDismissOne} />
-          ))}
-        </div>
+      </div>
+      <div className="hrc-grid">
+        {rateable.map((b) => (
+          <PendingRatingCard key={b._id} booking={b} onRated={handleRated} onDismiss={handleDismissOne} />
+        ))}
       </div>
     </section>
+  );
+};
+
+// Homepage trust stats — live from GET /api/stats/public (see backend
+// routes/stats.js). Hardcoded marketing numbers are a CCPA 2022
+// misleading-ad exposure for a payment merchant, so the hero only renders a
+// stat once it is meaningful, and falls back to honest "growing" copy.
+const STAT_MINIMUMS = { cooks: 5, bookings: 20, ratings: 5 };
+
+const HeroStats = () => {
+  const [stats, setStats] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    API.get("/stats/public")
+      .then((res) => {
+        if (!cancelled) setStats(res.data || null);
+      })
+      .catch(() => {
+        // Stats are decorative — the hero must render without them.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const showCooks = (stats?.cooks ?? 0) >= STAT_MINIMUMS.cooks;
+  const showBookings = (stats?.bookings ?? 0) >= STAT_MINIMUMS.bookings;
+  const showRating =
+    (stats?.ratingCount ?? 0) >= STAT_MINIMUMS.ratings && stats?.ratingAverage != null;
+
+  // Pre-launch: nothing is meaningful yet — render nothing instead of
+  // placeholder stats.
+  if (!showCooks && !showBookings && !showRating) {
+    return null;
+  }
+
+  return (
+    <div className="hero-v2-stats">
+      {showCooks && (
+        <>
+          <div className="hero-v2-stat">
+            <div className="hero-v2-stat-num"><CountUp to={stats.cooks} suffix="+" /></div>
+            <div className="hero-v2-stat-label">Verified Cooks</div>
+          </div>
+          <div className="hero-v2-stat-sep" />
+        </>
+      )}
+      {showBookings && (
+        <>
+          <div className="hero-v2-stat">
+            <div className="hero-v2-stat-num"><CountUp to={stats.bookings} suffix="+" /></div>
+            <div className="hero-v2-stat-label">Sessions Completed</div>
+          </div>
+          <div className="hero-v2-stat-sep" />
+        </>
+      )}
+      {showRating && (
+        <div className="hero-v2-stat">
+          <div className="hero-v2-stat-num"><CountUp to={stats.ratingAverage} decimals={1} suffix=" ★" /></div>
+          <div className="hero-v2-stat-label">Average Rating</div>
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -392,37 +369,45 @@ const Home = () => {
     {
       id: "cook_for_me",
       title: "Cook for Me",
+      tagline: "Most Popular",
       description: "Host effortlessly while a skilled chef prepares authentic festival meals right in your home kitchen.",
-      icon: <ChefHat size={22} />,
-      bg: "var(--primary-light)",
-      color: "var(--primary)",
+      icon: <ChefHat size={24} />,
+      bg: "linear-gradient(135deg, #fff7ed, #ffedd5)",
+      color: "#c2410c",
+      accent: "linear-gradient(135deg, #f59e0b, #ea580c)",
       perks: ["Full meal prep & plating", "Traditional authentic spices", "Kitchen left clean & tidy"],
     },
     {
       id: "cook_with_me",
       title: "Cook With Me",
+      tagline: "Family Favourite",
       description: "Team up with an experienced home chef to knead, fry, shape, and cook festive snacks together.",
-      icon: <Users size={22} />,
-      bg: "var(--accent-emerald-light)",
-      color: "#059669",
+      icon: <Users size={24} />,
+      bg: "linear-gradient(135deg, #ecfdf5, #d1fae5)",
+      color: "#047857",
+      accent: "linear-gradient(135deg, #10b981, #047857)",
       perks: ["Hands-on partnership", "Great for family bonding", "Share traditional recipes"],
     },
     {
       id: "teach_me",
       title: "Teach Me",
+      tagline: "Learn Heritage",
       description: "Master intricate culinary techniques like one-string sugar syrup, chakli spiral shaping, and modak pleating.",
-      icon: <GraduationCap size={22} />,
-      bg: "var(--accent-blue-light)",
-      color: "#2563eb",
+      icon: <GraduationCap size={24} />,
+      bg: "linear-gradient(135deg, #eff6ff, #dbeafe)",
+      color: "#1d4ed8",
+      accent: "linear-gradient(135deg, #3b82f6, #1d4ed8)",
       perks: ["Step-by-step guidance", "Troubleshooting tips", "Heritage secret ratios"],
     },
     {
       id: "preparation_help",
       title: "Preparation Help",
+      tagline: "Save Hours",
       description: "Get reliable helping hands for labor-intensive tasks like grating coconut, chopping, kneading, and deep-frying.",
-      icon: <HandHelping size={22} />,
-      bg: "var(--accent-purple-light)",
-      color: "#7c3aed",
+      icon: <HandHelping size={24} />,
+      bg: "linear-gradient(135deg, #f5f3ff, #ede9fe)",
+      color: "#6d28d9",
+      accent: "linear-gradient(135deg, #8b5cf6, #6d28d9)",
       perks: ["Saves hours of prep time", "Ideal for large gatherings", "Focused prep assistance"],
     },
   ];
@@ -437,7 +422,7 @@ const Home = () => {
     },
     {
       name: "Vikram Kulkarni",
-      role: "Ganesh Festival in Mumbai",
+      role: "Ganesh Festival in Pune",
       quote: "Booking a cook for Modaks was the best decision we made. We learned the traditional pleating technique and enjoyed fresh steamed Ukadiche Modak.",
       rating: 5,
       avatar: "VK",
@@ -482,8 +467,8 @@ const Home = () => {
             </h1>
             <p className="hero-v2-sub hero-enter" style={{ "--d": "0.25s" }}>
               Welcome Bappa home with ukadiche modak, puran poli, chakli & more —
-              cooked fresh in your kitchen by verified home cooks. Live tracking,
-              secure UPI payments, and real-time alerts.
+              cooked fresh in your kitchen by verified home cooks. OTP-verified
+              starts, secure UPI payments, and real-time alerts.
             </p>
 
             <div className="hero-v2-actions hero-enter" style={{ "--d": "0.35s" }}>
@@ -527,7 +512,7 @@ const Home = () => {
             </div>
 
             <div className="hero-v2-perks hero-enter" style={{ "--d": "0.55s" }}>
-              {["100% Verified Cooks", "Live Tracking", "Secure UPI"].map((p) => (
+              {["100% Verified Cooks", "OTP-Verified Start", "Secure UPI"].map((p) => (
                 <span key={p}>
                   <CheckCircle2 size={14} /> {p}
                 </span>
@@ -563,34 +548,14 @@ const Home = () => {
             <div className="hero-v2-float hero-v2-float-live">
               <span className="hero-v2-float-live-dot" />
               <div>
-                <div className="hero-v2-float-live-title">Live Tracking</div>
-                <div className="hero-v2-float-live-sub">Arriving in ~12 min</div>
+                <div className="hero-v2-float-live-title">Cook Arrived</div>
+                <div className="hero-v2-float-live-sub">OTP-verified start</div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="hero-v2-stats">
-          <div className="hero-v2-stat">
-            <div className="hero-v2-stat-num"><CountUp to={50} suffix="+" /></div>
-            <div className="hero-v2-stat-label">Heritage Recipes</div>
-          </div>
-          <div className="hero-v2-stat-sep" />
-          <div className="hero-v2-stat">
-            <div className="hero-v2-stat-num"><CountUp to={100} suffix="+" /></div>
-            <div className="hero-v2-stat-label">Verified Cooks</div>
-          </div>
-          <div className="hero-v2-stat-sep" />
-          <div className="hero-v2-stat">
-            <div className="hero-v2-stat-num"><CountUp to={4.9} decimals={1} suffix=" ★" /></div>
-            <div className="hero-v2-stat-label">Average Rating</div>
-          </div>
-          <div className="hero-v2-stat-sep" />
-          <div className="hero-v2-stat">
-            <div className="hero-v2-stat-num"><CountUp to={10} suffix="+" /></div>
-            <div className="hero-v2-stat-label">Cities Served</div>
-          </div>
-        </div>
+        <HeroStats />
       </section>
 
       {/* Scrolling dishes ticker */}
@@ -812,8 +777,8 @@ const Home = () => {
               </div>
               <span className="how-step-badge">03</span>
             </div>
-            <h3>3. Pick Date & Slot</h3>
-            <p>Select your desired service type, choose an available date and time slot, and confirm your request.</p>
+            <h3>3. OTP-Verified Start</h3>
+            <p>Cook arrives at your home, you share the OTP — session starts securely with live tracking and UPI payment after approval.</p>
           </div>
 
           <div className="how-card">
@@ -841,15 +806,21 @@ const Home = () => {
 
         <div className="services-grid-modern">
           {services.map((svc) => (
-            <div key={svc.id} className="service-card-modern">
-              <div
-                className="service-icon-wrapper"
-                style={{ background: svc.bg, color: svc.color }}
-              >
-                {svc.icon}
+            <article key={svc.id} className="service-card-modern">
+              <span className="service-accent-bar" style={{ background: svc.accent }} aria-hidden="true" />
+              <div className="service-card-top">
+                <div
+                  className="service-icon-wrapper"
+                  style={{ background: svc.bg, color: svc.color }}
+                >
+                  {svc.icon}
+                </div>
+                <span className="service-tagline" style={{ color: svc.color, background: svc.bg }}>
+                  {svc.tagline}
+                </span>
               </div>
               <h3>{svc.title}</h3>
-              <p>{svc.description}</p>
+              <p className="service-desc">{svc.description}</p>
               <ul className="service-card-perks">
                 {svc.perks.map((perk, i) => (
                   <li key={i}>
@@ -857,18 +828,79 @@ const Home = () => {
                   </li>
                 ))}
               </ul>
-              {user?.role !== "admin" && user?.role !== "cook" && (
-                <Link
-                  to={`/cook-on-demand?serviceType=${svc.id}`}
-                  className="btn btn-outline"
-                  style={{ width: "100%", justifyContent: "space-between" }}
-                >
-                  <span>Book Now</span>
-                  <ArrowRight size={16} />
-                </Link>
-              )}
-            </div>
+              <Link
+                to={`/cook-on-demand?serviceType=${svc.id}`}
+                className="service-learn-more"
+                style={{ color: svc.color }}
+                aria-label={`Book now - ${svc.title}`}
+              >
+                <span>Book now</span>
+                <ArrowRight size={15} />
+              </Link>
+            </article>
           ))}
+        </div>
+      </section>
+
+      {/* COOKMITRA EVENTS — birthdays, anniversaries & family functions.
+          You Celebrate. We Cook. No cook selection: CookMitra assigns a
+          suitable verified cook after the request. */}
+      <section className="home-band band-slate" id="events">
+        <div className="section-header">
+          <span className="section-eyebrow">🎉 CookMitra Events</span>
+          <h2 className="section-title">You Celebrate. We Cook.</h2>
+          <p className="section-description">
+            Birthdays, anniversaries, family functions & home celebrations — a cook for your
+            event, from ₹499. Pick your occasion, tell us the menu, see the price, and request.
+            CookMitra assigns a suitable verified cook.
+          </p>
+        </div>
+        <div className="how-it-works-grid">
+          <div className="how-card">
+            <div className="how-card-header">
+              <div className="how-icon-box">
+                <CalendarCheck size={26} />
+              </div>
+              <span className="how-step-badge">01</span>
+            </div>
+            <h3>1. Pick Event & Menu</h3>
+            <p>Birthday, anniversary or family function — date, guests, and your dishes.</p>
+          </div>
+          <div className="how-card">
+            <div className="how-card-header">
+              <div className="how-icon-box">
+                <ChefHat size={26} />
+              </div>
+              <span className="how-step-badge">02</span>
+            </div>
+            <h3>2. Choose Service</h3>
+            <p>Cooking Only, Preparation + Cooking, or Cooking + Serving — by the hour.</p>
+          </div>
+          <div className="how-card">
+            <div className="how-card-header">
+              <div className="how-icon-box">
+                <CalendarClock size={26} />
+              </div>
+              <span className="how-step-badge">03</span>
+            </div>
+            <h3>3. See Price & Request</h3>
+            <p>Full breakdown up front — service + extra cooks + travel. Then request booking.</p>
+          </div>
+          <div className="how-card">
+            <div className="how-card-header">
+              <div className="how-icon-box">
+                <UserCheck size={26} />
+              </div>
+              <span className="how-step-badge">04</span>
+            </div>
+            <h3>4. We Assign the Cook</h3>
+            <p>CookMitra assigns a verified cook for your event — confirmed, then enjoy.</p>
+          </div>
+        </div>
+        <div style={{ textAlign: "center", marginTop: "1.75rem" }}>
+          <Link to="/events" className="btn btn-lg hero-v2-btn-primary">
+            <ChefHat size={18} /> Book an Event Cook <ArrowRight size={18} />
+          </Link>
         </div>
       </section>
 
@@ -910,38 +942,51 @@ const Home = () => {
           Deep-links to /register?role=cook so the Register page preselects
           the "Join as Cook" tab instead of defaulting to customer. */}
       {user?.role !== "cook" && user?.role !== "admin" && (
+        <div className="cta-cook-wrap">
         <section className="cta-banner cta-cook">
           <div className="cta-cook-glow cta-cook-glow-1" aria-hidden="true" />
           <div className="cta-cook-glow cta-cook-glow-2" aria-hidden="true" />
-          <span className="cta-cook-badge">
-            <ChefHat size={14} /> For Home Chefs · Earn Festive Income
-          </span>
-          <h2>Are You a Skilled Home Cook?</h2>
-          <p>
-            Earn during festive seasons by sharing your traditional culinary recipes and cooking skills with families in your city.
-          </p>
-          <ul className="cta-cook-perks">
-            <li>
-              <BadgeIndianRupee size={16} /> Earn per booking
-            </li>
-            <li>
-              <CalendarClock size={16} /> Flexible slots
-            </li>
-            <li>
-              <ShieldCheck size={16} /> Verified profile
-            </li>
-          </ul>
-          <div className="cta-cook-actions">
-            <Link to="/register?role=cook" className="btn btn-lg cta-cook-btn-primary">
-              <ChefHat size={18} /> {user ? "Join as a Cook" : "Register as a Cook"} <ArrowRight size={18} />
-            </Link>
-            {!user && (
-              <Link to="/login" className="cta-cook-signin">
-                Already a cook? Sign in
-              </Link>
-            )}
+          <div className="cta-cook-pattern" aria-hidden="true" />
+          <div className="cta-cook-grid">
+            <div className="cta-cook-copy">
+              <span className="cta-cook-badge">
+                <ChefHat size={14} /> For Home Chefs · Earn Festive Income
+              </span>
+              <h2>Are You a Skilled Home Cook?</h2>
+              <p className="cta-cook-sub">
+                Turn your family recipes into festive earnings. Share your traditional
+                culinary recipes and cooking skills with families in your city —
+                on flexible slots, with a verified profile.
+              </p>
+              <ul className="cta-cook-perks">
+                <li>
+                  <span className="cta-cook-perk-icon"><ChefHat size={17} /></span>
+                  <span><strong>Share recipes</strong><em>Traditional festive dishes</em></span>
+                </li>
+                <li>
+                  <span className="cta-cook-perk-icon"><CalendarClock size={17} /></span>
+                  <span><strong>Flexible slots</strong><em>You choose timings</em></span>
+                </li>
+                <li>
+                  <span className="cta-cook-perk-icon"><ShieldCheck size={17} /></span>
+                  <span><strong>Verified profile</strong><em>Build trust & reviews</em></span>
+                </li>
+              </ul>
+              <div className="cta-cook-actions">
+                <Link to="/register?role=cook" className="btn btn-lg cta-cook-btn-primary">
+                  <ChefHat size={18} /> {user ? "Join as a Cook" : "Register as a Cook"} <ArrowRight size={18} />
+                </Link>
+                {!user && (
+                  <Link to="/login" className="btn btn-lg cta-cook-btn-ghost">
+                    Already a cook? Sign in
+                  </Link>
+                )}
+              </div>
+              <p className="cta-cook-note">No joining fee · Festive demand in Pune</p>
+            </div>
           </div>
         </section>
+        </div>
       )}
     </div>
   );

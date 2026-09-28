@@ -12,6 +12,12 @@ const cookProfileSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Renamed from "bio" in the cook profile form — new input writes here.
+    // `bio` is kept for backward compat with existing profiles.
+    skills: {
+      type: String,
+      default: "",
+    },
     experienceYears: {
       type: Number,
       default: 0,
@@ -28,9 +34,12 @@ const cookProfileSchema = new mongoose.Schema(
         enum: ["cook_for_me", "cook_with_me", "teach_me", "preparation_help"],
       },
     ],
+    // Legacy hourly rate — no longer collected from cooks (pricing uses
+    // slab pricing). Kept optional with a default so old profiles keep
+    // working and new profiles save without a rate.
     rate: {
       type: Number,
-      required: [true, "Rate is required"],
+      default: 0,
     },
     serviceArea: {
       type: String,
@@ -84,16 +93,15 @@ const cookProfileSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // Rating aggregate, maintained by createReview only (updateCookProfile
+    // strips a `rating` payload so a cook can never edit their own score).
+    // `sum`/`count` are the authoritative counters, bumped atomically with
+    // $inc; `average` is derived from them and exists for read paths (cook
+    // lists, profiles) that should not have to recompute it.
     rating: {
       average: { type: Number, default: 0 },
       count: { type: Number, default: 0 },
-    },
-    liveLocation: {
-      lat: { type: Number, min: -90, max: 90 },
-      lng: { type: Number, min: -180, max: 180 },
-      // GPS fix radius in metres reported by the browser (null when unknown).
-      accuracy: { type: Number, min: 0, max: 100000 },
-      updatedAt: { type: Date },
+      sum: { type: Number, default: 0 },
     },
   },
   { timestamps: true }
