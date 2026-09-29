@@ -166,7 +166,7 @@ async function main() {
     const { auth } = require("./middleware/auth");
     const U = require("./models/User");
     const realFindById = U.findById;
-    U.findById = () => ({ select: async () => ({ _id: cookId, role: "CUSTOMER", status: "active" }) });
+    U.findById = () => ({ select: () => ({ lean: async () => ({ _id: cookId, role: "CUSTOMER", status: "active" }) }) });
     const token = jwt.sign({ id: cookId, role: "CUSTOMER" }, process.env.JWT_SECRET);
     // Cookie-authenticated GET works.
     {

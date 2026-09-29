@@ -201,7 +201,7 @@ const getDayBookings = (cookId, dateStr) => {
     cook: cookId,
     date: { $gte: start, $lte: end },
     $or: activeSlotMatch(),
-  }).select("startTime endTime status");
+  }).select("startTime endTime status").lean();
 };
 
 // Every viable {startTime, endTime} of length durationHours inside the open

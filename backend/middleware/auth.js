@@ -89,7 +89,7 @@ const auth = async (req, res, next) => {
     // block/delete actions take effect immediately — even for tokens
     // issued before the account was blocked or removed.
     const User = require("../models/User");
-    const account = await User.findById(decoded.id).select("role status tokenVersion");
+    const account = await User.findById(decoded.id).select("role status tokenVersion").lean();
 
     if (!account) {
       return res
@@ -142,7 +142,7 @@ const optionalAuth = async (req, res, next) => {
     // unfiltered cook list). On any failure (DB down, deleted, suspended),
     // continue as anonymous with NO role carried over.
     const User = require("../models/User");
-    const account = await User.findById(decoded.id).select("role status tokenVersion");
+    const account = await User.findById(decoded.id).select("role status tokenVersion").lean();
     if (!account || account.status === "suspended") {
       return next();
     }

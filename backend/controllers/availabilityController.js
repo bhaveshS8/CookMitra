@@ -133,7 +133,7 @@ exports.getAvailability = async (req, res, next) => {
     try {
       profile = await CookProfile.findById(cookId).select(
         "user availabilityStatus unavailableDate approvalStatus"
-      );
+      ).lean();
       if (profile?.user) cookId = profile.user.toString();
     } catch {
       // not a profile id — use the param as a user id
@@ -141,7 +141,7 @@ exports.getAvailability = async (req, res, next) => {
     if (!profile) {
       profile = await CookProfile.findOne({ user: cookId }).select(
         "availabilityStatus unavailableDate approvalStatus"
-      );
+      ).lean();
     }
     // A cook who has toggled "unavailable" exposes no slots until they flip
     // back or the next day begins.
@@ -158,7 +158,7 @@ exports.getAvailability = async (req, res, next) => {
         let suspended = false;
         try {
           const User = require("../models/User");
-          const cookUser = await User.findById(cookId).select("status");
+          const cookUser = await User.findById(cookId).select("status").lean();
           suspended = !cookUser || cookUser.status === "suspended";
         } catch {
           // fail-closed below only when we know the profile is unapproved;
@@ -181,7 +181,7 @@ exports.getAvailability = async (req, res, next) => {
       filter.date = { $gte: bounds.start, $lte: bounds.end };
     }
 
-    const slots = await Availability.find(filter).sort({ date: 1, startTime: 1 });
+    const slots = await Availability.find(filter).sort({ date: 1, startTime: 1 }).lean();
 
     // Duration-aware mode: derive bookable start times sized to the input
     // service hours (open windows minus already-booked intervals).

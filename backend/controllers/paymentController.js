@@ -65,17 +65,27 @@ exports.createOrder = async (req, res, next) => {
     if (!isOnGrid(strictStart) || !isOnGrid(strictEnd)) {
       return res.status(400).json({ message: "Start and end times must be on 30-minute intervals" });
     }
-    if (!parseDayStrict(date)) {
+    // Normalize date: accepts strict "YYYY-MM-DD" or an ISO date string (extracts IST day)
+    let orderDay = typeof date === "string" ? date.trim() : "";
+    if (date instanceof Date && !Number.isNaN(date.getTime())) {
+      orderDay = istDayString(date);
+    } else if (orderDay && !/^\d{4}-\d{2}-\d{2}$/.test(orderDay)) {
+      const parsedIso = new Date(orderDay);
+      if (!Number.isNaN(parsedIso.getTime())) {
+        orderDay = istDayString(parsedIso);
+      }
+    }
+    if (!parseDayStrict(orderDay)) {
       return res.status(400).json({ message: "Valid date (YYYY-MM-DD) is required" });
     }
-    if (istDayString(parseDayStrict(date)) < istDayString()) {
+    if (istDayString(parseDayStrict(orderDay)) < istDayString()) {
       return res.status(400).json({ message: "That date already passed — please pick today or a future date." });
     }
-    const windows = await getDayWindows(cook, date);
+    const windows = await getDayWindows(cook, orderDay);
     if (!findContainingWindow(windows, startTime, endTime)) {
       return res.status(400).json({ message: "Cook is not available for the selected time" });
     }
-    const activeBookings = await getDayBookings(cook, date);
+    const activeBookings = await getDayBookings(cook, orderDay);
     // Post-acceptance checkout: the customer's own held request occupies this
     // window — exclude it so paying for your own hold isn't a "conflict".
     const othersBookings = bookingId

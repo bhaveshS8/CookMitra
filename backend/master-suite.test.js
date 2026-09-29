@@ -152,7 +152,7 @@ async function testCustomer() {
     const cookId = new Types.ObjectId().toString();
     CookProfile.findOne = async () => ({ rate: 500, liveLocation: null });
     Availability.find = () => ({ sort: () => Promise.resolve([win]) });
-    Booking.find = () => ({ select: () => Promise.resolve([]) });
+    Booking.find = () => ({ select: () => ({ lean: async () => [] }) });
     Booking.create = async (d) => { createdDoc = d; return { _id: new Types.ObjectId(), ...d, toObject: () => createdDoc }; };
     Notification.create = async (d) => d;
     User.findById = () => ({ select: () => Promise.resolve({ name: "Neha", phone: "9876543210" }) });

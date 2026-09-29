@@ -113,7 +113,7 @@ const chainable = (doc) => ({
 });
 
 Booking.findById = async (id) => (String(id) === "booking1" && bookingDoc ? bookingDoc : null);
-Booking.find = () => ({ select: async () => rivals });
+Booking.find = () => chainable(rivals);
 CookProfile.findOne = () => chainable(cookProfile);
 Notification.create = async (payload) => {
   notificationLog.push(payload);

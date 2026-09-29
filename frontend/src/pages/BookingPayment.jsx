@@ -21,7 +21,7 @@ import API from "../api/axios";
 import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
 import { AnalyticsEvents, track } from "../utils/analytics";
-import { SERVICE_DETAILS, formatCurrency, formatDate, formatTimeRange12 } from "../utils/constants";
+import { SERVICE_DETAILS, formatCurrency, formatDate, formatTimeRange12, formatIsoToIstDay } from "../utils/constants";
 
 const WINDOW_MS = 5 * 60 * 1000; // 5-minute payment window
 // Explicit test payments (no real money) are offered only when the gateway
@@ -231,9 +231,10 @@ const BookingPayment = () => {
       const cookId = booking?.cook?._id || booking?.cook;
       let order;
       try {
+        const orderDate = formatIsoToIstDay(booking?.date) || booking?.date;
         const res = await API.post("/payments/order", {
           cook: cookId,
-          date: booking?.date,
+          date: orderDate,
           startTime: booking?.startTime,
           endTime: booking?.endTime,
           durationHours: booking?.durationHours,

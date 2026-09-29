@@ -5,10 +5,11 @@ const CookProfile = require("../models/CookProfile");
 const Review = require("../models/Review");
 const DailyStat = require("../models/DailyStat");
 const DailyVisitor = require("../models/DailyVisitor");
+const VisitSession = require("../models/VisitSession");
 const PageStat = require("../models/PageStat");
 const CityStat = require("../models/CityStat");
 const { auth, authorize } = require("../middleware/auth");
-const { istDayString, isBot, normalizeVisitInput } = require("../utils/visits");
+const { istDayString, istDayRange, parseDaysParam, isBot, normalizeVisitInput } = require("../utils/visits");
 
 // Public marketing stats for the homepage hero.
 //
@@ -26,7 +27,9 @@ router.get("/", async (_req, res, next) => {
       return res.json(cache.payload);
     }
 
-    const [approvedCooks, completedBookings, ratingAgg] = await Promise.all([
+    // All 4 reads are independent — run together so one slow query can't
+    // serialize the homepage hero (was: 3 in parallel, then distinct alone).
+    const [approvedCooks, completedBookings, ratingAgg, areas] = await Promise.all([
       CookProfile.countDocuments({ approvalStatus: "approved" }),
       // Completed services, or hours actually worked — both mean a family
       // was served.
@@ -36,14 +39,12 @@ router.get("/", async (_req, res, next) => {
       Review.aggregate([
         { $group: { _id: null, avg: { $avg: "$rating" }, count: { $sum: 1 } } },
       ]),
+      // Distinct service areas among approved cooks, e.g. "Baner, Kothrud".
+      CookProfile.distinct("serviceArea", {
+        approvalStatus: "approved",
+        serviceArea: { $ne: "" },
+      }),
     ]);
-
-    // Distinct service areas among approved cooks, e.g. "Baner, Kothrud".
-    // Capped so the string stays short; empty when no cook lists an area.
-    const areas = await CookProfile.distinct("serviceArea", {
-      approvalStatus: "approved",
-      serviceArea: { $ne: "" },
-    });
     const cities = areas
       .map((a) => String(a || "").split(",")[0].trim())
       .filter(Boolean)
@@ -71,43 +72,83 @@ router.get("/", async (_req, res, next) => {
   }
 });
 
-// POST /visit — public visit ping, fired once per browser session by the
-// frontend (utils/analytics trackSiteVisit). No auth by design: guests must
-// count too. Bots are ignored, garbage input is 400'd, and failures are
-// invisible to the visitor (the client fire-and-forgets).
+// POST /visit — public visit ping, fired once per browser-tab session by the
+// frontend (utils/analytics trackSiteVisit sends { vid, sid, path, ... }).
+// No auth by design: guests must count too. Bots are ignored, garbage input
+// is 400'd, and failures are invisible to the visitor (fire-and-forget).
+//
+// Counting rule (server-enforced, not just the browser's sessionStorage
+// gate): a visit is counted only for the FIRST accepted (day, vid, sid)
+// triple. Replays and concurrent duplicates hit the VisitSession unique
+// index and are answered idempotently ({ ok:true, deduped:true }) without
+// touching any counter. A new tab (new sid) legitimately counts again.
+// Duplicate-key races (E11000) under concurrency are treated as duplicates,
+// never as errors.
+const isDupKey = (err) => err && (err.code === 11000 || err.code === 11001);
 router.post("/visit", async (req, res, next) => {
   try {
     if (isBot(req.get("user-agent"))) return res.json({ ok: true, ignored: "bot" });
     const parsed = normalizeVisitInput(req.body);
     if (parsed.error) return res.status(400).json({ message: parsed.error });
     const day = istDayString();
-    await DailyStat.updateOne(
-      { day },
-      { $inc: { visits: 1 }, $setOnInsert: { uniques: 0 } },
-      { upsert: true }
-    );
-    await PageStat.updateOne(
-      { day, path: parsed.path },
-      { $inc: { visits: 1 } },
-      { upsert: true }
-    );
-    // Approximate city when the browser resolved one (IP-based, city-level
-    // only — raw IPs are never sent or stored).
-    if (parsed.city) {
-      await CityStat.updateOne(
-        { day, city: parsed.city, state: parsed.state },
-        { $inc: { visits: 1 }, $setOnInsert: { country: parsed.country } },
+    // Session gate FIRST: exactly one counted visit per (day, vid, sid).
+    let sessionSeen;
+    try {
+      sessionSeen = await VisitSession.updateOne(
+        { day, vid: parsed.vid, sid: parsed.sid },
+        { $setOnInsert: { day, vid: parsed.vid, sid: parsed.sid } },
         { upsert: true }
       );
+    } catch (err) {
+      if (isDupKey(err)) return res.json({ ok: true, deduped: true });
+      throw err;
     }
-    // First time this anonymous id is seen today → counts as a new unique.
-    // The compound-unique index makes concurrent pings safe.
-    const seen = await DailyVisitor.updateOne(
-      { day, vid: parsed.vid },
-      { $setOnInsert: { day, vid: parsed.vid } },
-      { upsert: true }
-    );
+    // Fail-closed toward NOT counting: only a fresh insert (upsertedCount
+    // 1) is a new session. Anything else is a replay/duplicate.
+    if (!(sessionSeen.upsertedCount > 0)) {
+      return res.json({ ok: true, deduped: true });
+    }
+    // Independent counter upserts — one Atlas round-trip instead of 3-4
+    // sequential ones. The uniques increment below still waits on `seen`.
+    // Approximate city when the browser resolved one (IP-based, city-level
+    // only — raw IPs are never sent or stored).
+    const visitWrites = [
+      DailyStat.updateOne(
+        { day },
+        { $inc: { visits: 1 }, $setOnInsert: { uniques: 0 } },
+        { upsert: true }
+      ),
+      PageStat.updateOne(
+        { day, path: parsed.path },
+        { $inc: { visits: 1 } },
+        { upsert: true }
+      ),
+      // First time this anonymous id is seen today → counts as a new unique
+      // visitor-day. The compound-unique index makes concurrent pings safe
+      // (E11000 losers are treated as already-seen, never as failures).
+      DailyVisitor.updateOne(
+        { day, vid: parsed.vid },
+        { $setOnInsert: { day, vid: parsed.vid } },
+        { upsert: true }
+      ).catch((err) => {
+        if (isDupKey(err)) return { upsertedCount: 0, matchedCount: 1, dupKeyRace: true };
+        throw err;
+      }),
+    ];
+    if (parsed.city) {
+      visitWrites.push(
+        CityStat.updateOne(
+          { day, city: parsed.city, state: parsed.state },
+          { $inc: { visits: 1 }, $setOnInsert: { country: parsed.country } },
+          { upsert: true }
+        )
+      );
+    }
+    const [, , seen] = await Promise.all(visitWrites);
     if (seen.upsertedCount > 0) {
+      // A hard DB failure here undercounts uniques by one while the
+      // DailyVisitor row exists — bounded, logged, and visible in the 500.
+      // (Uniques can be reconciled from DailyVisitor counts per day.)
       await DailyStat.updateOne({ day }, { $inc: { uniques: 1 } });
     }
     res.json({ ok: true });
@@ -117,12 +158,17 @@ router.post("/visit", async (req, res, next) => {
 });
 
 // GET /visits — admin dashboard chart data: per-day visits/uniques for the
-// last N days (default 30, max 365), range totals, top pages and top cities.
+// last N days (default 30, max 365; see parseDaysParam), range totals, top
+// pages and top cities. Days are IST calendar days; the series is zero-filled
+// across the whole range so a quiet day renders as 0 instead of vanishing
+// (which would misleadingly join its neighbours on the chart).
+// `uniques` are unique visitor-DAYS (distinct vid per day), summed across the
+// range — the UI labels them accordingly.
 router.get("/visits", auth, authorize("admin"), async (req, res, next) => {
   try {
-    let days = Math.round(Number(req.query.days)) || 30;
-    days = Math.min(Math.max(days, 1), 365);
-    const since = istDayString(new Date(Date.now() - (days - 1) * 86400000));
+    const days = parseDaysParam(req.query.days);
+    const range = istDayRange(days);
+    const since = range[0];
     const [series, totalsAgg, topPaths, topCities] = await Promise.all([
       DailyStat.find({ day: { $gte: since } })
         .sort({ day: 1 })
@@ -166,12 +212,27 @@ router.get("/visits", auth, authorize("admin"), async (req, res, next) => {
         },
       ]),
     ]);
+    const byDay = new Map((series || []).map((r) => [r.day, r]));
+    const filled = range.map((day) => {
+      const row = byDay.get(day);
+      return {
+        day,
+        visits: Math.max(0, Math.round(Number(row?.visits) || 0)),
+        uniques: Math.max(0, Math.round(Number(row?.uniques) || 0)),
+      };
+    });
     const totals = totalsAgg[0] || { visits: 0, uniques: 0 };
     res.json({
-      days: series,
+      days: filled,
       totals: { visits: totals.visits || 0, uniques: totals.uniques || 0 },
       topPaths,
       topCities,
+      meta: {
+        days,
+        since,
+        timezone: "Asia/Kolkata",
+        uniquesDefinition: "unique visitor-days: distinct anonymous visitor ids per IST day, summed across the range",
+      },
     });
   } catch (err) {
     next(err);

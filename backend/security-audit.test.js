@@ -175,7 +175,7 @@ async function main() {
           rescheduleCount: 0,
           ...over,
         });
-      Booking.find = () => ({ select: async () => [] });
+      Booking.find = () => chainable([]);
       CookProfile.findOne = () => chainable({ availabilityStatus: "available", approvalStatus: "approved" });
       Notification.create = async () => ({});
 

@@ -131,6 +131,9 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
 
 // Hot-pathed by role directory scans (complaint escalation, admin lists).
 userSchema.index({ role: 1, status: 1 });
+// Cook name search (cookController getCooks two-step lookup) — case-insensitive
+// prefix/substring scan over up to 200 matches per query.
+userSchema.index({ name: 1 });
 
 const User = mongoose.model("User", userSchema);
 

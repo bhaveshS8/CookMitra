@@ -131,7 +131,9 @@ exports.getCooks = async (req, res, next) => {
     // legacy full-array path applies (HARD_CAP 500). With params we skip/limit
     // at the DB so 1000-user browsing never loads the whole collection.
     const pg = paginationParams(req);
-    let cookQuery = CookProfile.find(filter).populate("user", userFields).sort({ createdAt: -1 });
+    // .lean(): read-only list — skips Mongoose hydration for ~2-3x faster
+    // list responses (populate still resolves, returned as plain objects).
+    let cookQuery = CookProfile.find(filter).populate("user", userFields).sort({ createdAt: -1 }).lean();
     if (pg.has) {
       cookQuery = cookQuery.skip(pg.skip).limit(pg.limit);
     } else {

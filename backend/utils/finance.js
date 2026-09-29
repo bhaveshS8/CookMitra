@@ -10,6 +10,9 @@
 // A booking may pay its cook ONLY when every condition below holds. Returns
 // { eligible, reasons[] } — callers refuse when eligible is false and MUST
 // surface the reasons (never a bare 400) so admins can reconcile.
+// NOTE: a missing payout subdoc (pre-payout ledgers rows) behaves as
+// "pending" — callers pin the state atomically at claim time, so legacy
+// rows settle through the same gate instead of sticking forever.
 const payoutEligibility = (booking) => {
   const reasons = [];
   if (!booking) return { eligible: false, reasons: ["Booking not found"] };
@@ -89,6 +92,32 @@ const isValidPayoutReference = (ref) => {
   return PAYOUT_REF_RE.test(s);
 };
 
+// Canonical duplicate-detection form: all whitespace removed, lowercased.
+// UPI transaction ids are numeric and bank UTR/RRN schemes carry no
+// significant spaces, so "ABC 123" and "abc123" are the same transfer typed
+// twice. The exact typed text is still stored in `payout.reference`.
+const normalizePayoutReference = (ref) => {
+  const s = String(ref || "").replace(/\s+/g, "");
+  if (!s) return "";
+  return s.toLowerCase();
+};
+
+// Strict rupee-amount parser for admin money inputs (approve / settle).
+// Accepts ONLY whole positive rupees, as a JSON number or a bare digits-only
+// string. Everything else is refused: booleans (Number(true) === 1 would
+// silently approve a ₹1 refund), null, objects, "NaN"/"Infinity", zero,
+// negatives and decimals — a malformed body must never move money, and
+// silently rounding a decimal would create an amount the admin never typed.
+const parseRupeeAmount = (input, { label = "Amount" } = {}) => {
+  const error = `${label} must be a positive whole number of rupees.`;
+  let n;
+  if (typeof input === "number") n = input;
+  else if (typeof input === "string" && /^\d+$/.test(input.trim())) n = Number(input.trim());
+  else return { ok: false, error };
+  if (!Number.isSafeInteger(n) || !(n > 0)) return { ok: false, error };
+  return { ok: true, value: n };
+};
+
 // Cook payout-destination validation (server-side; the cook form only hints).
 // Returns { ok, reasons[], normalized } — normalized upper-cases IFSC,
 // trims strings, and keeps ONLY known keys so unknown payload keys never
@@ -150,6 +179,8 @@ module.exports = {
   maxRefundable,
   refundApprovalCheck,
   isValidPayoutReference,
+  normalizePayoutReference,
+  parseRupeeAmount,
   validatePayoutDetails,
   recordLedger,
 };

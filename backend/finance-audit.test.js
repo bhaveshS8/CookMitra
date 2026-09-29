@@ -30,6 +30,7 @@ const {
   maxRefundable,
   refundedTotal,
   isValidPayoutReference,
+  normalizePayoutReference,
   validatePayoutDetails,
   recordLedger,
 } = require("./utils/finance");
@@ -225,10 +226,25 @@ const eligibleBooking = (over = {}) => ({
     try {
       const doc = qdoc();
       Booking.findById = async () => doc;
-      // Synchronous CAS: exactly one concurrent approver wins the claim.
+      // Synchronous CAS + generic applier: exactly one concurrent approver
+      // wins the pending->processing claim; the winner's final commit
+      // (processing->terminal) applies all $set dotted paths + history.
       Booking.findOneAndUpdate = async (filter, update) => {
-        if (doc.payment.refundStatus !== "pending") return null;
-        doc.payment.refundStatus = update.$set["payment.refundStatus"];
+        const want = filter["payment.refundStatus"];
+        const cur = doc.payment.refundStatus;
+        const matches =
+          want === undefined ? true
+          : typeof want === "string" ? cur === want
+          : want && typeof want === "object" && "$ne" in want ? cur !== want.$ne
+          : true;
+        if (!matches) return null;
+        for (const [k, v] of Object.entries(update.$set || {})) {
+          const ks = String(k).split(".");
+          let t = doc;
+          for (let i = 0; i < ks.length - 1; i++) t = t[ks[i]];
+          t[ks[ks.length - 1]] = v;
+        }
+        if (update.$push?.statusHistory) doc.statusHistory.push(update.$push.statusHistory);
         return doc;
       };
       Booking.updateOne = async () => ({});
@@ -263,6 +279,7 @@ const eligibleBooking = (over = {}) => ({
   console.log("\n═══ markRefundSettled caps ═══");
   {
     const savedFindById = Booking.findById;
+    const savedClaim = Booking.findOneAndUpdate;
     const savedLedger = LedgerEntry.create;
     LedgerEntry.create = async (e) => e;
     try {
@@ -271,14 +288,34 @@ const eligibleBooking = (over = {}) => ({
         payment: { status: "paid", paidAmount: 349, refundStatus: "manual", refundAmount: 349 },
       });
       Booking.findById = async () => doc;
+      // Atomic close: applies the controller's $set/$push when the status
+      // guard still holds, like the database would.
+      Booking.findOneAndUpdate = async (filter, update) => {
+        const cur = doc.payment.refundStatus;
+        const want = filter["payment.refundStatus"];
+        const ok = want && typeof want === "object" && "$in" in want ? want.$in.includes(cur) : cur === want;
+        if (!ok) return null;
+        for (const [k, v] of Object.entries(update.$set || {})) {
+          const ks = String(k).split(".");
+          let t = doc;
+          for (let i = 0; i < ks.length - 1; i++) t = t[ks[i]];
+          t[ks[ks.length - 1]] = v;
+        }
+        if (update.$push?.statusHistory) doc.statusHistory.push(update.$push.statusHistory);
+        return doc;
+      };
       let r = makeRes();
-      await payoutCtrl.markRefundSettled({ params: { id: "b1" }, user: { id: "admin1" }, body: { reference: "R", amount: 999 } }, r, next);
+      await payoutCtrl.markRefundSettled({ params: { id: "b1" }, user: { id: "admin1" }, body: { reference: "MANUALREF001", amount: 999 } }, r, next);
       check("over-approved manual amount refused", r.statusCode === 400, `s=${r.statusCode}`);
       r = makeRes();
-      await payoutCtrl.markRefundSettled({ params: { id: "b1" }, user: { id: "admin1" }, body: { reference: "R", amount: 349 } }, r, next);
+      await payoutCtrl.markRefundSettled({ params: { id: "b1" }, user: { id: "admin1" }, body: { reference: "MANUALREF001", amount: 349 } }, r, next);
       check("exact manual amount settles", r.statusCode === 200 && doc.payment.refundStatus === "processed", `s=${r.statusCode}`);
+      r = makeRes();
+      await payoutCtrl.markRefundSettled({ params: { id: "b1" }, user: { id: "admin1" }, body: { reference: "x", amount: 349 } }, r, next);
+      check("malformed manual reference refused", r.statusCode === 400, `s=${r.statusCode}`);
     } finally {
       Booking.findById = savedFindById;
+      Booking.findOneAndUpdate = savedClaim;
       LedgerEntry.create = savedLedger;
     }
   }
@@ -314,7 +351,7 @@ const eligibleBooking = (over = {}) => ({
     // stubbed at the model layer: Booking.find yields no rivals, and the
     // plain CookProfile stub throws inside getDayWindows, which falls back
     // to the full service day.
-    Booking.find = () => ({ select: async () => [] });
+    Booking.find = () => ({ select: () => ({ lean: async () => [] }) });
     let updateCalls = 0;
     Booking.updateOne = async () => { updateCalls += 1; return {}; };
     const body = { cook: "cook1", date: "2099-02-02", startTime: "10:00", endTime: "12:00", durationHours: 2, bookingId: "b1" };
@@ -428,6 +465,470 @@ const eligibleBooking = (over = {}) => ({
       CookProfile.findOneAndUpdate = savedFind;
       CookProfile.updateOne = savedUpdate;
     }
+  }
+
+  console.log("\n═══ ADVERSARIAL: payout state machine ═══");
+  {
+    // In-memory booking store with Mongo-ish filter semantics for the exact
+    // operators the payout controller uses ($or/$and/$in/$ne/$gt/$exists).
+    const tick = () => new Promise((r) => setImmediate(r));
+    const getPath = (o, p) => String(p).split(".").reduce((a, k) => a?.[k], o);
+    const setPath = (o, p, v) => {
+      const ks = String(p).split(".");
+      let t = o;
+      for (let i = 0; i < ks.length - 1; i++) {
+        if (t[ks[i]] == null || typeof t[ks[i]] !== "object") t[ks[i]] = {};
+        t = t[ks[i]];
+      }
+      t[ks[ks.length - 1]] = v;
+    };
+    const matchCond = (val, cond) => {
+      if (cond && typeof cond === "object" && !Array.isArray(cond)) {
+        return Object.entries(cond).every(([op, ov]) => {
+          if (op === "$in") return ov.includes(val);
+          if (op === "$ne") return val !== ov;
+          if (op === "$gt") return val > ov;
+          if (op === "$gte") return val >= ov;
+          if (op === "$exists") return ov ? val !== undefined : val === undefined;
+          return false;
+        });
+      }
+      return val === cond;
+    };
+    const matchFilter = (doc, filter) =>
+      Object.entries(filter || {}).every(([k, v]) => {
+        if (k === "$or") return v.some((c) => matchFilter(doc, c));
+        if (k === "$and") return v.every((c) => matchFilter(doc, c));
+        return matchCond(getPath(doc, k), v);
+      });
+    const applyUpdate = (doc, update = {}) => {
+      for (const [k, v] of Object.entries(update.$set || {})) setPath(doc, k, v);
+      for (const [k, v] of Object.entries(update.$push || {})) {
+        const arr = getPath(doc, k);
+        if (Array.isArray(arr)) arr.push(v);
+      }
+    };
+    const store = new Map();
+    let beforeClaimHook = null;
+    const mkDoc = (id, over = {}) => {
+      const d = eligibleBooking({ _id: id, ...over });
+      store.set(id, d);
+      return d;
+    };
+    const installStore = () => {
+      Booking.findById = async (id) => store.get(String(id)) || null;
+      Booking.findOne = (filter) => ({
+        select: async () => {
+          for (const d of store.values()) if (matchFilter(d, filter)) return d;
+          return null;
+        },
+      });
+      Booking.findOneAndUpdate = async (filter, update) => {
+        if (beforeClaimHook) await beforeClaimHook();
+        await tick();
+        let target = null;
+        for (const d of store.values()) if (matchFilter(d, filter)) { target = d; break; }
+        if (!target) return null;
+        const newKey = update.$set?.["payout.referenceKey"];
+        if (newKey) {
+          for (const d of store.values()) {
+            if (d !== target && d.payout?.status === "settled" && d.payout?.referenceKey === newKey) {
+              const e = new Error("E11000 duplicate key"); e.code = 11000; throw e;
+            }
+          }
+        }
+        applyUpdate(target, update);
+        return target;
+      };
+    };
+    const savedFindById = Booking.findById;
+    const savedFindOne = Booking.findOne;
+    const savedClaim = Booking.findOneAndUpdate;
+    const savedLedger = LedgerEntry.create;
+    const savedNotif = Notification.create;
+    const ledgerRows = [];
+    const ledgerKeys = new Set();
+    LedgerEntry.create = async (e) => {
+      await tick();
+      if (ledgerKeys.has(e.idempotencyKey)) { const err = new Error("dup"); err.code = 11000; throw err; }
+      ledgerKeys.add(e.idempotencyKey);
+      ledgerRows.push(e);
+      return e;
+    };
+    Notification.create = async (d) => { notifLog.push(d); return d; };
+    const CookProfile = require("./models/CookProfile");
+    const savedProfile = CookProfile.findOne;
+    CookProfile.findOne = () => ({ select: () => ({ lean: async () => ({ payoutDetails: { method: "upi", upiId: "cook@okhdfc", holderName: "C", bankName: "", accountLast4: "", ifsc: "" } }) }) });
+    const admin = { id: "admin1" };
+    const settle = (id, ref) => {
+      const r = makeRes();
+      return payoutCtrl.settlePayout({ params: { id }, user: admin, body: { reference: ref } }, r, next).then(() => r);
+    };
+    try {
+      installStore();
+
+      // pending -> settled, then terminal idempotency both directions.
+      mkDoc("s1");
+      let r = await settle("s1", "UTRSTATE001");
+      check("pending -> settled 200", r.statusCode === 200 && store.get("s1").payout.status === "settled", `s=${r.statusCode}`);
+      r = await settle("s1", "UTRSTATE001");
+      check("settled -> settle idempotent (no dup ledger)", r.statusCode === 200 && ledgerRows.filter((l) => l.idempotencyKey === "payout:s1").length === 1, `s=${r.statusCode}`);
+      r = makeRes();
+      await payoutCtrl.rejectPayout({ params: { id: "s1" }, user: admin, body: {} }, r, next);
+      check("settled -> reject is no-op success", r.statusCode === 200 && store.get("s1").payout.status === "settled", `s=${r.statusCode}`);
+      // pending -> not_applicable, then terminal.
+      mkDoc("s2");
+      r = makeRes();
+      await payoutCtrl.rejectPayout({ params: { id: "s2" }, user: admin, body: { reason: "bad service" } }, r, next);
+      check("pending -> not_applicable 200", r.statusCode === 200 && store.get("s2").payout.status === "not_applicable", `s=${r.statusCode}`);
+      r = makeRes();
+      await payoutCtrl.rejectPayout({ params: { id: "s2" }, user: admin, body: {} }, r, next);
+      check("not_applicable -> reject idempotent", r.statusCode === 200, `s=${r.statusCode}`);
+      r = await settle("s2", "UTRSTATE002");
+      check("not_applicable -> settle refused 400", r.statusCode === 400 && store.get("s2").payout.status === "not_applicable", `s=${r.statusCode}`);
+
+      // Legacy row without any payout subdoc settles/rejects through the gate.
+      const legacy = eligibleBooking({ _id: "s3" });
+      delete legacy.payout;
+      store.set("s3", legacy);
+      r = await settle("s3", "UTRSTATE003");
+      check("missing payout subdoc settles (treated pending)", r.statusCode === 200 && store.get("s3").payout?.status === "settled", `s=${r.statusCode}`);
+      const legacy2 = eligibleBooking({ _id: "s4" });
+      delete legacy2.payout;
+      store.set("s4", legacy2);
+      r = makeRes();
+      await payoutCtrl.rejectPayout({ params: { id: "s4" }, user: admin, body: {} }, r, next);
+      check("missing payout subdoc rejects (treated pending)", r.statusCode === 200 && store.get("s4").payout?.status === "not_applicable", `s=${r.statusCode}`);
+
+      // 10 concurrent settles, same booking: exactly one settlement, one
+      // ledger row, one reference; losers get idempotent 200, no new rows.
+      mkDoc("s5");
+      const before = ledgerRows.length;
+      const results = await Promise.all(Array.from({ length: 10 }, (_, i) => settle("s5", `UTRRACE${String(i).padStart(3, "0")}`)));
+      const okAll = results.every((x) => x.statusCode === 200);
+      const refs = new Set(results.map((x) => x.body?.payout?.reference));
+      check("10 concurrent settles: all 200, one reference", okAll && refs.size === 1, `${results.map((x) => x.statusCode).join(",")} refs=${[...refs]}`);
+      check("10 concurrent settles: one ledger row", ledgerRows.filter((l) => l.idempotencyKey === "payout:s5").length === 1, `rows=${ledgerRows.length - before}`);
+      check("10 concurrent settles: one settledAt", store.get("s5").payout.status === "settled");
+
+      // Settle + reject race: exactly one terminal state; ledger matches winner.
+      mkDoc("s6");
+      const [rs, rj] = await Promise.all([
+        settle("s6", "UTRRACEB01"),
+        (async () => { const rr = makeRes(); await payoutCtrl.rejectPayout({ params: { id: "s6" }, user: admin, body: {} }, rr, next); return rr; })(),
+      ]);
+      const terminal = store.get("s6").payout.status;
+      const settledLedgers = ledgerRows.filter((l) => l.idempotencyKey === "payout:s6").length;
+      const rejectLedgers = ledgerRows.filter((l) => l.idempotencyKey === "payout-reject:s6").length;
+      check("settle+reject race: one terminal state", terminal === "settled" || terminal === "not_applicable", `${rs.statusCode}/${rj.statusCode} -> ${terminal}`);
+      check("settle+reject race: ledger matches winner", (terminal === "settled" && settledLedgers === 1 && rejectLedgers === 0) || (terminal === "not_applicable" && rejectLedgers === 1 && settledLedgers === 0), `settle=${settledLedgers} reject=${rejectLedgers}`);
+
+      // Refund queued between eligibility read and settle claim -> 409, untouched.
+      mkDoc("s7");
+      beforeClaimHook = async () => { store.get("s7").payment.refundStatus = "pending"; };
+      r = await settle("s7", "UTRRACEC01");
+      beforeClaimHook = null;
+      check("refund queued mid-settle -> 409, stays pending", r.statusCode === 409 && store.get("s7").payout.status === "pending", `s=${r.statusCode}`);
+
+      // Settle commits between refund pre-check and approve claim -> approve
+      // fails closed (no gateway move without a recorded clawback).
+      const { razorpay: rzClient } = require("./config/razorpay");
+      let gatewayCalls = 0;
+      const savedRefund = rzClient?.payments?.refund;
+      if (rzClient?.payments) rzClient.payments.refund = async () => { gatewayCalls++; return { id: "rf_x" }; };
+      mkDoc("s8", { status: "cancelled", hoursCompleted: false, serviceStartedAt: null, cookArrived: false, payment: { status: "paid", paidAmount: 349, testMode: false, refundStatus: "pending", refundAmount: 349 } });
+      beforeClaimHook = async () => { store.get("s8").payout.status = "settled"; };
+      r = makeRes();
+      await payoutCtrl.approveRefund({ params: { id: "s8" }, user: admin, body: {} }, r, next);
+      beforeClaimHook = null;
+      if (rzClient?.payments && savedRefund) rzClient.payments.refund = savedRefund;
+      check("settle-during-approve -> 400, gateway untouched", r.statusCode === 400 && gatewayCalls === 0, `s=${r.statusCode} gw=${gatewayCalls}`);
+
+      // Clawback wording: flag on UNsettled payout must not fabricate history.
+      mkDoc("s9", { status: "cancelled", hoursCompleted: false, serviceStartedAt: null, cookArrived: false, payment: { status: "paid", paidAmount: 349, testMode: false, refundStatus: "pending", refundAmount: 349 } });
+      r = makeRes();
+      await payoutCtrl.approveRefund({ params: { id: "s9" }, user: admin, body: { clawback: true } }, r, next);
+      const note9 = (store.get("s9").statusHistory || []).map((h) => h.note).join(" ");
+      check("clawback flag on unsettled: no fabricated settled-claim", r.statusCode === 200 && !/already settled/i.test(note9), `s=${r.statusCode}`);
+      // Clawback on truly settled payout: allowed + recorded.
+      mkDoc("s10", { status: "cancelled", hoursCompleted: false, serviceStartedAt: null, cookArrived: false, payment: { status: "paid", paidAmount: 349, testMode: false, refundStatus: "pending", refundAmount: 349 }, payout: { status: "settled" } });
+      r = makeRes();
+      await payoutCtrl.approveRefund({ params: { id: "s10" }, user: admin, body: { clawback: true } }, r, next);
+      const note10 = (store.get("s10").statusHistory || []).map((h) => h.note).join(" ");
+      check("clawback on settled: allowed + recorded", /already settled/i.test(note10), `s=${r.statusCode}`);
+
+      // Reference matrix.
+      mkDoc("s11");
+      r = await settle("s11", "AbC123x4");
+      check("settle stores exact reference", r.statusCode === 200 && store.get("s11").payout.reference === "AbC123x4", `s=${r.statusCode}`);
+      check("referenceKey normalized", store.get("s11").payout.referenceKey === "abc123x4", store.get("s11").payout.referenceKey);
+      mkDoc("s12");
+      r = await settle("s12", "abc123X4");
+      check("case-variant reference rejected 409", r.statusCode === 409 && store.get("s12").payout.status === "pending", `s=${r.statusCode}`);
+      mkDoc("s13");
+      r = await settle("s13", "ABC  123X4");
+      check("whitespace-variant reference rejected 409", r.statusCode === 409, `s=${r.statusCode}`);
+      // Concurrent same-reference settles on two bookings: one wins.
+      mkDoc("s14"); mkDoc("s15");
+      const [ra, rb] = await Promise.all([settle("s14", "UTRSHARED01"), settle("s15", "UTRSHARED01")]);
+      const won = [ra, rb].filter((x) => x.statusCode === 200).length;
+      const lost = [ra, rb].filter((x) => x.statusCode === 409).length;
+      check("concurrent duplicate reference: one 200, one 409", won === 1 && lost === 1, `${ra.statusCode}/${rb.statusCode}`);
+      for (const [label, ref, want] of [
+        ["short rejected", "ab", 400],
+        ["blank rejected", "   ", 400],
+        ["unicode lookalike rejected", "АBC12345", 400],
+        ["control char rejected", "AB\x01C12345", 400],
+        ["overlong rejected", "X".repeat(121), 400],
+      ]) {
+        mkDoc(`ref-${label.length}`);
+        r = await settle(`ref-${label.length}`, ref);
+        check(`reference ${label}`, r.statusCode === want, `s=${r.statusCode}`);
+      }
+      check("normalizePayoutReference folds case/space", normalizePayoutReference("  AbC  123X ") === "abc123x", normalizePayoutReference("  AbC  123X "));
+
+      // Amount + actor tampering: server truth wins unconditionally.
+      mkDoc("s16");
+      r = makeRes();
+      await payoutCtrl.settlePayout({ params: { id: "s16" }, user: admin, body: { reference: "UTRTAMPER01", amount: 1, cookPayout: 999999999, settledBy: "evil", actor: "admin:evil" } }, r, next);
+      const p16 = store.get("s16").payout;
+      check("client amount ignored", r.statusCode === 200 && p16.amount === 262, `s=${r.statusCode} amount=${p16.amount}`);
+      check("settler forged-proof (server identity)", String(p16.settledBy) === "admin1", String(p16.settledBy));
+      mkDoc("s17");
+      for (const evil of [{ amount: -5 }, { amount: 0 }, { amount: 1e12 }, { amount: "x" }, { amount: NaN }]) {
+        r = makeRes();
+        await payoutCtrl.settlePayout({ params: { id: "s17" }, user: admin, body: { reference: "UTRTAMPER02", ...evil } }, r, next);
+      }
+      check("hostile amounts never corrupt payout", store.get("s17").payout.amount === 262 && store.get("s17").payout.status === "settled");
+
+      // Test-mode can never settle.
+      mkDoc("s18", { payment: { status: "paid", paidAmount: 349, testMode: true, refundStatus: "none" } });
+      r = await settle("s18", "UTRTESTMODE1");
+      check("testMode settle refused", r.statusCode === 400 && store.get("s18").payout.status === "pending", `s=${r.statusCode}`);
+
+      // Full refund-state matrix against the eligibility gate.
+      for (const [rs, want] of [["none", true], ["rejected", true], ["pending", false], ["processing", false], ["processed", false], ["failed", false], ["manual", false]]) {
+        const e = payoutEligibility(eligibleBooking({ payment: { status: "paid", paidAmount: 349, testMode: false, refundStatus: rs } }));
+        check(`refund ${rs} ${want ? "permits" : "blocks"} payout`, e.eligible === want);
+      }
+
+      // Ledger failure AFTER settlement: durable state + recoverable audit gap.
+      mkDoc("s19");
+      const savedCreate = LedgerEntry.create;
+      LedgerEntry.create = async () => { throw new Error("ledger db down"); };
+      r = await settle("s19", "UTRLEDGER01");
+      LedgerEntry.create = savedCreate;
+      check("ledger outage: settlement still commits 200", r.statusCode === 200 && store.get("s19").payout.status === "settled", `s=${r.statusCode}`);
+      check("ledger outage: gap is detectable", !ledgerRows.some((l) => l.idempotencyKey === "payout:s19"));
+      // Recovery via the reconcile endpoint (idempotent backfill).
+      LedgerEntry.findOne = (q) => ({ select: () => ({ lean: async () => (ledgerKeys.has(q.idempotencyKey) ? { _id: "x" } : null) }) });
+      Booking.find = () => ({ select: () => ({ limit: () => ({ lean: async () => [...store.values()].filter((d) => d.payout?.status === "settled").map((d) => ({ _id: d._id, payout: d.payout, payment: d.payment })) }) }) });
+      r = makeRes();
+      await payoutCtrl.reconcileMissingPayoutLedger({ user: admin }, r, next);
+      check("reconcile backfills the gap", r.statusCode === 200 && r.body?.reconciled?.includes("s19"), `s=${r.statusCode} ${JSON.stringify(r.body)}`);
+      r = makeRes();
+      await payoutCtrl.reconcileMissingPayoutLedger({ user: admin }, r, next);
+      check("reconcile rerun is a no-op (idempotent)", r.statusCode === 200 && r.body?.reconciled?.length === 0 && r.body?.alreadyLogged?.includes("s19"), JSON.stringify(r.body));
+    } finally {
+      Booking.findById = savedFindById;
+      Booking.findOne = savedFindOne;
+      Booking.findOneAndUpdate = savedClaim;
+      LedgerEntry.create = savedLedger;
+      Notification.create = savedNotif;
+      CookProfile.findOne = savedProfile;
+      delete Booking.find;
+      delete LedgerEntry.findOne;
+    }
+  }
+
+  console.log("\n═══ ADVERSARIAL: cross-endpoint reconciliation ═══");
+  {
+    // Independent books (plain data) + independent math (plain loops — never
+    // controller helpers). Queue, history, statements and ledger summary must
+    // agree on the same underlying truth.
+    const C1 = "aaaaaaaaaaaaaaaaaaaaaaaa";
+    const C2 = "bbbbbbbbbbbbbbbbbbbbbbbb";
+    const books = [
+      { _id: "r1", cook: C1, customer: "u1", status: "completed", hoursCompleted: true, serviceStartedAt: new Date(1), cookArrived: true, amount: 349, commission: 87, cookPayout: 262, date: new Date("2026-09-10"), payment: { status: "paid", paidAmount: 349, testMode: false, refundStatus: "none" }, payout: { status: "settled", amount: 262, reference: "R1", referenceKey: "r1", settledAt: new Date("2026-09-11") }, statusHistory: [] },
+      { _id: "r2", cook: C1, customer: "u2", status: "completed", hoursCompleted: true, serviceStartedAt: new Date(1), cookArrived: true, amount: 499, commission: 125, cookPayout: 374, date: new Date("2026-09-12"), payment: { status: "paid", paidAmount: 499, testMode: false, refundStatus: "none" }, payout: { status: "pending" }, statusHistory: [] },
+      { _id: "r3", cook: C1, customer: "u1", status: "cancelled", hoursCompleted: false, amount: 199, commission: 50, cookPayout: 149, date: new Date("2026-09-13"), payment: { status: "paid", paidAmount: 199, testMode: false, refundStatus: "processed", refundAmount: 199 }, payout: { status: "pending" }, statusHistory: [] },
+      { _id: "r4", cook: C1, customer: "u3", status: "completed", hoursCompleted: true, serviceStartedAt: new Date(1), cookArrived: true, amount: 349, commission: 87, cookPayout: 262, date: new Date("2026-09-14"), payment: { status: "paid", paidAmount: 349, testMode: true, refundStatus: "none" }, payout: { status: "pending" }, statusHistory: [] },
+      { _id: "r5", cook: C2, customer: "u4", status: "completed", hoursCompleted: true, serviceStartedAt: new Date(1), cookArrived: true, amount: 649, commission: 162, cookPayout: 487, date: new Date("2026-09-15"), payment: { status: "paid", paidAmount: 649, testMode: false, refundStatus: "none" }, payout: { status: "settled", amount: 487, reference: "R2", referenceKey: "r2", settledAt: new Date("2026-09-16") }, statusHistory: [] },
+    ];
+    const ledger = [
+      { idempotencyKey: "payout:r1", booking: "r1", type: "payout.settled", amount: 262 },
+      { idempotencyKey: "payout:r5", booking: "r5", type: "payout.settled", amount: 487 },
+      { idempotencyKey: "refund-approve:r3", booking: "r3", type: "refund.approved", amount: 199 },
+    ];
+    // INDEPENDENT expectations (no controller helpers).
+    const real = (b) => b.payment?.status === "paid" && b.payment?.testMode !== true;
+    const settledBooks = books.filter((b) => b.payout?.status === "settled" && real(b));
+    const EXP_SETTLED = settledBooks.reduce((a, b) => a + (b.payout.amount || 0), 0); // 749
+    const EXP_COUNT = settledBooks.length; // 2
+    const EXP_CAPTURED = books.filter(real).reduce((a, b) => a + (b.payment.paidAmount || 0), 0); // 1696
+    const EXP_REFUNDED = books.filter((b) => real(b) && ["processed", "manual"].includes(b.payment.refundStatus)).reduce((a, b) => a + (b.payment.refundAmount || 0), 0); // 199
+    const EXP_QUEUE = books.filter((b) => real(b) && b.status === "completed" && b.hoursCompleted === true && (b.cookPayout || 0) > 0 && b.payout?.status === "pending");
+    const EXP_QUEUE_AMT = EXP_QUEUE.reduce((a, b) => a + b.cookPayout, 0); // 374 (r2 only)
+    const EXP_LEDGER_SETTLED = ledger.filter((l) => l.type === "payout.settled").reduce((a, l) => a + l.amount, 0); // 749
+    const stmtOf = (cook) => {
+      const rows = books.filter((b) => String(b.cook) === cook && real(b) && ["confirmed", "in_progress", "completed", "cancelled"].includes(b.status));
+      const earnings = rows.reduce((a, b) => a + (b.cookPayout || 0), 0);
+      const refunded = rows.filter((b) => ["processed", "manual"].includes(b.payment.refundStatus)).reduce((a, b) => a + (b.payment.refundAmount || 0), 0);
+      const settled = rows.filter((b) => b.payout?.status === "settled").reduce((a, b) => a + (b.payout.amount || b.cookPayout || 0), 0);
+      const pending = rows.filter((b) => (!b.payout || b.payout.status === "pending") && b.status === "completed" && b.hoursCompleted === true && !(b.payment.refundStatus && !["none", "rejected"].includes(b.payment.refundStatus))).reduce((a, b) => a + (b.cookPayout || 0), 0);
+      return { earnings, refunded, net: earnings - refunded, settled, pending };
+    };
+    const EXP_C1 = stmtOf(C1); // earnings 785, refunded 199, net 586, settled 262, pending 374
+    const EXP_C2 = stmtOf(C2); // settled 487
+
+    // Fakes: chainable find, countDocuments, mini aggregation engine.
+    const getP = (o, p) => String(p).split(".").reduce((a, k) => a?.[k], o);
+    const mCond = (val, cond) => {
+      if (cond && typeof cond === "object" && !Array.isArray(cond)) {
+        return Object.entries(cond).every(([op, ov]) => {
+          if (op === "$in") return ov.includes(val);
+          if (op === "$ne") return val !== ov;
+          if (op === "$gt") return val > ov;
+          if (op === "$gte") return val >= ov;
+          if (op === "$exists") return ov ? val !== undefined : val === undefined;
+          return false;
+        });
+      }
+      return val === cond;
+    };
+    const mFilter = (doc, filter) => Object.entries(filter || {}).every(([k, v]) => {
+      if (k === "$or") return v.some((c) => mFilter(doc, c));
+      if (k === "$and") return v.every((c) => mFilter(doc, c));
+      return mCond(getP(doc, k), v);
+    });
+    const ev = (row, e) => {
+      if (e && typeof e === "object") {
+        if ("$cond" in e) { const [c, t, f] = e.$cond; return ev(row, c) ? ev(row, t) : ev(row, f); }
+        if ("$and" in e) return e.$and.every((x) => ev(row, x));
+        if ("$eq" in e) return ev(row, e.$eq[0]) === ev(row, e.$eq[1]);
+        if ("$ne" in e) return ev(row, e.$ne[0]) !== ev(row, e.$ne[1]);
+        if ("$in" in e) return (ev(row, e.$in[1]) || []).includes(ev(row, e.$in[0]));
+        if ("$ifNull" in e) { const v = ev(row, e.$ifNull[0]); return v == null ? e.$ifNull[1] : v; }
+      }
+      if (typeof e === "string" && e.startsWith("$")) return getP(row, e.slice(1));
+      return e;
+    };
+    const runPipe = (docs, pipe) => {
+      let rows = docs.map((d) => ({ ...d }));
+      for (const st of pipe) {
+        if (st.$match) rows = rows.filter((r) => mFilter(r, st.$match));
+        else if (st.$group) {
+          const g = new Map();
+          for (const r of rows) {
+            const gid = st.$group._id === null ? null : typeof st.$group._id === "string" ? ev(r, st.$group._id) : Object.fromEntries(Object.entries(st.$group._id).map(([k, v]) => [k, ev(r, v)]));
+            const gk = JSON.stringify(gid);
+            if (!g.has(gk)) { const init = { _id: gid }; for (const [k, v] of Object.entries(st.$group)) { if (k !== "_id") { if (v.$sum !== undefined) init[k] = 0; if (v.$push !== undefined) init[k] = []; } } g.set(gk, init); }
+            const o = g.get(gk);
+            for (const [k, v] of Object.entries(st.$group)) {
+              if (k === "_id") continue;
+              if (v.$sum !== undefined) o[k] += typeof v.$sum === "number" ? v.$sum : Number(ev(r, v.$sum)) || 0;
+              if (v.$push !== undefined) o[k].push(ev(r, v.$push));
+            }
+          }
+          rows = [...g.values()];
+        } else if (st.$sort) { const es = Object.entries(st.$sort); rows.sort((a, b) => { for (const [k, d] of es) { if (a[k] !== b[k]) return (a[k] < b[k] ? -1 : 1) * d; } return 0; }); }
+        else if (st.$limit) rows = rows.slice(0, st.$limit);
+        else if (st.$project) rows = rows.map((r) => { const o = {}; for (const [k, v] of Object.entries(st.$project)) { if (k === "_id" && v === 0) continue; else if (v === 1) { if (r[k] !== undefined) o[k] = r[k]; } else if (typeof v === "string" && v.startsWith("$")) o[k] = ev(r, v); } return o; });
+      }
+      return rows;
+    };
+    const qfind = (arr) => (filter) => {
+      let rows = arr.filter((d) => mFilter(d, filter));
+      const q = {
+        sort: () => q, populate: () => q, select: () => q,
+        skip: (n) => { rows = rows.slice(n); return q; },
+        limit: (n) => { rows = rows.slice(0, n); return q; },
+        lean: async () => rows,
+        then: (res, rej) => Promise.resolve(rows).then(res, rej),
+      };
+      return q;
+    };
+    const sBookingFind = Booking.find, sBookingCount = Booking.countDocuments, sBookingAgg = Booking.aggregate;
+    const sLedgerAgg = LedgerEntry.aggregate, sLedgerFind = LedgerEntry.find;
+    const sCPFind = CookProfile.find, sCPFindOne = CookProfile.findOne;
+    Booking.find = qfind(books);
+    Booking.countDocuments = async (f) => books.filter((d) => mFilter(d, f || {})).length;
+    Booking.aggregate = async (p) => runPipe(books, p);
+    LedgerEntry.aggregate = async (p) => runPipe(ledger, p);
+    LedgerEntry.find = (f) => ({ select: () => ({ lean: async () => ledger.filter((d) => mFilter(d, f || {})) }) });
+    CookProfile.find = () => ({ select: () => ({ lean: async () => [] }) });
+    CookProfile.findOne = () => ({ select: () => ({ lean: async () => null }) });
+    const get = (fn, req) => { const r = makeRes(); return fn(req, r, next).then(() => r); };
+    try {
+      // Queue: exactly r2, flagged eligible.
+      let r = await get(payoutCtrl.getPayoutQueue, { query: {} });
+      check("queue holds exactly the eligible row", r.statusCode === 200 && r.body?.length === 1 && r.body[0]._id === "r2", `s=${r.statusCode} n=${r.body?.length}`);
+      check("queue row flagged eligible with no blockers", r.body[0].payoutEligible === true && (r.body[0].payoutBlockers || []).length === 0);
+      check("queue pending == independent", r.body.reduce((a, b) => a + b.cookPayout, 0) === EXP_QUEUE_AMT, `${EXP_QUEUE_AMT}`);
+      // History: r1 + r5, amounts reconcile.
+      r = await get(payoutCtrl.getPayoutHistory, { query: {} });
+      const histSum = (r.body || []).reduce((a, b) => a + (b.payout?.amount || 0), 0);
+      check("history settled total == independent", histSum === EXP_SETTLED, `${histSum}==${EXP_SETTLED}`);
+      // Statements per cook.
+      r = await get(payoutCtrl.getPayoutStatement, { params: { cookId: "me" }, user: { id: C1, role: "cook" } });
+      check("cook cannot spoof me-path (uses own id)", r.body?.statement && typeof r.body.statement.settled === "number", `s=${r.statusCode}`);
+      const st1 = r.body.statement;
+      check("statement c1 earnings/refunded/net", st1.earnings === EXP_C1.earnings && st1.refunded === EXP_C1.refunded && st1.netEarnings === EXP_C1.net, JSON.stringify({ e: st1.earnings, r: st1.refunded, n: st1.netEarnings }));
+      check("statement c1 settled/pending", st1.settled === EXP_C1.settled && st1.pending === EXP_C1.pending, `set=${st1.settled} pend=${st1.pending}`);
+      r = await get(payoutCtrl.getPayoutStatement, { params: { cookId: C2 }, user: { id: "admin1", role: "admin" } });
+      check("admin statement c2 settled == independent", r.body?.statement?.settled === EXP_C2.settled, `${r.body?.statement?.settled}`);
+      // IDOR: cook A reading cook B.
+      r = await get(payoutCtrl.getPayoutStatement, { params: { cookId: C2 }, user: { id: C1, role: "cook" } });
+      check("cook-to-cook statement IDOR blocked 403", r.statusCode === 403, `s=${r.statusCode}`);
+      // Ledger summary agrees with everything.
+      r = await get(payoutCtrl.getLedgerSummary, {});
+      const b = r.body?.bookings || {};
+      check("summary captured == independent", b.captured === EXP_CAPTURED, `${b.captured}==${EXP_CAPTURED}`);
+      check("summary refunded == independent", b.refunded === EXP_REFUNDED, `${b.refunded}==${EXP_REFUNDED}`);
+      check("summary settled == history == ledger == statements", b.settledPayouts === EXP_SETTLED && b.settledPayouts === EXP_LEDGER_SETTLED && b.settledPayouts === EXP_C1.settled + EXP_C2.settled, `${b.settledPayouts}/${EXP_SETTLED}/${EXP_LEDGER_SETTLED}`);
+      check("summary settledCount == 2", b.settledCount === EXP_COUNT, `${b.settledCount}`);
+      check("summary has blocked + dup diagnostics", Array.isArray(r.body?.missingPayoutLedger) && r.body?.blockedPayouts && Array.isArray(r.body?.duplicateReferences));
+      check("summary missing-ledger empty (all logged)", (r.body?.missingPayoutLedger || []).length === 0);
+      check("summary duplicate-refs empty", (r.body?.duplicateReferences || []).length === 0);
+    } finally {
+      Booking.find = sBookingFind;
+      Booking.countDocuments = sBookingCount;
+      Booking.aggregate = sBookingAgg;
+      LedgerEntry.aggregate = sLedgerAgg;
+      LedgerEntry.find = sLedgerFind;
+      CookProfile.find = sCPFind;
+      CookProfile.findOne = sCPFindOne;
+    }
+  }
+
+  console.log("\n═══ payout index guarantee ═══");
+  {
+    const { ensurePayoutIndexesOnce, PAYOUT_INDEXES } = require("./utils/payoutIndexes");
+    check("declares payout + refund reference indexes", PAYOUT_INDEXES.length === 3 && PAYOUT_INDEXES.every((x) => x.options.unique && x.options.partialFilterExpression));
+    const created = [];
+    const conn = { readyState: 1 };
+    const coll = { createIndex: async (spec, options) => { created.push([spec, options]); return options.name; } };
+    let r = await ensurePayoutIndexesOnce({ connection: conn, collection: coll, onLog: () => {} });
+    check("connected: all three indexes ensured", r.ok === true && created.length === 3, JSON.stringify(created.map((c) => c[1].name)));
+    check("referenceKey index is unique+partial", created.some(([, o]) => o.name === "uniq_payout_reference_key" && o.unique && o.partialFilterExpression));
+    check("refund referenceKey index is unique+partial", created.some(([, o]) => o.name === "uniq_refund_reference_key" && o.unique && o.partialFilterExpression));
+    const failing = { createIndex: async () => { throw new Error("boom"); } };
+    r = await ensurePayoutIndexesOnce({ connection: conn, collection: failing, onLog: () => {} });
+    check("failure is reported, never thrown", r.ok === false && /boom/.test(r.error || ""));
+    r = await ensurePayoutIndexesOnce({ connection: { readyState: 0 }, collection: coll, onLog: () => {} });
+    check("disconnected: reports without touching db", r.ok === false);
+    let calls = 0;
+    const flaky = { createIndex: async (s, o) => { calls++; if (calls === 1) throw new Error("transient"); return o.name; } };
+    r = await ensurePayoutIndexesOnce({ connection: conn, collection: flaky, retryMs: 5, onLog: () => {} });
+    // once-mode does not loop; loop-mode tested via retry below
+    check("once-mode surfaces first failure", r.ok === false);
+    const { ensurePayoutIndexes } = require("./utils/payoutIndexes");
+    let calls2 = 0;
+    const flaky2 = { createIndex: async (s, o) => { calls2++; if (calls2 <= 2) throw new Error("transient"); return o.name; } };
+    const logs = [];
+    const p = ensurePayoutIndexes({ connection: conn, collection: flaky2, retryMs: 5, onLog: (m) => logs.push(m) });
+    r = await p;
+    check("loop-mode retries to success", r.ok === true && calls2 >= 3, `calls=${calls2}`);
   }
 
   console.log(`\n${passes} passed, ${failures} failed`);

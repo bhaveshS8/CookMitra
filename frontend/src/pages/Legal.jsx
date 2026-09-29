@@ -112,6 +112,13 @@ export const PrivacyPolicy = () => (
         logged in and to remember your location preference. We do not use tracking cookies
         for advertising.
       </li>
+      <li>
+        <strong>Anonymous site analytics:</strong> we count visits using an anonymous
+        browser identifier stored in localStorage (not a cookie) and an approximate
+        city derived from your network IP via a third-party lookup. Raw IP addresses
+        are never sent to or stored on our servers, and city data is approximate —
+        never exact.
+      </li>
     </ul>
 
     <h3>2. How we use your information</h3>

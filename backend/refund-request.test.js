@@ -347,9 +347,21 @@ const callEligibility = (user) =>
       });
     // Partial approval of a customer request (gateway unconfigured in tests
     // → manual path, same guards + ledger + notify shape as full approval).
+    // Faithful claim applier: honors the refundStatus filter (claim + final
+    // atomic commit), applies $set dotted paths and history like Mongo would.
     reset({ payment: { refundStatus: "pending", refundAmount: 1110, refundReason: "Cook did not arrive" } });
-    claimImpl = async () => {
-      bookingDoc.payment.refundStatus = "processing";
+    claimImpl = async (filter, update) => {
+      const want = filter["payment.refundStatus"];
+      const cur = bookingDoc.payment.refundStatus;
+      const ok = !want || (typeof want === "string" ? cur === want : want.$in ? want.$in.includes(cur) : true);
+      if (!ok) return null;
+      for (const [k, v] of Object.entries(update.$set || {})) {
+        const ks = String(k).split(".");
+        let t = bookingDoc;
+        for (let i = 0; i < ks.length - 1; i++) t = t[ks[i]];
+        t[ks[ks.length - 1]] = v;
+      }
+      if (update.$push?.statusHistory) bookingDoc.statusHistory.push(update.$push.statusHistory);
       return bookingDoc;
     };
     const r = await callApprove(ADMIN, { amount: 700 });
@@ -370,6 +382,20 @@ const callEligibility = (user) =>
   {
     const payout = require("./controllers/payoutController");
     reset({ payment: { refundStatus: "pending", refundAmount: 1110, refundReason: "Cook did not arrive" } });
+    claimImpl = async (filter, update) => {
+      const want = filter["payment.refundStatus"];
+      const cur = bookingDoc.payment.refundStatus;
+      const ok = !want || (typeof want === "string" ? cur === want : want.$in ? want.$in.includes(cur) : true);
+      if (!ok) return null;
+      for (const [k, v] of Object.entries(update.$set || {})) {
+        const ks = String(k).split(".");
+        let t = bookingDoc;
+        for (let i = 0; i < ks.length - 1; i++) t = t[ks[i]];
+        t[ks[ks.length - 1]] = v;
+      }
+      if (update.$push?.statusHistory) bookingDoc.statusHistory.push(update.$push.statusHistory);
+      return bookingDoc;
+    };
     const req = { params: { id: "booking1" }, user: ADMIN, body: { reason: "Cook arrived late but served" } };
     const res = makeRes();
     await payout.rejectRefund(req, res, (e) => { if (e) throw e; });

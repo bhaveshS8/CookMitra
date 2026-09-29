@@ -851,13 +851,20 @@ const BookingDetails = () => {
           );
         }
         if (rs === "processed") {
+          const paid = Number(refundInfo.paidAmount || booking?.payment?.paidAmount || booking?.amount || 0);
+          const refunded = Number(refundInfo.refundAmount || 0);
+          const isPartial = paid > 0 && refunded > 0 && refunded < paid;
+          const remaining = isPartial ? paid - refunded : 0;
           return (
             <div className="bd-card bd-refund-card is-done" role="status">
               <h3 className="bd-card-head">
-                <CheckCircle2 size={18} /> Refund completed
+                <CheckCircle2 size={18} /> {isPartial ? "Partial refund completed" : "Refund completed"}
               </h3>
               <p className="bd-note-hint">
-                Refunded{amt ? `: ${formatCurrency(amt)}` : ""} — it reaches your account in 5–7 business days.
+                {isPartial
+                  ? `Refund of ${formatCurrency(refunded)} processed (from ${formatCurrency(paid)} paid). Remaining unrefunded: ${formatCurrency(remaining)}.`
+                  : `Refunded${amt ? `: ${formatCurrency(amt)}` : ""} — it reaches your account in 5–7 business days.`}
+                {refundInfo.refundAdminNote ? ` Note: ${refundInfo.refundAdminNote}` : ""}
               </p>
             </div>
           );

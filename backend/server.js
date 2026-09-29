@@ -83,9 +83,6 @@ app.use((req, res, next) => {
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)");
   next();
 });
-// compression: gzip JSON/API + static frontend (threshold 1kb).
-app.use(compression({ threshold: 1024 }));
-
 // Rate limits. Counters live in memory per bucket by default; the
 // security-critical, low-traffic buckets (auth, payments) use a MongoDB-backed
 // store so the limits stay exact with 2+ replicas — no Redis, no new service.
@@ -127,6 +124,9 @@ const visitLimiter = rateLimit({
   message: { message: "Too many requests — please slow down and retry." },
 });
 app.use("/api/", generalLimiter);
+// compression AFTER rate limiters: rejected 429s skip gzip entirely,
+// saving CPU on traffic spikes. Threshold 1kb keeps small JSON uncompressed.
+app.use(compression({ threshold: 1024 }));
 
 // One line of operational truth at boot: with 2+ replicas, any bucket left
 // in-memory has its effective limit multiplied by the replica count.
@@ -206,6 +206,14 @@ if (process.env.NODE_ENV === "production") {
 // Background retry loop — never throws, never exits. The API stays up
 // (health reports db status) even while MongoDB is unreachable.
 connectDB();
+
+// Payout safety invariant: offline references must be unique at the DATABASE
+// level, not just via the app-level check (two concurrent settles can pass
+// the check simultaneously). Auto-index creation proved unreliable in this
+// deployment (uniq_payout_reference was absent on live bookings), so ensure
+// the payout indexes explicitly here — idempotent, retrying, never fatal.
+const { ensurePayoutIndexes } = require("./utils/payoutIndexes");
+ensurePayoutIndexes({ connection: mongoose.connection });
 
 // Fail-fast on uncaught exceptions (S-14): continuing to serve with
 // potentially corrupt in-memory state risks wrong bookings/payments. The
@@ -304,7 +312,7 @@ const uploadAccess = async (req, res, next) => {
       return res.status(401).json({ message: "Token is not valid" });
     }
     const User = require("./models/User");
-    const account = await User.findById(decoded.id).select("role status tokenVersion");
+    const account = await User.findById(decoded.id).select("role status tokenVersion").lean();
     if (!account) {
       return res.status(401).json({ message: "Account no longer exists. Please log in again." });
     }

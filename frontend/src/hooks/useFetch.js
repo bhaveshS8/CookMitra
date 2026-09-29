@@ -1,23 +1,61 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import API from "../api/axios";
 
 export const useFetch = (url) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(Boolean(url));
   const [error, setError] = useState(null);
+  // Monotonic request id: only the latest request may write state, so a
+  // slow earlier response (e.g. range 7 → 90 → 30) can never overwrite
+  // newer data. The AbortController cancels the in-flight HTTP request for
+  // the same reason (and on unmount, avoiding set-state-after-unmount).
+  const seqRef = useRef(0);
+  const abortRef = useRef(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      try {
+        abortRef.current?.abort();
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
 
   const fetchData = useCallback(async () => {
     // A null url means "do not fetch" — used by tabbed consoles that only
     // load the list for the visible tab. Returns empty state, never an error.
     if (!url) {
+      try {
+        abortRef.current?.abort();
+      } catch {
+        // ignore
+      }
+      if (!mountedRef.current) return;
       setData(null);
       setLoading(false);
       setError(null);
       return;
     }
+    // Cancel any in-flight request (rapid range changes, double-clicked
+    // Refresh) so only one request is ever outstanding per hook.
     try {
-      setLoading(true);
-      const response = await API.get(url);
+      abortRef.current?.abort();
+    } catch {
+      // ignore
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const seq = seqRef.current + 1;
+    seqRef.current = seq;
+    const isCurrent = () => mountedRef.current && seqRef.current === seq;
+    try {
+      if (isCurrent()) setLoading(true);
+      const response = await API.get(url, { signal: controller.signal });
+      if (!isCurrent()) return;
       const payload = response.data;
       // Tolerate the paginated envelope ({data, pagination}) so list screens
       // keep working if ?page/limit is ever sent — today the API returns
@@ -29,6 +67,11 @@ export const useFetch = (url) => {
       );
       setError(null);
     } catch (err) {
+      if (!isCurrent()) return;
+      // Superseded by a newer request — not an error, stay silent.
+      if (err?.code === "ERR_CANCELED" || err?.name === "CanceledError" || err?.name === "AbortError") {
+        return;
+      }
       // Backend down / timed out: surface a clear message, never hang.
       if (err.code === "ECONNABORTED") {
         setError("Server is taking too long to respond — is the backend running?");
@@ -38,7 +81,7 @@ export const useFetch = (url) => {
         setError(err.response?.data?.message || "An error occurred");
       }
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [url]);
 

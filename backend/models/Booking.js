@@ -144,6 +144,13 @@ const bookingSchema = new mongoose.Schema(
       },
       settledAt: { type: Date },
       reference: { type: String, default: "", trim: true },
+      // Normalized duplicate-detection key for `reference`: lowercased with
+      // collapsed whitespace, set at settlement time. Bank/UPI references
+      // are case-insensitive in practice, so "ABC123" and "abc123" must
+      // collide here even though `reference` keeps the exact typed text for
+      // audit fidelity. Unique index `uniq_payout_reference_key` makes the
+      // concurrent same-reference race fail closed at the database level.
+      referenceKey: { type: String, default: "", trim: true },
       amount: { type: Number, default: 0 },
       // Frozen recipient snapshot taken at settlement: later edits to the
       // cook's payout details can never rewrite who a settled payout
@@ -192,6 +199,13 @@ const bookingSchema = new mongoose.Schema(
       },
       refundAmount: { type: Number, default: 0 },
       refundedAt: { type: Date },
+      // Manual-settlement audit: the exact transfer reference typed by the
+      // admin plus its canonical duplicate-detection key (whitespace removed,
+      // lowercased). One bank/UPI transfer must never settle two refunds —
+      // enforced by the unique index `uniq_refund_reference_key` (see also
+      // utils/payoutIndexes.js, which guarantees it at boot).
+      refundReference: { type: String, default: "", trim: true },
+      refundReferenceKey: { type: String, default: "", trim: true },
       // Customer post-service refund request (no-show / not completed). The
       // customer never chooses an amount — refundAmount is always computed
       // server-side (capped at maxRefundable). requestedBy is "customer" for
@@ -247,6 +261,9 @@ const bookingSchema = new mongoose.Schema(
 );
 
 bookingSchema.index({ customer: 1, status: 1 });
+// "My bookings" sorted by recency + admin analytics paid-revenue scan.
+bookingSchema.index({ customer: 1, createdAt: -1 });
+bookingSchema.index({ "payment.status": 1 });
 bookingSchema.index({ cook: 1, status: 1 });
 bookingSchema.index({ cook: 1, date: 1, startTime: 1, endTime: 1 });
 // Hot read paths: "today's bookings" scans and status-sorted dashboards.
@@ -298,6 +315,30 @@ bookingSchema.index(
     sparse: true,
     partialFilterExpression: { "payout.reference": { $exists: true, $ne: "" } },
     name: "uniq_payout_reference",
+  }
+);
+// Case-insensitive twin of the above over the normalized key: without it,
+// "ABC123" and "abc123" (same bank transfer typed twice) would both commit.
+// Empty keys never collide.
+bookingSchema.index(
+  { "payout.referenceKey": 1 },
+  {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: { "payout.referenceKey": { $exists: true, $ne: "" } },
+    name: "uniq_payout_reference_key",
+  }
+);
+// Refund counterpart of the payout-reference guarantees: the same offline
+// transfer reference can never be recorded as a manual refund twice (case-
+// and whitespace-insensitive). Empty keys never collide.
+bookingSchema.index(
+  { "payment.refundReferenceKey": 1 },
+  {
+    unique: true,
+    sparse: true,
+    partialFilterExpression: { "payment.refundReferenceKey": { $exists: true, $ne: "" } },
+    name: "uniq_refund_reference_key",
   }
 );
 

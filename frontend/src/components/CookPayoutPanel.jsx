@@ -77,9 +77,9 @@ const CookPayoutPanel = () => {
         <>
           {st && (
             <div className="cook-stats-row" style={{ display: "flex", flexWrap: "wrap", gap: "1rem", marginBottom: "1rem" }}>
-              <div className="cook-stat">
-                <span className="cook-stat-label">Total earned (75%)</span>
-                <strong>{formatCurrency(st.earnings)}</strong>
+              <div className="cook-stat" title={`Gross cook share ${formatCurrency(st.earnings)} minus successful refunds ${formatCurrency(st.refunded || 0)}`}>
+                <span className="cook-stat-label">Total earned (75%, net of refunds)</span>
+                <strong>{formatCurrency(st.netEarnings ?? st.earnings)}</strong>
               </div>
               <div className="cook-stat">
                 <span className="cook-stat-label"><CheckCircle2 size={12} /> Settled</span>

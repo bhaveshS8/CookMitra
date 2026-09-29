@@ -241,7 +241,9 @@ export const fetchIpLocation = async () => {
 // Resolves with { lat, lng, accuracy, timestamp }. Uses a fresh (maximumAge: 0)
 // high-accuracy watch to pick the best fix, then falls back to single-shot
 // attempts. Rejects with an Error whose message is safe to show to the user.
-export const getCurrentPositionRobust = ({ highAccuracyTimeout = 15000 } = {}) =>
+// Worst case is bounded (~7s watch + highAccuracyTimeout + 10s low-power ≈
+// 29s with defaults) so the UI never spins for a minute on GPS-less desktops.
+export const getCurrentPositionRobust = ({ highAccuracyTimeout = 12000 } = {}) =>
   new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
       reject(
@@ -289,7 +291,7 @@ export const getCurrentPositionRobust = ({ highAccuracyTimeout = 15000 } = {}) =
     (async () => {
       // 1) Best-of-watch: fresh high-accuracy fixes for a few seconds.
       try {
-        const best = await bestOfWatch({ watchMs: 8000 });
+        const best = await bestOfWatch({ watchMs: 7000 });
         if (best && Number.isFinite(best.lat) && Number.isFinite(best.lng)) {
           resolve(best);
           return;
@@ -311,11 +313,11 @@ export const getCurrentPositionRobust = ({ highAccuracyTimeout = 15000 } = {}) =
           reject(describe(err, "first"));
           return;
         }
-        // 3) One longer low-power attempt before giving up.
+        // 3) One shorter low-power attempt before giving up.
         try {
           const pos2 = await singleShot({
             enableHighAccuracy: false,
-            timeout: 30000,
+            timeout: 10000,
             maximumAge: 0,
           });
           resolve(toCoords(pos2));

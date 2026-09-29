@@ -1,9 +1,10 @@
 const mongoose = require("mongoose");
 
 // Aggregated site-visit counter — exactly one document per calendar day
-// (IST). Written by POST /api/stats/public/visit (one ping per browser
-// session), read by the admin Visits tab. Aggregated instead of per-hit so
-// the collection stays at ~365 docs/year no matter the traffic.
+// (IST). Written by POST /api/stats/public/visit (one ping per browser-tab
+// session, server-deduped by VisitSession), read by the admin Visits tab.
+// Aggregated instead of per-hit so the collection stays at ~365 docs/year
+// no matter the traffic.
 const dailyStatSchema = new mongoose.Schema(
   {
     // Calendar day in Asia/Kolkata as YYYY-MM-DD.

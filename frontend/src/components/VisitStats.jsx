@@ -27,7 +27,7 @@ const VisitStats = () => {
         <div>
           <h2 style={{ fontSize: "1.4rem", margin: 0 }}>Site Visits</h2>
           <p style={{ color: "var(--slate-500)", margin: "0.25rem 0 0", fontSize: "0.9rem" }}>
-            One count per browser session · bots excluded · days in IST · cities are approximate (IP-based).
+            One count per browser-tab session · bots excluded · days in IST · cities are approximate (IP-based).
           </p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
@@ -57,11 +57,11 @@ const VisitStats = () => {
             <div className="stat-metric-title">Visits · last {range} days</div>
           </div>
         </div>
-        <div className="dashboard-stat-card">
+        <div className="dashboard-stat-card" title="Distinct anonymous browsers per IST day, summed across the range — the same visitor counts again on another day.">
           <div className="stat-icon-wrapper"><Users size={20} /></div>
           <div>
             <div className="stat-metric-number">{loading ? "…" : totals.uniques.toLocaleString("en-IN")}</div>
-            <div className="stat-metric-title">Unique visitors · last {range} days</div>
+            <div className="stat-metric-title">Unique visitor-days · last {range} days</div>
           </div>
         </div>
       </div>

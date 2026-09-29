@@ -129,13 +129,17 @@ const chainable = (doc) => ({
 
 Booking.findById = async (id) => (String(id) === "booking1" && bookingDoc ? bookingDoc : null);
 Booking.find = (filter = {}) => ({
-  select: async () => {
-    const c = filter?.cook;
-    if (c && typeof c === "object" && Array.isArray(c.$in)) {
-      return c.$in.flatMap((id) => rivalsByCook[String(id)] || []);
-    }
-    return rivalsByCook[String(c)] || [];
-  },
+  // Mirrors the production chain Booking.find(...).select(...).lean()
+  // (utils/slots.js getDayBookings) — select/lean resolve to rivals.
+  select: () => ({
+    lean: async () => {
+      const c = filter?.cook;
+      if (c && typeof c === "object" && Array.isArray(c.$in)) {
+        return c.$in.flatMap((id) => rivalsByCook[String(id)] || []);
+      }
+      return rivalsByCook[String(c)] || [];
+    },
+  }),
 });
 Booking.findOneAndUpdate = async (filter, update, opts) => {
   claimCalls.push({ filter, update, opts });

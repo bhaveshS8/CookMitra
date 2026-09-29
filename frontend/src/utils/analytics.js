@@ -121,6 +121,7 @@ export const isAnalyticsConfigured = () => hasGa || hasPixel;
 // stored). Fire-and-forget: failures are swallowed so tracking can never
 // break the app.
 const VISIT_SESSION_KEY = "cm-visit-sent";
+const VISIT_SID_KEY = "cm-visit-sid";
 const VISITOR_KEY = "cm-vid";
 // Never hold the ping longer than this waiting for the city lookup.
 const VISIT_CITY_TIMEOUT_MS = 2500;
@@ -138,6 +139,23 @@ const getVisitorId = () => {
   }
 };
 
+// Per-tab session id: new on every tab (sessionStorage), stable for the
+// tab's lifetime. The server counts one visit per (day, vid, sid), so a
+// retried or replayed ping from the same tab is idempotent while a new tab
+// legitimately counts again.
+const getVisitSid = () => {
+  try {
+    let sid = sessionStorage.getItem(VISIT_SID_KEY);
+    if (!sid) {
+      sid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+      sessionStorage.setItem(VISIT_SID_KEY, sid);
+    }
+    return sid;
+  } catch {
+    return null;
+  }
+};
+
 export const trackSiteVisit = (path = "/") => {
   try {
     if (typeof window === "undefined") return;
@@ -145,12 +163,15 @@ export const trackSiteVisit = (path = "/") => {
     sessionStorage.setItem(VISIT_SESSION_KEY, "1");
     const vid = getVisitorId();
     if (!vid) return;
+    const sid = getVisitSid();
+    if (!sid) return;
     const send = (loc) => {
       // Lazy import keeps analytics.js free of module cycles.
       import("../api/axios")
         .then(({ default: API }) =>
           API.post("/stats/public/visit", {
             vid,
+            sid,
             path,
             city: loc?.city || "",
             state: loc?.state || "",

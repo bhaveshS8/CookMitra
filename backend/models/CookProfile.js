@@ -162,5 +162,8 @@ const cookProfileSchema = new mongoose.Schema(
 );
 
 cookProfileSchema.index({ approvalStatus: 1, serviceArea: 1 });
+// Default list sort is { createdAt: -1 } filtered by approvalStatus —
+// covering index avoids the in-memory sort on every browse.
+cookProfileSchema.index({ approvalStatus: 1, createdAt: -1 });
 
 module.exports = mongoose.model("CookProfile", cookProfileSchema);

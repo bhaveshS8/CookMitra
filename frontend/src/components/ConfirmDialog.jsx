@@ -24,16 +24,23 @@ const ConfirmDialog = ({
   tone = "brand",
   busy = false,
   input,
+  // Optional explicit decision checkbox (e.g. the refund clawback gate):
+  // { label, initialChecked }. `requireCheckbox` keeps the confirm button
+  // disabled until it is ticked, and onConfirm receives (value, checked).
+  checkbox,
+  requireCheckbox = false,
   onCancel,
   onConfirm,
 }) => {
   const [value, setValue] = useState("");
+  const [checked, setChecked] = useState(false);
   const confirmRef = useRef(null);
 
   // Reset the prompt field, lock body scroll, focus confirm, close on Escape.
   useEffect(() => {
     if (!open) return undefined;
     setValue(input?.initialValue || "");
+    setChecked(Boolean(checkbox?.initialChecked));
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const focusTimer = setTimeout(() => confirmRef.current?.focus(), 60);
@@ -92,13 +99,36 @@ const ConfirmDialog = ({
         {input && (
           <label className="cf-field">
             <span>{input.label}</span>
-            <textarea
-              rows={3}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              placeholder={input.placeholder}
+            {input.singleLine ? (
+              <input
+                className="cf-input"
+                type="text"
+                inputMode={input.inputMode || "text"}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder={input.placeholder}
+                disabled={busy}
+              />
+            ) : (
+              <textarea
+                rows={3}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder={input.placeholder}
+                disabled={busy}
+              />
+            )}
+          </label>
+        )}
+        {checkbox && (
+          <label className="cf-check">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => setChecked(e.target.checked)}
               disabled={busy}
             />
+            <span>{checkbox.label}</span>
           </label>
         )}
         <div className="cf-actions">
@@ -116,8 +146,8 @@ const ConfirmDialog = ({
             className={`btn cf-btn ${
               tone === "danger" ? "btn-danger" : tone === "emerald" ? "btn-success" : "btn-primary"
             }`}
-            onClick={() => onConfirm?.(value)}
-            disabled={busy}
+            onClick={() => onConfirm?.(value, checked)}
+            disabled={busy || (requireCheckbox && !checked)}
           >
             {busy ? (
               <>

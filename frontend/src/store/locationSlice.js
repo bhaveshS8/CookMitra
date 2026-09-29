@@ -75,33 +75,36 @@ export const requestPreciseLocation = createAsyncThunk(
       return { location: next, error: "" };
     } catch (err) {
       const msg = err?.message || "Could not detect your location";
-      const denied =
-        err?.code === 1 || /permission|blocked|denied|secure page/i.test(msg);
-      // Permission denial is not a failure of the site — fall back to an
-      // approximate IP city so the header still shows something useful.
-      if (denied) {
-        try {
-          const ip = await fetchIpLocation();
-          if (ip?.label) {
-            const approx = {
-              label: ip.label,
-              city: ip.city || "",
-              area: "",
-              state: ip.state || "",
-              lat: null,
-              lng: null,
-              source: "ip",
-            };
-            persist(approx);
-            return {
-              location: approx,
-              error:
-                "Precise location is off — showing approximate area. Enable GPS for better accuracy.",
-            };
-          }
-        } catch {
-          // ignore — fall through to the denied state below
+      const denied = /permission|blocked|denied|secure page/i.test(msg);
+      // Any GPS failure falls back to an approximate IP city so detection
+      // always yields something useful. Previously only permission-denial
+      // got this fallback — the common desktop outcome (GPS timeout /
+      // position unavailable after a long spin) ended with nothing, even
+      // though an approximate city was one cheap lookup away.
+      try {
+        const ip = await fetchIpLocation();
+        if (ip?.label) {
+          const approx = {
+            label: ip.label,
+            city: ip.city || "",
+            area: "",
+            state: ip.state || "",
+            lat: null,
+            lng: null,
+            source: "ip",
+          };
+          persist(approx);
+          return {
+            location: approx,
+            error: denied
+              ? "Precise location is off — showing approximate area. Enable GPS for better accuracy."
+              : "GPS unavailable — showing approximate area instead. Enable GPS for better accuracy.",
+          };
         }
+      } catch {
+        // ignore — fall through to the error states below
+      }
+      if (denied) {
         return rejectWithValue({
           location: null,
           error:
