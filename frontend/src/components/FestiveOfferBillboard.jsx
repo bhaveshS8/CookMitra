@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import API from "../api/axios";
 import {
   X,
@@ -77,6 +77,13 @@ function useCountdown() {
 const pad = (n) => String(n).padStart(2, "0");
 
 const FestiveOfferBillboard = () => {
+  const location = useLocation();
+  // Booking flow must stay interruption-free: the 8s festive modal locks
+  // body scroll and covers the slot/address form, so never arm it on
+  // cook discovery, booking, waiting or payment routes.
+  const isBookingRoute = /^\/(cook-on-demand|cooks(\/|$)|bookings(\/|$))/.test(
+    location.pathname || ""
+  );
   const [showModal, setShowModal] = useState(false);
   const [copied, setCopied] = useState(false);
   const { d, h, m, s, expired } = useCountdown();
@@ -107,6 +114,7 @@ const FestiveOfferBillboard = () => {
   }, []);
 
   useEffect(() => {
+    if (isBookingRoute) return undefined;
     let timer;
     try {
       const hidden = localStorage.getItem(HIDE_KEY);
@@ -120,7 +128,7 @@ const FestiveOfferBillboard = () => {
       timer = setTimeout(() => setShowModal(true), 8000);
     }
     return () => clearTimeout(timer);
-  }, []);
+  }, [isBookingRoute]);
 
   useEffect(() => {
     if (!showModal) return;
@@ -150,6 +158,13 @@ const FestiveOfferBillboard = () => {
     }
   };
 
+  // If the user navigates into the booking flow while the modal is open
+  // (e.g. clicks "Claim % OFF"), close it immediately so it never covers
+  // the slot picker, address form, waiting screen or payment page.
+  useEffect(() => {
+    if (isBookingRoute) setShowModal(false);
+  }, [isBookingRoute]);
+
   const copyCode = async () => {
     try {
       await navigator.clipboard.writeText(heroCode);
@@ -162,8 +177,8 @@ const FestiveOfferBillboard = () => {
 
   return (
     <>
-      {/* Entry popup billboard */}
-      {showModal && (
+      {/* Entry popup billboard — never on booking routes */}
+      {showModal && !isBookingRoute && (
         <div
           className="festive-overlay"
           onClick={closeModal}

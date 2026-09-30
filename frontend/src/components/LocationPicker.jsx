@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
-import { MapPin, LocateFixed, X, AlertCircle } from "lucide-react";
+import { MapPin, LocateFixed, X, AlertCircle, Navigation } from "lucide-react";
 import { useDispatch } from "react-redux";
 import { useSiteLocation } from "../store/hooks";
 import { requestPreciseLocation, clearLocation } from "../store/locationSlice";
+import { formatAccuracy, accuracyGrade } from "../utils/geolocation";
 
 // Header location pill + dropdown. Never blocks the page: GPS denial or a
 // failed lookup only shows an inline message while browsing keeps working.
@@ -11,7 +12,7 @@ import { requestPreciseLocation, clearLocation } from "../store/locationSlice";
 const LocationPicker = () => {
   const { location, status, error, isLocating } = useSiteLocation();
   const dispatch = useDispatch();
-  const handlePrecise = () => dispatch(requestPreciseLocation());
+  const handlePrecise = () => dispatch(requestPreciseLocation({ forceRefine: true }));
   const handleClear = () => dispatch(clearLocation());
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -39,7 +40,7 @@ const LocationPicker = () => {
 
   const sourceNote =
     location?.source === "gps"
-      ? "Precise GPS location"
+      ? `Precise GPS location${Number.isFinite(location?.accuracy) ? ` · ${formatAccuracy(location.accuracy)}` : ""}`
       : location?.source === "ip"
         ? "Approximate area (IP)"
         : location?.source === "manual"
@@ -47,6 +48,22 @@ const LocationPicker = () => {
           : location?.source === "stored"
             ? "Saved location"
             : "";
+
+  // Exact-fix hint: GPS radius tells the user whether the stored label is
+  // house-level (±50 m) or just area-level.
+  const gpsGrade = location?.source === "gps" || Number.isFinite(location?.accuracy)
+    ? accuracyGrade(location?.accuracy)
+    : null;
+  // One amber line at a time: a real error (denied / saved pin kept) wins over
+  // the accuracy note so the same message is never shown twice.
+  const accuracyHint = error
+    ? ""
+    : location?.accuracyNote ||
+      (gpsGrade === "poor"
+        ? "Approximate pin — step outdoors with a clear sky view, then tap Re-detect for your exact house address."
+        : gpsGrade === "fair"
+          ? "Close pin — re-detect outdoors if the house number looks off."
+          : "");
 
   return (
     <div className="loc-wrap" ref={wrapRef}>
@@ -98,6 +115,17 @@ const LocationPicker = () => {
             <LocateFixed size={15} />
             {isLocating ? "Detecting…" : location ? "Re-detect my location" : "Use my current location"}
           </button>
+
+          {location?.exactLine ? (
+            <div className="loc-current-sub">
+              <Navigation size={12} aria-hidden="true" /> {location.exactLine}
+            </div>
+          ) : null}
+          {accuracyHint ? (
+            <p className="loc-error" role="note" style={{ borderColor: "var(--amber-300, #fcd34d)" }}>
+              <AlertCircle size={14} aria-hidden="true" /> {accuracyHint}
+            </p>
+          ) : null}
 
           {error && (
             <p className="loc-error" role="alert">

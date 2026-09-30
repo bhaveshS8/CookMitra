@@ -26,9 +26,7 @@ import {
   BadgeCheck,
 } from "lucide-react";
 import cookMitraLogo from "../assets/logo.png";
-// Google sign-in intentionally disabled for now — re-enable together with the
-// commented <GoogleSignInButton /> block below.
-// import GoogleSignInButton from "../components/GoogleSignInButton";
+import GoogleSignInButton from "../components/GoogleSignInButton";
 
 const Login = () => {
   const [formData, setFormData] = useState({ email: "", password: "" });
@@ -314,7 +312,7 @@ const Login = () => {
             </p>
           </form>
 
-          {/* <div className="auth-divider">
+          <div className="auth-divider">
             <span>or</span>
           </div>
 
@@ -326,7 +324,7 @@ const Login = () => {
 
           <div className="auth-google-role-note">
             New here? Join with Google — account type will be set during setup.
-          </div> */}
+          </div>
 
           <div className="auth-footer-prompt">
             Don&apos;t have an account yet? <Link to={registerTo}>Create an account</Link>

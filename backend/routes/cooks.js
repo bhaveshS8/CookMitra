@@ -3,7 +3,7 @@ const router = express.Router();
 const { body } = require("express-validator");
 const validate = require("../middleware/validate");
 const { auth, authorize, optionalAuth } = require("../middleware/auth");
-const { cookDocUpload } = require("../middleware/upload");
+const { cookDocUpload, validateUploadedContent } = require("../middleware/upload");
 const {
   getCooks,
   getCook,
@@ -48,6 +48,7 @@ router.post(
       next();
     });
   },
+  validateUploadedContent,
   uploadCookDocs
 );
 router.get("/admin-overview/:id", auth, authorize("admin"), getCookAdminOverview);
@@ -69,6 +70,7 @@ router.post(
       next();
     });
   },
+  validateUploadedContent,
   adminUploadCookDocs
 );
 router.get("/:id", getCook);

@@ -155,6 +155,42 @@ const stubFindById = (doc) => () => Promise.resolve(doc);
         User.findById = oF;
       }
     }
+
+    // 1.7 Admin sessions are capped at 12h (financial powers); customers keep 30d.
+    {
+      const admin = makeUser("ADMIN");
+      const oF = User.findOne;
+      User.findOne = stubFindOne(admin);
+      const r = makeRes();
+      try {
+        await authCtrl.login({ body: { email: "a@e.com", password: "pass123" } }, r, next);
+        const decoded = jwt.verify(r.body.token, process.env.JWT_SECRET);
+        const lifetimeHrs = (decoded.exp - decoded.iat) / 3600;
+        check("1.7 admin token capped at 12h", Math.abs(lifetimeHrs - 12) < 0.01 && r.body.expiresIn === "12h", `${lifetimeHrs.toFixed(2)}h/${r.body.expiresIn}`);
+      } catch (e) {
+        check("1.7 admin session cap", false, e.message);
+      } finally {
+        User.findOne = oF;
+      }
+    }
+
+    // 1.8 Customer sessions keep the 30d contract.
+    {
+      const user = makeUser("CUSTOMER");
+      const oF = User.findOne;
+      User.findOne = stubFindOne(user);
+      const r = makeRes();
+      try {
+        await authCtrl.login({ body: { email: "t@e.com", password: "pass123" } }, r, next);
+        const decoded = jwt.verify(r.body.token, process.env.JWT_SECRET);
+        const lifetimeDays = (decoded.exp - decoded.iat) / 86400;
+        check("1.8 customer token keeps 30d", Math.abs(lifetimeDays - 30) < 0.01 && r.body.expiresIn === "30d", `${lifetimeDays.toFixed(2)}d/${r.body.expiresIn}`);
+      } catch (e) {
+        check("1.8 customer session lifetime", false, e.message);
+      } finally {
+        User.findOne = oF;
+      }
+    }
   } catch (error) {
     check("login suite did not throw", false, (error && error.message) || String(error));
   }

@@ -127,16 +127,23 @@ exports.settlePayout = async (req, res, next) => {
     }
     const { eligible, reasons } = payoutEligibility(existing);
     if (!eligible) {
-      return res.status(400).json({ message: reasons[0], reasons });
+      return res.status(400).json({ message: reasons[0], reasons, code: "PAYOUT_NOT_ELIGIBLE" });
     }
     // One transfer, one record: a reference that already settled another
     // booking is a double-entry until proven otherwise. Compared on the
     // NORMALIZED key (case/whitespace-insensitive) — bank refs are too;
-    // the exact typed text is still stored for audit fidelity.
+    // the exact typed text is still stored for audit fidelity. Checked
+    // across BOTH families: the same offline transfer must not close a
+    // manual refund and a payout (markRefundSettled checks both directions).
     const refKey = normalizePayoutReference(reference);
-    const dup = await Booking.findOne({ "payout.referenceKey": refKey, "payout.status": "settled" }).select("_id");
+    const dup = await Booking.findOne({
+      $or: [
+        { "payout.referenceKey": refKey, "payout.status": "settled" },
+        { "payment.refundReferenceKey": refKey },
+      ],
+    }).select("_id");
     if (dup && String(dup._id) !== String(existing._id)) {
-      return res.status(409).json({ message: "This reference already settled another payout — use the unique UPI/bank transaction id" });
+      return res.status(409).json({ message: "This reference is already recorded on another payment — use the unique UPI/bank transaction id", code: "DUPLICATE_PAYOUT_REFERENCE" });
     }
     // Freeze who is being paid: the cook's CURRENT destination details.
     // Semantics (documented, not proof): this records the destination the
@@ -197,14 +204,14 @@ exports.settlePayout = async (req, res, next) => {
       // another booking settled with this reference (or its case-variant)
       // first. The uniq_payout_reference* indexes make this fail closed.
       if (e?.code === 11000) {
-        return res.status(409).json({ message: "This reference already settled another payout — use the unique UPI/bank transaction id" });
+        return res.status(409).json({ message: "This reference is already recorded on another payment — use the unique UPI/bank transaction id", code: "DUPLICATE_PAYOUT_REFERENCE" });
       }
       throw e;
     }
     if (!booking) {
       const fresh = await Booking.findById(req.params.id);
       if (fresh?.payout?.status === "settled") return res.json(fresh);
-      return res.status(409).json({ message: "Payout is already being processed — please refresh." });
+      return res.status(409).json({ message: "Payout is already being processed — please refresh.", code: "PAYOUT_ALREADY_PROCESSED" });
     }
     await recordLedger({
       idempotencyKey: `payout:${booking._id}`,
@@ -409,7 +416,7 @@ exports.approveRefund = async (req, res, next) => {
       return res.status(404).json({ message: "Booking not found" });
     }
     if (booking.payment?.refundStatus !== "pending") {
-      return res.status(400).json({ message: "Only refunds awaiting approval can be approved" });
+      return res.status(400).json({ message: "Only refunds awaiting approval can be approved", code: "REFUND_NOT_ELIGIBLE" });
     }
     // Validate BEFORE claiming: amount caps, test-mode routing, and the
     // settled-payout clawback gate are all pure checks on the queued state.
@@ -419,7 +426,7 @@ exports.approveRefund = async (req, res, next) => {
     const clawback = req.body?.clawback === true;
     const pre = refundApprovalCheck(booking, { clawback });
     if (!pre.ok) {
-      return res.status(400).json({ message: pre.reasons[0], reasons: pre.reasons });
+      return res.status(400).json({ message: pre.reasons[0], reasons: pre.reasons, code: "REFUND_NOT_ELIGIBLE" });
     }
     let approvedAmount = pre.amount;
     let partial = false;
@@ -429,11 +436,11 @@ exports.approveRefund = async (req, res, next) => {
       // would round to an amount the admin never typed. Rejected loudly.
       const parsed = parseRupeeAmount(req.body.amount, { label: "Approved amount" });
       if (!parsed.ok) {
-        return res.status(400).json({ message: parsed.error });
+        return res.status(400).json({ message: parsed.error, code: "REFUND_AMOUNT_INVALID" });
       }
       const cap = maxRefundable(booking);
       if (parsed.value > cap) {
-        return res.status(400).json({ message: `Refund of ₹${parsed.value} exceeds the refundable ₹${cap}` });
+        return res.status(400).json({ message: `Refund of ₹${parsed.value} exceeds the refundable ₹${cap}`, code: "REFUND_AMOUNT_INVALID" });
       }
       approvedAmount = parsed.value;
       partial = parsed.value < pre.amount;
@@ -453,7 +460,7 @@ exports.approveRefund = async (req, res, next) => {
       { new: true }
     );
     if (!claimed) {
-      return res.status(400).json({ message: "This refund is already being processed — please refresh." });
+      return res.status(400).json({ message: "This refund is already being processed — please refresh.", code: "REFUND_ALREADY_PROCESSED" });
     }
     // Whether a settled payout actually backs the clawback flag: a flag set
     // on an UNsettled payout must not fabricate a "was already settled"
@@ -911,7 +918,7 @@ exports.markRefundSettled = async (req, res, next) => {
         .lean();
     }
     if (dup) {
-      return res.status(409).json({ message: "This reference already settled another payout or refund — use the unique UPI/bank transaction id" });
+      return res.status(409).json({ message: "This reference already settled another payout or refund — use the unique UPI/bank transaction id", code: "DUPLICATE_PAYOUT_REFERENCE" });
     }
     const prevStatus = booking.payment.refundStatus;
     // Atomic close (not read-modify-save): a concurrent approval/retry
@@ -940,14 +947,14 @@ exports.markRefundSettled = async (req, res, next) => {
       // Unique-index collision on the reference key: another refund (or a
       // concurrent double-click) recorded the same transfer first.
       if (e?.code === 11000) {
-        return res.status(409).json({ message: "This reference already settled another payout or refund — use the unique UPI/bank transaction id" });
+        return res.status(409).json({ message: "This reference already settled another payout or refund — use the unique UPI/bank transaction id", code: "DUPLICATE_PAYOUT_REFERENCE" });
       }
       throw e;
     }
     if (!closed) {
       const fresh = await Booking.findById(req.params.id);
       if (fresh?.payment?.refundStatus === "processed") return res.json(fresh);
-      return res.status(409).json({ message: "This refund was just updated — please refresh to see its current state." });
+      return res.status(409).json({ message: "This refund was just updated — please refresh to see its current state.", code: "REFUND_ALREADY_PROCESSED" });
     }
     await recordLedger({
       idempotencyKey: `refund-settled:${closed._id}`,

@@ -34,14 +34,20 @@ const normalizeRole = (v) => {
 };
 
 const generateToken = (user, persistent = true) => {
+  // Admin sessions are capped at 12h even when "keep me signed in" is set:
+  // admins hold financial powers (refunds, payouts, user deletion), so a
+  // stolen admin token must expire in hours, not 30 days. No MFA exists yet
+  // (see docs), so the short lifetime is the backstop. Customers/cooks keep
+  // the existing 30d/1d contract.
+  const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN";
   return jwt.sign(
     // tv (token version): bumped on password reset so pre-reset tokens stop
     // verifying immediately (see middleware/auth.js). Defaults to 0.
     { id: user._id, role: user.role, tv: Number(user.tokenVersion) || 0 },
     process.env.JWT_SECRET,
     // "Keep me signed in" unchecked => short-lived 1-day session token;
-    // checked (default) => 30-day persistent token.
-    { expiresIn: persistent === false ? "1d" : "30d" }
+    // checked (default) => 30-day persistent token (12h cap for admins).
+    { expiresIn: isAdmin ? "12h" : persistent === false ? "1d" : "30d" }
   );
 };
 
@@ -94,10 +100,10 @@ const clearLoginFails = (email) => {
 // token is kept during migration for older clients; new clients prefer the
 // cookie (axios withCredentials) and never touch localStorage.
 const SESSION_COOKIE = "__Host-cm_session";
-const setSessionCookie = (res, token, persistent = true) => {
+const setSessionCookie = (res, token, persistent = true, maxAgeSec = null) => {
   try {
     const isProd = process.env.NODE_ENV === "production";
-    const maxAge = (persistent === false ? 1 : 30) * 24 * 60 * 60;
+    const maxAge = maxAgeSec ?? (persistent === false ? 1 : 30) * 24 * 60 * 60;
     const parts = [
       `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
       "Path=/",
@@ -281,11 +287,13 @@ exports.login = async (req, res, next) => {
     clearLoginFails(email);
 
     // Keep token payload and toUserPayload role identical (UPPERCASE) so
-    // authorize() and frontend role checks agree.
+    // authorize() and frontend role checks agree. Admin sessions are capped
+    // at 12h (see generateToken) — report the real lifetime.
     const token = generateToken(user, persistent);
     const me = toUserPayload(user);
-    setSessionCookie(res, token, persistent);
-    res.json({ token, user: me, expiresIn: persistent ? "30d" : "1d" });
+    const isAdminSession = String(user.role || "").toUpperCase() === "ADMIN";
+    setSessionCookie(res, token, persistent, isAdminSession ? 12 * 60 * 60 : null);
+    res.json({ token, user: me, expiresIn: isAdminSession ? "12h" : persistent ? "30d" : "1d" });
   } catch (error) {
     next(error);
   }
@@ -389,8 +397,9 @@ exports.googleAuth = async (req, res, next) => {
     }
 
     const token = generateToken(user);
-    setSessionCookie(res, token, true);
-    res.json({ token, user: toUserPayload(user) });
+    const isAdminSession = String(user.role || "").toUpperCase() === "ADMIN";
+    setSessionCookie(res, token, true, isAdminSession ? 12 * 60 * 60 : null);
+    res.json({ token, user: toUserPayload(user), expiresIn: isAdminSession ? "12h" : "30d" });
   } catch (error) {
     next(error);
   }
@@ -778,8 +787,14 @@ exports.adminSetUserStatus = async (req, res, next) => {
   }
 };
 
-// Admin: permanently delete a customer/cook account along with the data it
-// owns (cook profile, availability slots, notifications, reviews, bookings).
+// Admin: permanently delete a customer/cook account.
+//
+// FINANCIAL SAFETY: accounts with booking history are NEVER hard-deleted —
+// bookings embed payment/refund/payout subdocuments and ledger rows,
+// reviews and notifications reference the account, so a cascade delete
+// would destroy auditable money history. Deletion is refused with 400 when
+// any booking exists; pass `{ anonymize: true }` to suspend + scrub PII
+// instead (refs stay intact, history stays auditable).
 exports.adminDeleteUser = async (req, res, next) => {
   try {
     const target = await User.findById(req.params.id);
@@ -794,13 +809,47 @@ exports.adminDeleteUser = async (req, res, next) => {
     const Review = require("../models/Review");
     const Notification = require("../models/Notification");
 
-    // Cascade-delete everything owned by or linked to this account so no
-    // orphaned records are left behind.
+    const bookingCount = await Booking.countDocuments({
+      $or: [{ customer: target._id }, { cook: target._id }],
+    });
+
+    if (bookingCount > 0 && req.body?.anonymize !== true) {
+      return res.status(400).json({
+        message:
+          "This account has booking history (payments, refunds, payouts) and cannot be permanently deleted — suspend it instead, or re-send with { anonymize: true } to suspend and scrub personal data while keeping auditable records.",
+        code: "ACCOUNT_HAS_FINANCIAL_HISTORY",
+        bookings: bookingCount,
+      });
+    }
+
+    if (bookingCount > 0) {
+      // Soft path: suspend + scrub PII, keep every _id reference intact so
+      // bookings, ledger rows, reviews and notifications stay auditable.
+      const tag = String(target._id).slice(-6);
+      target.status = "suspended";
+      target.name = "Deleted User";
+      target.email = `deleted_${tag}@deleted.local`;
+      target.phone = "";
+      target.mobile = "";
+      target.address = "";
+      // Invalidate all sessions (same mechanism as password reset).
+      target.tokenVersion = Number(target.tokenVersion || 0) + 1;
+      await target.save();
+      // Non-financial clutter tied to the account can still go.
+      await Availability.deleteMany({ cook: target._id });
+      return res.json({
+        message: `Account anonymized and suspended — ${bookingCount} booking record(s) preserved for audit`,
+        id: target._id,
+        anonymized: true,
+      });
+    }
+
+    // No bookings: cascade-delete everything owned by or linked to this
+    // account so no orphaned records are left behind.
     await CookProfile.deleteMany({ user: target._id });
     await Availability.deleteMany({ cook: target._id });
     await Notification.deleteMany({ user: target._id });
     await Review.deleteMany({ $or: [{ customer: target._id }, { cook: target._id }] });
-    await Booking.deleteMany({ $or: [{ customer: target._id }, { cook: target._id }] });
 
     await target.deleteOne();
 

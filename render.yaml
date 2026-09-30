@@ -10,7 +10,10 @@ services:
     rootDir: .
     buildCommand: cd frontend && npm ci && npm run build && cd ../backend && npm ci
     startCommand: cd backend && node server.js
-    healthCheckPath: /api/health
+    # Readiness gate (not just liveness): /api/ready returns 200 only when
+    # MongoDB is connected, so Render stops routing to DB-down instances
+    # instead of serving financial operations in a degraded state.
+    healthCheckPath: /api/ready
     envVars:
       - key: NODE_ENV
         value: production
@@ -66,8 +69,8 @@ services:
       # replicas multiply every bucket by N. The buckets named here are backed
       # by a small MongoDB collection instead (no Redis needed), which keeps
       # the security-critical ones exact across the fleet.
-      # Default "auth,strict"; use "all" to share every bucket (heavier).
+      # Default "auth,strict,otp"; use "all" to share every bucket (heavier).
       # - key: RATE_LIMIT_SHARED
-      #   value: "auth,strict"
+      #   value: "auth,strict,otp"
       # NOTE: the server writes uploads to local disk, so multiple
       # instances need a shared/object store (S3/R2) before scaling out.

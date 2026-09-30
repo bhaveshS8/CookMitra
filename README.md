@@ -48,10 +48,9 @@ MERN monorepo: `backend/` (Express + MongoDB API, serves uploaded docs) and `fro
    Then edit `.env`: set `NODE_ENV=production`, `MONGODB_URI` (Atlas SRV URI),
    live `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` (from
    https://dashboard.razorpay.com/app/keys), `RAZORPAY_WEBHOOK_SECRET`,
-   `GOOGLE_CLIENT_ID`, and `REACT_APP_API_URL=/api`. Leave
-   `ALLOW_TEST_PAYMENTS` unset/false — the server refuses to boot in
-   production while it is `true`. For real-money deploys also set
-   `REQUIRE_PAYMENTS=true` so boot fails fast when payment config is missing.
+    `GOOGLE_CLIENT_ID`, and `REACT_APP_API_URL=/api`. For real-money deploys
+    also set `REQUIRE_PAYMENTS=true` so boot fails fast when payment config
+    is missing.
 4. Start the application:
    ```bash
    docker compose up --build -d
@@ -77,7 +76,6 @@ MERN monorepo: `backend/` (Express + MongoDB API, serves uploaded docs) and `fro
 
 - [ ] `NODE_ENV=production`, strong `JWT_SECRET` (never commit it).
 - [ ] Razorpay **live** keys + webhook secret configured; webhook endpoint `POST <your-domain>/api/payments/webhook` registered in the Razorpay dashboard.
-- [ ] `ALLOW_TEST_PAYMENTS` unset/false in production.
 - [ ] Google Sign-In: add your production domain to the OAuth client's Authorized JavaScript origins in Google Cloud Console, and match `GOOGLE_CLIENT_ID` (backend) with `REACT_APP_GOOGLE_CLIENT_ID` (frontend build env).
 - [ ] Persistent volume mounted for `backend/uploads`.
 - [ ] HTTPS via your platform (the app sets `trust proxy`, so `req.secure` behaves correctly behind load balancers).

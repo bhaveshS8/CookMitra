@@ -96,10 +96,10 @@ const generalLimiter = rateLimit({
   store: rateLimitStore("general"),
   windowMs: 60 * 1000,
   max: Number(process.env.RATE_LIMIT_GENERAL || 300),
-  // Health checks must never be throttled: load balancers / uptime monitors
-  // poll this path from a single IP and would otherwise exhaust the bucket
-  // (and get a 429 instead of the DB status they need).
-  skip: (req) => req.path === "/api/health",
+  // Health/readiness checks must never be throttled: load balancers / uptime
+  // monitors poll these paths from a single IP and would otherwise exhaust
+  // the bucket (and get a 429 instead of the status they need).
+  skip: (req) => req.path === "/api/health" || req.path === "/api/ready",
   message: { message: "Too many requests — please slow down and retry." },
 });
 const authLimiter = rateLimit({
@@ -137,7 +137,7 @@ app.use(compression({ threshold: 1024 }));
   );
 }
 
-// ---- Production config validation (warn loudly, never crash) ----
+// ---- Production config validation (fail closed on security-critical gaps) ----
 if (process.env.NODE_ENV === "production") {
   const jwt = process.env.JWT_SECRET || "";
   if (
@@ -147,12 +147,7 @@ if (process.env.NODE_ENV === "production") {
     jwt.length < 32
   ) {
     console.error(
-      "CONFIG WARNING: JWT_SECRET is missing, a placeholder, or too short (<32 chars). Set a long random secret (e.g. `openssl rand -hex 32`) or all logins will be insecure/unstable."
-    );
-  }
-  if (process.env.ALLOW_TEST_PAYMENTS === "true") {
-    console.error(
-      "CONFIG ERROR: ALLOW_TEST_PAYMENTS=true is set while NODE_ENV=production. Refusing to start: test-mode checkout must never be enabled on the live site. Unset the variable and restart."
+      "CONFIG ERROR: JWT_SECRET is missing, a placeholder, or too short (<32 chars). Refusing to start: every session token depends on this secret. Set a long random secret (e.g. `openssl rand -hex 32`) and restart."
     );
     process.exit(1);
   }
@@ -163,10 +158,17 @@ if (process.env.NODE_ENV === "production") {
   }
   try {
     // Reuse the same placeholder detection as the payments route.
-    const { isConfigured } = require("./config/razorpay");
+    const { isConfigured, keyId } = require("./config/razorpay");
     if (!isConfigured) {
       console.warn(
         "CONFIG NOTICE: Razorpay keys missing/placeholder — POST /api/payments/order will return 503 until real RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET are set."
+      );
+    } else if (String(keyId || "").startsWith("rzp_test_")) {
+      // Test keys authenticate against Razorpay's sandbox only: live
+      // traffic would fail at checkout. Loud prod warning (not a boot
+      // refusal — same-origin staging builds legitimately run test keys).
+      console.warn(
+        "CONFIG WARNING: RAZORPAY_KEY_ID is a TEST key while NODE_ENV=production — live checkout requires rzp_live_ keys. Set live keys or expect payment failures."
       );
     }
   } catch {
@@ -199,6 +201,19 @@ if (process.env.NODE_ENV === "production") {
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
     console.warn(
       "CONFIG NOTICE: SMTP_HOST/SMTP_USER are not set — password-reset emails cannot be delivered (users get a generic message and no link arrives). Set SMTP_HOST/PORT/USER/PASS/FROM to enable."
+    );
+    // Opt-in hard gate: with REQUIRE_SMTP=true the process refuses to boot
+    // without mail delivery, so password-reset can never silently break.
+    if (process.env.REQUIRE_SMTP === "true") {
+      console.error(
+        "CONFIG ERROR: REQUIRE_SMTP=true but SMTP_HOST/SMTP_USER are missing. Refusing to start."
+      );
+      process.exit(1);
+    }
+  }
+  if (!process.env.WHATSAPP_TOKEN || !process.env.WHATSAPP_PHONE_NUMBER_ID) {
+    console.warn(
+      "CONFIG NOTICE: WHATSAPP_TOKEN/WHATSAPP_PHONE_NUMBER_ID are not set — automatic WhatsApp notifications are disabled (in-app notifications + wa.me share links still work). See docs/WHATSAPP_SETUP.md to enable."
     );
   }
 }
@@ -262,9 +277,31 @@ app.use(
 // before express.json() (body-parser skips bodies that are already parsed,
 // so the JSON parser below leaves webhook requests untouched).
 app.use("/api/payments/webhook", express.raw({ type: "application/json", limit: "100kb" }));
+// Same for the WhatsApp inbound webhook (X-Hub-Signature-256 over raw bytes).
+app.use("/api/whatsapp/webhook", express.raw({ type: "application/json", limit: "100kb" }));
 // Bounded JSON bodies: a 10MB default lets one client burn memory per request.
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: false, limit: "100kb" }));
+// Request IDs: every request gets a correlation id (client-supplied
+// X-Request-Id is echoed only when it looks like an id, otherwise minted).
+// Included in access logs and 5xx error logs so a payment can be traced
+// across checkout → webhook → refund → payout. Never logged with secrets.
+const crypto = require("crypto");
+let requestCounter = 0;
+app.use((req, res, next) => {
+  try {
+    const incoming = String(req.header("x-request-id") || "").trim().slice(0, 64);
+    const id =
+      /^[A-Za-z0-9_-]{8,64}$/.test(incoming)
+        ? incoming
+        : `${Date.now().toString(36)}-${(requestCounter = (requestCounter + 1) % 1e6).toString(36)}-${crypto.randomBytes(4).toString("hex")}`;
+    req.id = id;
+    res.setHeader("X-Request-Id", id);
+  } catch {
+    // never block a request on observability
+  }
+  next();
+});
 // Scrub single-purpose doc tokens out of access logs: the signed URL query
 // (?docToken=) must never be persisted to log files (P0-2). Session JWTs are
 // never in URLs anymore, so nothing else needs scrubbing.
@@ -272,10 +309,11 @@ morgan.token("scrubbed-url", (req) => {
   const url = req.originalUrl || req.url || "";
   return url.replace(/([?&]docToken=)[^&\s]*/g, "$1[REDACTED]");
 });
+morgan.token("req-id", (req) => req.id || "-");
 app.use(
-  morgan(isProduction ? ':remote-addr - :remote-user [:date[clf]] ":method :scrubbed-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"' : "dev", {
+  morgan(isProduction ? ':remote-addr - :remote-user [:date[clf]] ":method :scrubbed-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent" req=:req-id' : "dev", {
     // Keep health-check noise out of production logs.
-    skip: (req) => req.path === "/api/health" && isProduction,
+    skip: (req) => (req.path === "/api/health" || req.path === "/api/ready") && isProduction,
   })
 );
 
@@ -352,6 +390,7 @@ app.use("/api/availability", require("./routes/availability"));
 app.use("/api/reviews", require("./routes/reviews"));
 app.use("/api/complaints", require("./routes/complaints"));
 app.use("/api/notifications", require("./routes/notifications"));
+app.use("/api/whatsapp", require("./routes/whatsapp"));
 app.use("/api/leads", require("./routes/leads"));
 app.use("/api/coupons", require("./routes/coupons"));
 app.use("/api/analytics", require("./routes/analytics"));
@@ -371,6 +410,17 @@ app.get("/api/health", (req, res) => {
     db: states[mongoose.connection.readyState] ?? "unknown",
     timestamp: new Date().toISOString(),
   });
+});
+
+// Readiness (for load-balancer gating): 200 only when the database is
+// connected. Liveness (/api/health) stays 200 while the process retries the
+// connection in the background — readiness stops traffic instead, so
+// financial operations never run against a partially-connected store.
+app.get("/api/ready", (req, res) => {
+  if (mongoose.connection.readyState === 1) {
+    return res.json({ ready: true, timestamp: new Date().toISOString() });
+  }
+  return res.status(503).json({ ready: false, db: "disconnected" });
 });
 
 // ---- Static frontend (single-service deployment) ----

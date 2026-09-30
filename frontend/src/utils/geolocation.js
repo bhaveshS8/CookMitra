@@ -36,7 +36,9 @@ const singleShot = (options) =>
 // Watch GPS briefly and keep the most accurate fix (lowest accuracy number).
 // Resolves early once a GOOD fix arrives, otherwise resolves with the best
 // fix seen when `watchMs` elapses. Rejects only if no fix at all arrives.
-const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M } = {}) =>
+// Stale fixes (older than `maxAgeMs`) are ignored so a cached network pin
+// from hours ago can never win over a fresh, slightly coarser fix.
+const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M, maxAgeMs = 120000 } = {}) =>
   new Promise((resolve, reject) => {
     let best = null;
     let done = false;
@@ -56,6 +58,9 @@ const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M } = {}) =>
     };
 
     const onFix = (pos) => {
+      // Drop stale cached fixes — some devices hand watchPosition a fix
+      // timestamped minutes/hours ago on the first callback.
+      if (Number.isFinite(pos.timestamp) && Date.now() - pos.timestamp > maxAgeMs) return;
       const candidate = {
         lat: pos.coords.latitude,
         lng: pos.coords.longitude,
@@ -99,7 +104,18 @@ const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M } = {}) =>
 // Never throws — callers always keep the pin and ask the user to type what's
 // missing. Uses BigDataCloud (fast, keyless) + Nominatim (street-level detail).
 export const reverseGeocode = async (lat, lng) => {
-  const out = { city: "", area: "", state: "", street: "", suburb: "", postcode: "" };
+  const out = {
+    city: "",
+    area: "",
+    state: "",
+    street: "",
+    suburb: "",
+    postcode: "",
+    // Exact-address parts (house number, full display name). Empty when the
+    // providers return only area-level data — callers fall back gracefully.
+    houseNumber: "",
+    displayName: "",
+  };
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return out;
 
   const fromBigDataCloud = (async () => {
@@ -125,7 +141,8 @@ export const reverseGeocode = async (lat, lng) => {
         `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=18&addressdetails=1`
       );
       if (!r.ok) return {};
-      const a = (await r.json()).address || {};
+      const body = await r.json();
+      const a = body.address || {};
       return {
         city: a.city || a.town || a.village || a.county || a.state || "",
         area: a.suburb || a.neighbourhood || a.hamlet || a.quarter || a.residential || "",
@@ -133,6 +150,8 @@ export const reverseGeocode = async (lat, lng) => {
         street: a.road || "",
         suburb: a.suburb || a.neighbourhood || a.hamlet || "",
         postcode: a.postcode || "",
+        houseNumber: a.house_number || "",
+        displayName: body.display_name || "",
       };
     } catch {
       return {};
@@ -146,6 +165,8 @@ export const reverseGeocode = async (lat, lng) => {
   out.street = nomi.street || "";
   out.suburb = nomi.suburb || "";
   out.postcode = bdc.postcode || nomi.postcode || "";
+  out.houseNumber = nomi.houseNumber || "";
+  out.displayName = nomi.displayName || "";
   return out;
 };
 

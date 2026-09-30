@@ -280,7 +280,7 @@ bookingSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      "payment.razorpayPaymentId": { $exists: true, $ne: "" },
+      "payment.razorpayPaymentId": { $exists: true, $gt: "" },
     },
     name: "uniq_payment_razorpayPaymentId",
   }
@@ -294,26 +294,25 @@ bookingSchema.index(
     name: "idx_payment_razorpayOrderId",
   }
 );
-// Idempotency-key lookup for booking-creation retries. Unique + sparse +
-// partial so only non-empty keys are constrained.
+// Idempotency-key lookup for booking-creation retries. Unique + partial so
+// only non-empty keys are constrained. (No `sparse`: MongoDB rejects
+// sparse+partial combinations — partial alone already excludes the rest.)
 bookingSchema.index(
   { clientKey: 1 },
   {
     unique: true,
-    sparse: true,
-    partialFilterExpression: { clientKey: { $exists: true, $ne: "" } },
+    partialFilterExpression: { clientKey: { $exists: true, $gt: "" } },
     name: "uniq_booking_clientKey",
   }
 );
 // Offline payout references are admin-typed: the same reference settling two
 // bookings is one transfer recorded twice (or a double-click). Unique +
-// sparse + partial so empty references never collide.
+// partial so empty references never collide (no `sparse`: see above).
 bookingSchema.index(
   { "payout.reference": 1 },
   {
     unique: true,
-    sparse: true,
-    partialFilterExpression: { "payout.reference": { $exists: true, $ne: "" } },
+    partialFilterExpression: { "payout.reference": { $exists: true, $gt: "" } },
     name: "uniq_payout_reference",
   }
 );
@@ -324,8 +323,7 @@ bookingSchema.index(
   { "payout.referenceKey": 1 },
   {
     unique: true,
-    sparse: true,
-    partialFilterExpression: { "payout.referenceKey": { $exists: true, $ne: "" } },
+    partialFilterExpression: { "payout.referenceKey": { $exists: true, $gt: "" } },
     name: "uniq_payout_reference_key",
   }
 );
@@ -336,8 +334,7 @@ bookingSchema.index(
   { "payment.refundReferenceKey": 1 },
   {
     unique: true,
-    sparse: true,
-    partialFilterExpression: { "payment.refundReferenceKey": { $exists: true, $ne: "" } },
+    partialFilterExpression: { "payment.refundReferenceKey": { $exists: true, $gt: "" } },
     name: "uniq_refund_reference_key",
   }
 );

@@ -223,9 +223,10 @@ const withFallback = (primary, fallback) => {
 
 // Buckets that get a shared (database-backed) counter. Everything else stays
 // in-memory: see the header for why the high-volume buckets must not gain a
-// database write per request.
-const DEFAULT_SHARED_BUCKETS = "auth,strict";
-const ALL_BUCKETS = ["general", "auth", "strict", "visit"];
+// database write per request. "otp" is shared by default: the service-start
+// code is 4 digits, so its IP throttle must hold across replicas.
+const DEFAULT_SHARED_BUCKETS = "auth,strict,otp";
+const ALL_BUCKETS = ["general", "auth", "strict", "visit", "otp"];
 
 const sharedBuckets = () => {
   const raw = String(process.env.RATE_LIMIT_SHARED ?? DEFAULT_SHARED_BUCKETS);

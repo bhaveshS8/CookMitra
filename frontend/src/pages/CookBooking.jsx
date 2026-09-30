@@ -180,8 +180,15 @@ const CookBooking = () => {
   const [coords, setCoords] = useState(null);
   const [copied, setCopied] = useState(false);
   const [savedLocations, setSavedLocations] = useState([]);
+  // True once the saved-locations fetch settles (either outcome) — lets the
+  // autofill effects know a past booking can no longer claim the fields.
+  const [savedLoaded, setSavedLoaded] = useState(false);
   const [savedIdx, setSavedIdx] = useState("");
   const autoFilled = useRef(false);
+  // Set when the customer explicitly picks a previous place from the saved
+  // dropdown — that choice owns the map pin (its own saved pin, or none), so
+  // the detected-location effect must never override it afterwards.
+  const explicitPlacePick = useRef(false);
   const venueErrorRef = useRef(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const scrollToVenueError = () =>
@@ -207,27 +214,57 @@ const CookBooking = () => {
   // Cooks offering the chosen service (0 = none exist, vs slots just full).
   const [totalCooksFound, setTotalCooksFound] = useState(null);
 
-  // Header-detected place (GPS / IP / manual) pre-fills address fields when
-  // they are still empty — typed or previously-saved input always wins.
+  // Header-detected place (GPS / IP / manual): the detected pin is attached
+  // to the booking whenever the fix carries real coordinates — it reaches the
+  // cook as a Google Maps link (payload.location) even when the address
+  // fields were filled from the profile address or a previous booking. The
+  // saved-places dropdown is the only override: an explicit pick carries its
+  // own pin (or clears the pin when that saved entry has none). Address
+  // fields are pre-filled only when still empty — typed or previously-saved
+  // input always wins, and a stale (>12 h) stored fix never fills them.
   useEffect(() => {
+    const hasFix =
+      Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng);
+    // Reverse-geocoding can fail while the GPS fix itself is valid — the pin
+    // must still go through (coordinates are all the cook's navigation needs).
+    if (!hasFix && !siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
+    // Pin first: a detected fix with real coordinates is attached for the
+    // cook's navigation even while profile/saved address sources settle.
+    if (hasFix && !explicitPlacePick.current) {
+      setCoords((c) => c || { lat: siteLocation.lat, lng: siteLocation.lng });
+    }
     if (!siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
-    // Logged-in customers: hold off until the profile address (which wins the
-    // auto-fill priority) has loaded — otherwise a brief race lets the
-    // detected location fill fields the profile address should own.
-    if (user?.role === "customer" && user?.address === undefined) return;
+    // Saved pins older than 12 h are not reused as today's venue: the header
+    // pill still shows them, but the form waits for a fresh detect or for the
+    // customer to type the address (last week's address is usually wrong).
+    // Fresh fixes carry a `timestamp`/`savedAt` of just now, so they pass.
+    const stamp = Number(siteLocation?.savedAt || siteLocation?.timestamp || 0);
+    if (stamp && Date.now() - stamp > 12 * 60 * 60 * 1000) return;
+    // Address fields are owned by the profile address, else by the most
+    // recent saved booking (previous effect). Detection only fills what is
+    // left: guests right away, customers once both sources had their chance
+    // and neither exists.
+    if (autoFilled.current) return;
+    if (user?.role === "customer") {
+      const profileAddr = String(user?.address || "").trim();
+      if (profileAddr || savedLocations.length > 0 || user?.address === undefined || !savedLoaded) return;
+    }
+    autoFilled.current = true;
     setForm((f) => {
       if (f.flatNo || f.society || f.landmark || f.city) return f;
+      // Door-level line (house + street) fills "Flat / House no." when the fix
+      // really carried a house number — a bare road/area name belongs in the
+      // society/landmark fields, never in the flat field.
+      const exact = siteLocation.hasHouseNumber ? (siteLocation.exactLine || "").trim() : "";
       return {
         ...f,
+        flatNo: exact || f.flatNo,
         city: f.city.trim() ? f.city : siteLocation.city || "",
         society: f.society.trim() ? f.society : siteLocation.area || "",
         landmark: f.landmark.trim() ? f.landmark : siteLocation.street || siteLocation.area || "",
       };
     });
-    if (Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng)) {
-      setCoords((c) => c || { lat: siteLocation.lat, lng: siteLocation.lng });
-    }
-  }, [siteLocation?.city, siteLocation?.area, siteLocation?.state, siteLocation?.street, siteLocation?.lat, siteLocation?.lng, user?.role, user?.address]);
+  }, [siteLocation?.city, siteLocation?.area, siteLocation?.state, siteLocation?.street, siteLocation?.exactLine, siteLocation?.hasHouseNumber, siteLocation?.timestamp, siteLocation?.savedAt, siteLocation?.lat, siteLocation?.lng, user?.role, user?.address, savedLoaded, savedLocations]);
 
   /* ── Profile address (locked summary card + Edit button) ── */
   const profileAddress = String(user?.address || "").trim();
@@ -255,14 +292,14 @@ const CookBooking = () => {
 
   // Previous locations of this customer for one-tap reuse (customers only).
   useEffect(() => {
-    if (user?.role !== "customer") return;
+    if (user?.role !== "customer") { setSavedLoaded(true); return; }
     let cancelled = false;
     API.get("/bookings/my/locations")
       .then((res) => {
-        if (!cancelled) setSavedLocations(res.data || []);
+        if (!cancelled) { setSavedLocations(res.data || []); setSavedLoaded(true); }
       })
       .catch(() => {
-        if (!cancelled) setSavedLocations([]);
+        if (!cancelled) { setSavedLocations([]); setSavedLoaded(true); }
       });
     return () => {
       cancelled = true;
@@ -272,6 +309,7 @@ const CookBooking = () => {
   const applySavedLocation = (idx) => {
     const saved = savedLocations[Number(idx)];
     if (!saved) return;
+    explicitPlacePick.current = true;
     const d = saved.addressDetails || {};
     // Explicit pick always replaces the auto-filled address block (header
     // detection or a previously applied entry) — the saved entry is
@@ -307,11 +345,7 @@ const CookBooking = () => {
   // Auto-fill priority: profile address > most recent previous booking
   // (an explicit pick from the dropdown above always wins once made).
   useEffect(() => {
-    if (autoFilled.current) return;
-    // Wait for the customer's profile to settle (address key resolved) so the
-    // profile address can claim priority over saved bookings.
-    if (user?.role === "customer" && user?.address === undefined) return;
-    autoFilled.current = true;
+    if (autoFilled.current || user?.role !== "customer") return;
     const fill = (src) =>
       setForm((f) => {
         if (f.flatNo || f.society || f.landmark || f.city) return f;
@@ -325,6 +359,10 @@ const CookBooking = () => {
       });
     const profileAddr = String(user?.address || "").trim();
     if (profileAddr) {
+      // The profile address is top priority and never waits for the saved-
+      // locations fetch: while it waited, the detected-location effect could
+      // claim the fields first and the profile address would never fill.
+      autoFilled.current = true;
       // Split "Flat 402, Sunshine Society, Baner, Pune" into the form fields,
       // same heuristic as applySavedLocation for unstructured addresses.
       const parts = profileAddr.split(",").map((p) => p.trim()).filter(Boolean);
@@ -337,13 +375,18 @@ const CookBooking = () => {
       );
       return;
     }
+    // No profile address: wait for /auth/me (address key) and the saved list
+    // before letting the detected-location effect take the fields, so a past
+    // booking can still outrank detection.
+    if (user?.address === undefined || !savedLoaded) return;
     if (savedLocations.length === 0) return;
+    autoFilled.current = true;
     fill(savedLocations[0].addressDetails || {});
     setSavedIdx("0");
     if (savedLocations[0].location?.lat != null) {
       setCoords({ lat: savedLocations[0].location.lat, lng: savedLocations[0].location.lng });
     }
-  }, [savedLocations, user?.role, user?.address]);
+  }, [savedLocations, savedLoaded, user?.role, user?.address]);
 
   const mapsLink = coords
     ? `https://www.google.com/maps?q=${coords.lat},${coords.lng}`

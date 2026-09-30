@@ -1,0 +1,8 @@
+﻿img-src 'self' data: blob: https://*.googleusercontent.com https://cdn.razorpay.com
+script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://accounts.google.com https://apis.google.com
+script-src-attr 'none'
+style-src 'self' 'unsafe-inline' https://fonts.googleapis.com
+connect-src 'self' https://api.razorpay.com https://checkout.razorpay.com https://cdn.razorpay.com https://accounts.google.com
+frame-src 'self' https://checkout.razorpay.com https://api.razorpay.com
+HEALTH: {"status":"ok","db":"connected","timestamp":"2026-09-30T05:57:02.351Z"}
+GOOGLE: 400 

@@ -3,6 +3,8 @@ import {
   getCurrentPositionRobust,
   reverseGeocode,
   formatLocationLabel,
+  formatAccuracy,
+  accuracyGrade,
   fetchIpLocation,
 } from "../utils/geolocation";
 
@@ -53,11 +55,23 @@ export const initLocation = createAsyncThunk(
 // Only call from a user gesture or the one first-visit auto-attempt.
 export const requestPreciseLocation = createAsyncThunk(
   "location/requestPrecise",
-  async (_, { rejectWithValue }) => {
+  async (opts, { rejectWithValue }) => {
     try {
+      // Allow a re-detect to keep refining even when a stored label already
+      // exists: callers pass { forceRefine: true } so an old coarse/stale
+      // fix is replaced by a fresher, tighter one instead of being kept.
+      const forceRefine = Boolean(opts?.forceRefine);
       const c = await getCurrentPositionRobust();
       const geo = await reverseGeocode(c.lat, c.lng);
       const area = geo.area || geo.suburb || geo.street || "";
+      const grade = accuracyGrade(c.accuracy);
+      // Exact address line for the booking form: house + street first, then
+      // the provider's full display name. A poor fix (>150 m) is area-level —
+      // its "nearest house number" can be a neighbour's gate — so no line is
+      // exposed for it and the amber note asks for a re-detect instead.
+      const houseLine = [geo.houseNumber, geo.street].filter(Boolean).join(" ").trim();
+      const displayShort = geo.displayName ? String(geo.displayName).split(",").slice(0, 2).join(",").trim() : "";
+      const exactOk = grade !== "poor";
       const label =
         formatLocationLabel({ area, city: geo.city, state: geo.state }) || "Current location";
       const next = {
@@ -65,13 +79,47 @@ export const requestPreciseLocation = createAsyncThunk(
         city: geo.city || "",
         area,
         state: geo.state || "",
+        street: geo.street || "",
+        postcode: geo.postcode || "",
+        // Pre-composed exact venue parts the booking form can adopt directly.
+        exactLine: exactOk ? houseLine || displayShort || "" : "",
+        // True only when exactLine really starts with a house number, so the
+        // booking form never puts a road/area name into "Flat / House no.".
+        hasHouseNumber: exactOk && Boolean(geo.houseNumber),
+        displayName: geo.displayName || "",
+        // Amber hint shown once by the picker (rides on the location, not on
+        // `error`, so real errors and accuracy notes never double up).
+        accuracyNote:
+          grade === "poor"
+            ? `GPS accuracy is ${formatAccuracy(c.accuracy)} — the pin is approximate. Step outdoors with a clear sky view and re-detect for an exact address.`
+            : grade === "fair"
+              ? `GPS accuracy is ${formatAccuracy(c.accuracy)} — close, but re-detect outdoors if the house number looks off.`
+              : "",
         lat: c.lat,
         lng: c.lng,
         accuracy: c.accuracy ?? null,
         timestamp: c.timestamp || Date.now(),
         source: "gps",
       };
+      // A poor fix (>150 m) is area-level, not exact: do NOT overwrite a
+      // stored exact pin with it — surface it as a refine hint instead.
+      if (grade === "poor" && !forceRefine) {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          const prev = raw ? JSON.parse(raw) : null;
+          if (prev && Number.isFinite(prev.lat) && Number.isFinite(prev.lng)) {
+            return {
+              location: { ...prev, source: prev.source || "stored" },
+              error: `GPS is approximate right now (${formatAccuracy(next.accuracy)}) — kept your saved pin. Step outdoors and tap Re-detect for an exact fix.`,
+            };
+          }
+        } catch {
+          // ignore — fall through and keep the fresh fix
+        }
+      }
       persist(next);
+      // `error` is reserved for real failures (denied / no fix / IP fallback /
+      // saved pin kept); the accuracy hint travels on the location itself.
       return { location: next, error: "" };
     } catch (err) {
       const msg = err?.message || "Could not detect your location";

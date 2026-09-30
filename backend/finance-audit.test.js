@@ -379,6 +379,7 @@ const eligibleBooking = (over = {}) => ({
     const WebhookEvent = require("./models/WebhookEvent");
     const savedCreate = WebhookEvent.create;
     const savedFindOne = Booking.findOne;
+    const savedFindOneAndUpdate = Booking.findOneAndUpdate;
     const seen = new Set();
     WebhookEvent.create = async (e) => {
       if (seen.has(e.key)) { const err = new Error("dup"); err.code = 11000; throw err; }
@@ -402,6 +403,21 @@ const eligibleBooking = (over = {}) => ({
         };
       }
       Booking.findOne = async () => doc;
+      // Atomic confirm claim: apply dotted $set + history push like Mongo.
+      Booking.findOneAndUpdate = async (filter, update) => {
+        if (String(filter._id) !== String(doc._id)) return null;
+        if (filter.status && doc.status !== filter.status) return null;
+        const pne = filter["payment.status"] && filter["payment.status"].$ne;
+        if (pne !== undefined && doc.payment && doc.payment.status === pne) return null;
+        for (const [k, v] of Object.entries(update.$set || {})) {
+          const parts = k.split(".");
+          let cur = doc;
+          for (let i = 0; i < parts.length - 1; i++) cur = cur[parts[i]];
+          cur[parts[parts.length - 1]] = v;
+        }
+        if (update.$push?.statusHistory) doc.statusHistory.push(update.$push.statusHistory);
+        return doc;
+      };
       const raw = Buffer.from(JSON.stringify({
         event: "payment.captured",
         payload: { payment: { entity: { id: "pay_w1", order_id: "order_w1", amount: 34900, currency: "INR", status: "captured" } } },
@@ -416,10 +432,11 @@ const eligibleBooking = (over = {}) => ({
       const a = mkRes(); await paymentCtrl.handleWebhook(req(), a.res);
       const b = mkRes(); await paymentCtrl.handleWebhook(req(), b.res);
       check("first delivery confirms", a.out().p?.handled === true && doc.status === "confirmed", JSON.stringify(a.out().p));
-      check("duplicate delivery acked w/o reprocessing", b.out().p?.handled === "duplicate" && saves === 1, `saves=${saves}`);
+      check("duplicate delivery acked w/o reprocessing", b.out().p?.handled === "duplicate" && saves === 0, `saves=${saves}`);
     } finally {
       WebhookEvent.create = savedCreate;
       Booking.findOne = savedFindOne;
+      Booking.findOneAndUpdate = savedFindOneAndUpdate;
       LedgerEntry.create = savedLedger;
     }
   }
@@ -904,14 +921,16 @@ const eligibleBooking = (over = {}) => ({
   console.log("\n═══ payout index guarantee ═══");
   {
     const { ensurePayoutIndexesOnce, PAYOUT_INDEXES } = require("./utils/payoutIndexes");
-    check("declares payout + refund reference indexes", PAYOUT_INDEXES.length === 3 && PAYOUT_INDEXES.every((x) => x.options.unique && x.options.partialFilterExpression));
+    check("declares payout + refund + payment + clientKey indexes", PAYOUT_INDEXES.length === 6 && PAYOUT_INDEXES.every((x) => x.options.unique !== false));
     const created = [];
     const conn = { readyState: 1 };
     const coll = { createIndex: async (spec, options) => { created.push([spec, options]); return options.name; } };
     let r = await ensurePayoutIndexesOnce({ connection: conn, collection: coll, onLog: () => {} });
-    check("connected: all three indexes ensured", r.ok === true && created.length === 3, JSON.stringify(created.map((c) => c[1].name)));
+    check("connected: all booking indexes ensured", r.ok === true && created.length === 6, JSON.stringify(created.map((c) => c[1].name)));
     check("referenceKey index is unique+partial", created.some(([, o]) => o.name === "uniq_payout_reference_key" && o.unique && o.partialFilterExpression));
     check("refund referenceKey index is unique+partial", created.some(([, o]) => o.name === "uniq_refund_reference_key" && o.unique && o.partialFilterExpression));
+    check("payment id index is unique", created.some(([, o]) => o.name === "uniq_payment_razorpayPaymentId" && o.unique));
+    check("clientKey index is unique", created.some(([, o]) => o.name === "uniq_booking_clientKey" && o.unique));
     const failing = { createIndex: async () => { throw new Error("boom"); } };
     r = await ensurePayoutIndexesOnce({ connection: conn, collection: failing, onLog: () => {} });
     check("failure is reported, never thrown", r.ok === false && /boom/.test(r.error || ""));

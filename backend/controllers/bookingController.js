@@ -21,6 +21,7 @@ const {
   resolveCookAvailability,
 } = require("../utils/slots");
 const { buildCustomerWhatsAppUrl, buildCookJobSheetWhatsAppUrl, buildHoursCompleteWhatsAppUrl, buildReviewWhatsAppUrl, FRONTEND_BASE_URL } = require("../utils/whatsapp");
+const { notifyWhatsApp } = require("../utils/whatsappApi");
 const { paginationParams, applyPagination, sendList, HARD_CAP } = require("../utils/pagination");
 const { razorpay: razorpayClient, isConfigured: razorpayConfigured } = require("../config/razorpay");
 const {
@@ -162,17 +163,21 @@ const dbReady = () => {
 
 // Strip the service OTP from a booking payload before it reaches the cook:
 // the cook must ask the customer for the code in person. Applies to a
-// Mongoose doc, a lean object, or an array of either.
+// Mongoose doc, a lean object, or an array of either. All four OTP fields
+// go — attempt counts and lockout timestamps would otherwise give the cook
+// an oracle for an ongoing brute-force attack.
+const OTP_FIELDS = ["serviceOtp", "serviceOtpGeneratedAt", "serviceOtpAttempts", "serviceOtpLockedUntil"];
 const stripServiceOtp = (payload) => {
   const stripOne = (b) => {
     if (!b || typeof b !== "object") return b;
     if (typeof b.toObject === "function") {
       const o = b.toObject();
-      delete o.serviceOtp;
+      for (const f of OTP_FIELDS) delete o[f];
       return o;
     }
-    const { serviceOtp: _omit, ...rest } = b;
-    return rest;
+    const out = { ...b };
+    for (const f of OTP_FIELDS) delete out[f];
+    return out;
   };
   return Array.isArray(payload) ? payload.map(stripOne) : stripOne(payload);
 };
@@ -264,6 +269,9 @@ const notifyServiceCompleted = async (booking) => {
   } catch {
     // non-fatal
   }
+  // WhatsApp push to BOTH sides, including the rate-your-cook prompt
+  // (fire-and-forget).
+  notifyWhatsApp("completed", booking);
 };
 
 // Flag cooking-hours completion. The session clock only runs after the cook
@@ -286,11 +294,32 @@ const markHoursCompleteIfNeeded = async (booking) => {
     booking.payment?.status === "paid" &&
     (!booking.payment?.refundStatus || booking.payment.refundStatus === "none")
   ) {
-    try {
-      const queued = queueRefundForApproval(booking, "booking_unattended");
-      if (queued > 0) {
-        await booking.save();
-        changed = true;
+      try {
+        const queued = queueRefundForApproval(booking, "booking_unattended");
+        if (queued > 0) {
+          // Targeted write: a full-doc save() here could clobber a
+          // concurrent cancel/complete transition on this paid no-show.
+          if (dbReady() && booking._id) {
+            try {
+              await Booking.updateOne(
+                { _id: booking._id, "payment.refundStatus": "none" },
+                {
+                  $set: { "payment.refundStatus": "pending", "payment.refundAmount": queued },
+                  $push: {
+                    statusHistory: {
+                      status: booking.status,
+                      note: `Refund of ₹${queued} queued for admin approval (booking_unattended)`,
+                    },
+                  },
+                }
+              );
+            } catch {
+              // non-fatal: retried on the next read
+            }
+          } else {
+            await booking.save();
+          }
+          changed = true;
         try {
           await Notification.create({
             user: booking.customer,
@@ -313,10 +342,33 @@ const markHoursCompleteIfNeeded = async (booking) => {
     if (!booking.serviceStartedAt && booking.serviceOtp) return false;
     const end = sessionEndDate(booking);
     if (!end || Date.now() < end.getTime()) return false;
-    booking.hoursCompleted = true;
-    booking.hoursCompletedAt = new Date();
+    // Atomic flag claim (production DB path): concurrent readers must not
+    // all fire the hours-complete notifications — exactly one winner
+    // notifies. Skipped without a DB connection (legacy flow).
+    if (dbReady() && booking._id) {
+      let flagClaimed = false;
+      try {
+        const claim = await Booking.updateOne(
+          { _id: booking._id, hoursCompleted: { $ne: true } },
+          { $set: { hoursCompleted: true, hoursCompletedAt: new Date() } }
+        );
+        flagClaimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
+      } catch {
+        flagClaimed = false;
+      }
+      if (!flagClaimed) {
+        booking.hoursCompleted = true;
+        return changed;
+      }
+      booking.hoursCompleted = true;
+      booking.hoursCompletedAt = booking.hoursCompletedAt || new Date();
+    } else {
+      booking.hoursCompleted = true;
+      booking.hoursCompletedAt = new Date();
+      changed = true;
+      await booking.save();
+    }
     changed = true;
-    await booking.save();
     await Notification.create({
       user: booking.customer,
       type: "cooking_hours_completed",
@@ -329,18 +381,54 @@ const markHoursCompleteIfNeeded = async (booking) => {
       booking: booking._id,
       message: "Cooking hours complete for this booking! Please wrap up your session.",
     });
+    // WhatsApp alarm to BOTH sides (fire-and-forget).
+    notifyWhatsApp("hours_complete", booking);
   }
   if (booking.status === "in_progress" && booking.serviceStartedAt) {
     const end = sessionEndDate(booking);
     if (end && Date.now() >= end.getTime()) {
-      booking.status = "completed";
-      booking.statusHistory.push({
-        status: "completed",
-        note: "Service hours completed — auto-completed",
-      });
-      changed = true;
-      await booking.save();
-      await notifyServiceCompleted(booking);
+      // Atomic auto-complete claim: a concurrent cancel must win or lose
+      // cleanly — never be overwritten back by a stale-doc save.
+      if (dbReady() && booking._id) {
+        let autoClaimed = false;
+        try {
+          const claim = await Booking.updateOne(
+            { _id: booking._id, status: "in_progress" },
+            {
+              $set: { status: "completed" },
+              $push: { statusHistory: { status: "completed", note: "Service hours completed — auto-completed" } },
+            }
+          );
+          autoClaimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
+        } catch {
+          autoClaimed = false;
+        }
+        if (!autoClaimed) {
+          try {
+            const latest = await Booking.findById(booking._id);
+            if (latest) booking.status = latest.status;
+          } catch {
+            // non-fatal
+          }
+          return changed;
+        }
+        booking.status = "completed";
+        booking.statusHistory.push({
+          status: "completed",
+          note: "Service hours completed — auto-completed",
+        });
+        changed = true;
+        await notifyServiceCompleted(booking);
+      } else {
+        booking.status = "completed";
+        booking.statusHistory.push({
+          status: "completed",
+          note: "Service hours completed — auto-completed",
+        });
+        changed = true;
+        await booking.save();
+        await notifyServiceCompleted(booking);
+      }
     }
   }
   // Backfill for old bookings (no OTP clock ever started): PAID services stuck
@@ -356,16 +444,50 @@ const markHoursCompleteIfNeeded = async (booking) => {
   ) {
     const end = sessionEndDate(booking);
     if (end && Date.now() >= end.getTime() + 24 * 60 * 60 * 1000) {
-      booking.hoursCompleted = true;
-      booking.hoursCompletedAt = booking.hoursCompletedAt || new Date();
-      booking.status = "completed";
-      booking.statusHistory.push({
-        status: "completed",
-        note: "Auto-completed: legacy booking past its scheduled end",
-      });
-      changed = true;
-      await booking.save();
-      await notifyServiceCompleted(booking);
+      // Atomic legacy auto-complete claim (same race contract as above).
+      if (dbReady() && booking._id) {
+        let legacyClaimed = false;
+        try {
+          const claim = await Booking.updateOne(
+            { _id: booking._id, status: { $in: ["accepted", "confirmed", "in_progress"] } },
+            {
+              $set: { hoursCompleted: true, hoursCompletedAt: new Date(), status: "completed" },
+              $push: { statusHistory: { status: "completed", note: "Auto-completed: legacy booking past its scheduled end" } },
+            }
+          );
+          legacyClaimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
+        } catch {
+          legacyClaimed = false;
+        }
+        if (!legacyClaimed) {          try {
+            const latest = await Booking.findById(booking._id);
+            if (latest) booking.status = latest.status;
+          } catch {
+            // non-fatal
+          }
+          return changed;
+        }
+        booking.hoursCompleted = true;
+        booking.hoursCompletedAt = booking.hoursCompletedAt || new Date();
+        booking.status = "completed";
+        booking.statusHistory.push({
+          status: "completed",
+          note: "Auto-completed: legacy booking past its scheduled end",
+        });
+        changed = true;
+        await notifyServiceCompleted(booking);
+      } else {
+        booking.hoursCompleted = true;
+        booking.hoursCompletedAt = booking.hoursCompletedAt || new Date();
+        booking.status = "completed";
+        booking.statusHistory.push({
+          status: "completed",
+          note: "Auto-completed: legacy booking past its scheduled end",
+        });
+        changed = true;
+        await booking.save();
+        await notifyServiceCompleted(booking);
+      }
     }
   }
   // Cook never attended and service hours have passed → mark as "unattended".
@@ -378,11 +500,53 @@ const markHoursCompleteIfNeeded = async (booking) => {
   ) {
     const end = sessionEndDate(booking);
     if (end && Date.now() >= end.getTime()) {
-      booking.status = "unattended";
-      booking.statusHistory.push({
-        status: "unattended",
-        note: "Cooking hours passed — cook did not attend the booking",
-      });
+      // Atomic unattended claim: a concurrent cancel must win or lose
+      // cleanly — never be resurrected by a stale-doc save.
+      if (dbReady() && booking._id) {
+        let unattendedClaimed = false;
+        try {
+          const claim = await Booking.updateOne(
+            {
+              _id: booking._id,
+              status: { $in: ["accepted", "confirmed", "in_progress"] },
+              cookArrived: { $ne: true },
+              serviceStartedAt: null,
+            },
+            {
+              $set: { status: "unattended" },
+              $push: {
+                statusHistory: {
+                  status: "unattended",
+                  note: "Cooking hours passed — cook did not attend the booking",
+                },
+              },
+            }
+          );
+          unattendedClaimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
+        } catch {
+          unattendedClaimed = false;
+        }
+        if (!unattendedClaimed) {
+          try {
+            const latest = await Booking.findById(booking._id);
+            if (latest) booking.status = latest.status;
+          } catch {
+            // non-fatal
+          }
+          return changed;
+        }
+        booking.status = "unattended";
+        booking.statusHistory.push({
+          status: "unattended",
+          note: "Cooking hours passed — cook did not attend the booking",
+        });
+      } else {
+        booking.status = "unattended";
+        booking.statusHistory.push({
+          status: "unattended",
+          note: "Cooking hours passed — cook did not attend the booking",
+        });
+      }
       // F-09: a paid no-show must never strand customer money. Queue a refund
       // for admin approval and free the coupon, exactly like a cancel does —
       // queueRefundForApproval is a no-op unless paid with no refund yet, and
@@ -390,8 +554,35 @@ const markHoursCompleteIfNeeded = async (booking) => {
       let unattendedRefund = 0;
       try {
         unattendedRefund = queueRefundForApproval(booking, "booking_unattended") || 0;
+        if (unattendedRefund > 0) {
+          // Targeted write: never a full-doc save() after the atomic flip.
+          if (dbReady() && booking._id) {
+            try {
+              await Booking.updateOne(
+                { _id: booking._id, "payment.refundStatus": "none" },
+                {
+                  $set: { "payment.refundStatus": "pending", "payment.refundAmount": unattendedRefund },
+                  $push: {
+                    statusHistory: {
+                      status: booking.status,
+                      note: `Refund of ₹${unattendedRefund} queued for admin approval (booking_unattended)`,
+                    },
+                  },
+                }
+              );
+            } catch {
+              // non-fatal: the status flip above is what matters
+            }
+          } else {
+            try {
+              await booking.save();
+            } catch {
+              // non-fatal: the status flip above is what matters
+            }
+          }
+        }
       } catch {
-        // non-fatal: the status flip below is what matters
+        // non-fatal: the status flip above is what matters
       }
       try {
         await releaseCouponUsage(booking);
@@ -399,7 +590,6 @@ const markHoursCompleteIfNeeded = async (booking) => {
         // non-fatal: best-effort
       }
       changed = true;
-      await booking.save();
       // Both sides hear about the no-show (best-effort — the flip above is
       // what matters). The customer also learns a refund was queued.
       try {
@@ -970,6 +1160,11 @@ exports.createBooking = async (req, res, next) => {
       // non-fatal: booking creation already succeeded
     }
 
+    // Automatic WhatsApp push to BOTH sides (Meta Cloud API; no-op when
+    // unconfigured). Never awaited — a notification outage must not 500
+    // the request (the client would retry and double-book).
+    notifyWhatsApp("request", booking, { customerName: req.user.name });
+
     // Contact privacy: the cook's phone number is shared only AFTER they
     // accept (see acceptBooking). A fresh "requested" booking therefore
     // exposes no contact details — coordination runs through in-app
@@ -1056,12 +1251,51 @@ const expireBookingIfNeeded = async (booking) => {
       booking.requestExpiresAt &&
       booking.requestExpiresAt < now
     ) {
-      booking.status = "expired";
-      booking.statusHistory.push({
-        status: "expired",
-        note: "Cook did not respond within 5 minutes",
-      });
-      await booking.save();
+      // Atomic expiry claim (production DB path): a concurrent accept must
+      // win over this lazy expiry — exactly one transition commits and the
+      // loser syncs to the truth. Skipped without a DB connection
+      // (unit-test path keeps the legacy flow).
+      if (dbReady() && booking._id) {
+        let expiredClaimed = false;
+        try {
+          const claim = await Booking.updateOne(
+            { _id: booking._id, status: "requested", requestExpiresAt: { $lt: now } },
+            {
+              $set: { status: "expired" },
+              $push: { statusHistory: { status: "expired", note: "Cook did not respond within 5 minutes" } },
+            }
+          );
+          expiredClaimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
+        } catch {
+          expiredClaimed = false;
+        }
+        if (!expiredClaimed) {
+          // Lost the race (accept/reject/cancel won, or the window moved) —
+          // sync to the truth and stop without side effects.
+          try {
+            const latest = await Booking.findById(booking._id);
+            if (latest && latest.status !== "requested") {
+              booking.status = latest.status;
+              return booking;
+            }
+          } catch {
+            // non-fatal
+          }
+          return null;
+        }
+        booking.status = "expired";
+        booking.statusHistory.push({
+          status: "expired",
+          note: "Cook did not respond within 5 minutes",
+        });
+      } else {
+        booking.status = "expired";
+        booking.statusHistory.push({
+          status: "expired",
+          note: "Cook did not respond within 5 minutes",
+        });
+        await booking.save();
+      }
       await releaseCouponUsage(booking);
       // A prepaid-at-creation hold (API path) must not keep captured money:
       // queue a refund for admin approval, otherwise the booking is stuck
@@ -1070,7 +1304,28 @@ const expireBookingIfNeeded = async (booking) => {
       try {
         const queued = queueRefundForApproval(booking, "request_expired");
         if (queued > 0) {
-          await booking.save();
+          // Targeted refund-queue write (production DB path): a full-doc
+          // save() here could clobber a concurrent accept's payment window.
+          if (dbReady() && booking._id) {
+            try {
+              await Booking.updateOne(
+                { _id: booking._id, "payment.refundStatus": "none" },
+                {
+                  $set: { "payment.refundStatus": "pending", "payment.refundAmount": queued },
+                  $push: {
+                    statusHistory: {
+                      status: booking.status,
+                      note: `Refund of ₹${queued} queued for admin approval (request_expired)`,
+                    },
+                  },
+                }
+              );
+            } catch {
+              // non-fatal: expiry itself must always succeed
+            }
+          } else {
+            await booking.save();
+          }
           expiredRefundNote = ` A refund of ₹${queued} has been requested — our team will review it shortly.`;
         } else if (booking.payment?.testMode && booking.payment?.status === "paid") {
           expiredRefundNote = " (Test payment — no real money moved.)";
@@ -1099,6 +1354,8 @@ const expireBookingIfNeeded = async (booking) => {
       } catch {
         // non-fatal: expiry itself must always succeed
       }
+      // WhatsApp push to BOTH sides (fire-and-forget).
+      notifyWhatsApp("expired", booking);
       return booking;
     }
     if (
@@ -1107,12 +1364,58 @@ const expireBookingIfNeeded = async (booking) => {
       booking.paymentExpiresAt &&
       booking.paymentExpiresAt < now
     ) {
-      booking.status = "cancelled";
-      booking.statusHistory.push({
-        status: "cancelled",
-        note: "Payment not completed within 5 minutes — slot released",
-      });
-      await booking.save();
+      // Atomic payment-window claim (production DB path): a concurrent pay
+      // confirm must win over this lazy release — exactly one commits.
+      if (dbReady() && booking._id) {
+        let releasedClaimed = false;
+        try {
+          const claim = await Booking.updateOne(
+            {
+              _id: booking._id,
+              status: "accepted",
+              "payment.status": { $ne: "paid" },
+              paymentExpiresAt: { $lt: now },
+            },
+            {
+              $set: { status: "cancelled" },
+              $push: {
+                statusHistory: {
+                  status: "cancelled",
+                  note: "Payment not completed within 5 minutes — slot released",
+                },
+              },
+            }
+          );
+          releasedClaimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
+        } catch {
+          releasedClaimed = false;
+        }
+        if (!releasedClaimed) {
+          // Lost the race (payment confirmed concurrently) — sync and stop.
+          try {
+            const latest = await Booking.findById(booking._id);
+            if (latest && (latest.status !== "accepted" || latest.payment?.status === "paid")) {
+              booking.status = latest.status;
+              return booking;
+            }
+          } catch {
+            // non-fatal
+          }
+          return null;
+        }
+        booking.status = "cancelled";
+        booking.statusHistory.push({
+          status: "cancelled",
+          note: "Payment not completed within 5 minutes — slot released",
+        });
+      } else {
+        booking.status = "cancelled";
+        booking.statusHistory.push({
+          status: "cancelled",
+          note: "Payment not completed within 5 minutes — slot released",
+        });
+        await booking.save();
+      }
       await releaseCouponUsage(booking);
       try {
         await Notification.create({
@@ -1135,6 +1438,10 @@ const expireBookingIfNeeded = async (booking) => {
       } catch {
         // non-fatal: expiry itself must always succeed
       }
+      // WhatsApp push to BOTH sides (fire-and-forget).
+      notifyWhatsApp("cancelled", booking, {
+        refundNote: "The slot was released because payment was not completed in time. Please book again.",
+      });
       return booking;
     }
   } catch {
@@ -1144,6 +1451,12 @@ const expireBookingIfNeeded = async (booking) => {
 };
 // Shared with paymentController.createOrder (payment-window check).
 exports.expireBookingIfNeeded = expireBookingIfNeeded;
+// Shared with the WhatsApp inbound controller (cook accept/decline taps):
+// refund queueing, coupon release and overlap helpers stay single-sourced.
+exports.queueRefundForApproval = queueRefundForApproval;
+exports.releaseCouponUsage = releaseCouponUsage;
+exports.REQUEST_WINDOW_MS = REQUEST_WINDOW_MS;
+exports.PAYMENT_WINDOW_MS = PAYMENT_WINDOW_MS;
 // Exported for unit tests of the cook-login no-show rule.
 exports.isNoShowPastHours = isNoShowPastHours;
 // Exported for unit tests of the auto-complete notification path.
@@ -1304,10 +1617,10 @@ exports.getCookBookings = async (req, res, next) => {
       }
     }
     const out = bookings.map((b) => {
-      const obj = b.toObject ? b.toObject() : b;
+      const obj = stripServiceOtp(b.toObject ? b.toObject() : b);
       const end = sessionEndDate(b);
-      // Cook never sees the OTP — they ask the customer for it in person.
-      delete obj.serviceOtp;
+      // Cook never sees the OTP or its metadata — they ask the customer for
+      // the code in person.
       return { ...obj, sessionEnd: end ? end.toISOString() : null };
     });
     // Cook avatars across the site need the profile photo (not on the User).
@@ -1564,6 +1877,7 @@ exports.acceptBooking = async (req, res, next) => {
         return res.status(409).json({
           ...keptObj,
           message: "This slot was just confirmed for another request. Your booking was kept as-is — please contact support if you were charged.",
+          code: "SLOT_UNAVAILABLE",
         });
       }
       latest.status = "requested";
@@ -1582,6 +1896,7 @@ exports.acceptBooking = async (req, res, next) => {
       }
       return res.status(409).json({
         message: "This slot was just confirmed for another request. Please decline this one.",
+        code: "SLOT_UNAVAILABLE",
       });
     }
 
@@ -1596,6 +1911,11 @@ exports.acceptBooking = async (req, res, next) => {
     } catch {
       // non-fatal: the accept itself already succeeded
     }
+    // WhatsApp push to the customer (cook acted in-app so only needs one
+    // when an admin accepted on their behalf — see notifyCook below).
+    notifyWhatsApp("accepted", booking, {
+      notifyCook: String(req.user.role).toUpperCase() === "ADMIN",
+    });
 
     // When an admin accepted on the cook's behalf, alert the cook — their
     // calendar just gained a booked slot and they would otherwise never know.
@@ -1654,7 +1974,7 @@ exports.rejectBooking = async (req, res, next) => {
     // Only pending "requested" bookings can be declined (ignore/cancel path).
     const filter = { _id: req.params.id };
     if (String(req.user.role).toUpperCase() !== "ADMIN") filter.cook = req.user.id;
-    const booking = await Booking.findOne(filter);
+    let booking = await Booking.findOne(filter);
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
     }
@@ -1665,11 +1985,61 @@ exports.rejectBooking = async (req, res, next) => {
       return res.status(400).json({ message: "Only pending requests can be declined" });
     }
 
-    booking.status = "rejected";
-    booking.statusHistory.push({
-      status: "rejected",
-      ...(String(req.user.role).toUpperCase() === "ADMIN" ? { note: "Declined by admin on behalf of the cook" } : {}),
-    });
+    // Atomic reject claim (production DB path): a concurrent accept (also
+    // atomic) vs this reject must have exactly one winner — a stale-doc
+    // save() here could otherwise overwrite an accept back to "rejected".
+    // Skipped without a DB connection (unit-test path keeps the legacy flow).
+    const rejectNote =
+      String(req.user.role).toUpperCase() === "ADMIN" ? { note: "Declined by admin on behalf of the cook" } : {};
+    let rejectClaimed = false;
+    if (dbReady()) {
+      try {
+        const claimFilter = { _id: booking._id, status: "requested" };
+        if (filter.cook) claimFilter.cook = filter.cook;
+        const claim = await Booking.updateOne(claimFilter, {
+          $set: { status: "rejected" },
+          $push: { statusHistory: { status: "rejected", ...rejectNote } },
+        });
+        if ((claim.modifiedCount ?? claim.nModified ?? 0) === 1) {
+          rejectClaimed = true;
+        }
+      } catch {
+        rejectClaimed = false;
+      }
+      if (rejectClaimed) {
+        try {
+          const fresh = await Booking.findOne(filter);
+          if (fresh) booking = fresh;
+        } catch {
+          // non-fatal: continue with the in-memory doc
+        }
+      } else {
+        // Lost the race (or the state moved) — report the current truth.
+        let latest = null;
+        try {
+          latest = await Booking.findOne(filter);
+        } catch {
+          latest = null;
+        }
+        if (!latest) {
+          return res.status(404).json({ message: "Booking not found" });
+        }
+        if (latest.status !== "requested") {
+          return res.status(409).json({
+            message: "This request was just handled — please refresh to see its current status.",
+            code: "BOOKING_INVALID_STATE",
+          });
+        }
+        return res.status(409).json({
+          message: "Another action is being processed for this request. Please try again.",
+          code: "BOOKING_INVALID_STATE",
+        });
+      }
+    }
+    if (!rejectClaimed) {
+      booking.status = "rejected";
+      booking.statusHistory.push({ status: "rejected", ...rejectNote });
+    }
 
     // A pay-first booking (paid at creation) is queued for an admin refund
     // decision — the cook declined, so the captured money has no service to
@@ -1701,6 +2071,10 @@ exports.rejectBooking = async (req, res, next) => {
     } catch {
       // non-fatal: the reject itself already succeeded
     }
+    // WhatsApp push to the customer (fire-and-forget).
+    notifyWhatsApp("rejected", booking, {
+      refundNote: rejectRefundNote || undefined,
+    });
 
     // Tell the cook when an admin declined on their behalf so they know the
     // request was handled and the slot stayed open.
@@ -1727,7 +2101,7 @@ exports.completeBooking = async (req, res, next) => {
   try {
     const filter = { _id: req.params.id };
     if (String(req.user.role).toUpperCase() !== "ADMIN") filter.cook = req.user.id;
-    const booking = await Booking.findOne(filter);
+    let booking = await Booking.findOne(filter);
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
     }
@@ -1762,9 +2136,57 @@ exports.completeBooking = async (req, res, next) => {
       }
     }
 
-    booking.status = "completed";
-    booking.statusHistory.push({ status: "completed" });
-    await booking.save();
+    // Atomic complete claim (production DB path): a concurrent cancel must
+    // not be silently overwritten back to "completed" by a stale-doc save —
+    // exactly one terminal transition wins and the loser reports the truth.
+    // Skipped without a DB connection (unit-test path keeps the legacy flow).
+    if (dbReady()) {
+      let claimOk = false;
+      try {
+        const claimFilter = {
+          _id: booking._id,
+          status: { $in: ["confirmed", "in_progress"] },
+          "payment.status": "paid",
+        };
+        if (String(req.user.role).toUpperCase() !== "ADMIN") claimFilter.cook = req.user.id;
+        const claim = await Booking.updateOne(claimFilter, {
+          $set: { status: "completed" },
+          $push: { statusHistory: { status: "completed" } },
+        });
+        claimOk = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
+      } catch {
+        claimOk = false;
+      }
+      if (!claimOk) {
+        let latest = null;
+        try {
+          latest = await Booking.findOne(filter);
+        } catch {
+          latest = null;
+        }
+        if (!latest) {
+          return res.status(404).json({ message: "Booking not found" });
+        }
+        if (latest.status === "completed") {
+          const completedObj = stripServiceOtp(latest);
+          return res.json({ ...completedObj, alreadyCompleted: true });
+        }
+        return res.status(409).json({
+          message: "This booking was just updated — please refresh to see its current status.",
+          code: "BOOKING_INVALID_STATE",
+        });
+      }
+      try {
+        const fresh = await Booking.findOne(filter);
+        if (fresh) booking = fresh;
+      } catch {
+        // non-fatal: continue with the in-memory doc
+      }
+    } else {
+      booking.status = "completed";
+      booking.statusHistory.push({ status: "completed" });
+      await booking.save();
+    }
 
     // Website (in-app) notification prompting the customer to rate the cook.
     let cookNameForMsg = "your cook";
@@ -2048,6 +2470,11 @@ exports.cancelBooking = async (req, res, next) => {
     } catch {
       // non-fatal
     }
+    // WhatsApp push to BOTH sides (fire-and-forget).
+    notifyWhatsApp("cancelled", booking, {
+      cancelledBy: cancelledByValue,
+      refundNote: refundNote || undefined,
+    });
 
     res.json(stripServiceOtp(booking));
   } catch (error) {
@@ -2734,6 +3161,12 @@ exports.rescheduleBooking = async (req, res, next) => {
     } catch {
       // non-fatal: the move itself already succeeded
     }
+    // WhatsApp push to BOTH sides with old → new slot (fire-and-forget).
+    notifyWhatsApp("rescheduled", moved || booking, {
+      oldDate: oldSlotLabel,
+      oldStart: "",
+      oldEnd: "",
+    });
 
     res.json(stripServiceOtp(moved));
   } catch (error) {
@@ -2751,7 +3184,7 @@ exports.startService = async (req, res, next) => {
   try {
     const filter = { _id: req.params.id };
     if (String(req.user.role).toUpperCase() !== "ADMIN") filter.cook = req.user.id;
-    const booking = await Booking.findOne(filter);
+    let booking = await Booking.findOne(filter);
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
     }
@@ -2796,16 +3229,44 @@ exports.startService = async (req, res, next) => {
       // non-fatal: expiry check unavailable — fall through to OTP check
     }
     if (!booking.serviceOtp || otp !== String(booking.serviceOtp)) {
-      booking.serviceOtpAttempts = Number(booking.serviceOtpAttempts || 0) + 1;
-      if (booking.serviceOtpAttempts >= 10) {
-        booking.serviceOtpLockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+      // Atomic attempt counter (production DB path): concurrent wrong
+      // guesses must all count toward the 10-try lockout — a read-increment-
+      // save here would let parallel guesses undercount and bypass the lock.
+      // Skipped without a DB connection (unit-test path keeps the legacy flow).
+      let totalAttempts = Number(booking.serviceOtpAttempts || 0) + 1;
+      if (dbReady()) {
+        try {
+          const bumped = await Booking.findOneAndUpdate(
+            { _id: booking._id },
+            { $inc: { serviceOtpAttempts: 1 } },
+            { new: true }
+          );
+          if (bumped) totalAttempts = Number(bumped.serviceOtpAttempts || totalAttempts);
+          if (totalAttempts >= 10) {
+            try {
+              await Booking.updateOne(
+                { _id: booking._id },
+                { $set: { serviceOtpLockedUntil: new Date(Date.now() + 15 * 60 * 1000) } }
+              );
+            } catch {
+              // non-fatal: the 429 below is what matters
+            }
+          }
+        } catch {
+          // non-fatal: fall through with the in-memory count
+        }
+      } else {
+        booking.serviceOtpAttempts = totalAttempts;
+        if (totalAttempts >= 10) {
+          booking.serviceOtpLockedUntil = new Date(Date.now() + 15 * 60 * 1000);
+        }
+        try {
+          await booking.save();
+        } catch {
+          // non-fatal: the 400 below is what matters
+        }
       }
-      try {
-        await booking.save();
-      } catch {
-        // non-fatal: the 400 below is what matters
-      }
-      if (booking.serviceOtpAttempts >= 10) {
+      if (totalAttempts >= 10) {
         return res.status(429).json({
           message: "Too many incorrect attempts — please wait 15 minutes and ask the customer for the code again.",
         });
@@ -2813,13 +3274,16 @@ exports.startService = async (req, res, next) => {
       return res.status(400).json({ message: "Incorrect OTP — please ask the customer for the 4-digit code shown on their booking" });
     }
     // Success resets the guard.
-    booking.serviceOtpAttempts = 0;
-    booking.serviceOtpLockedUntil = undefined;
     const durMin = Math.round(Number(booking.durationHours || 0) * 60);
     if (!Number.isInteger(Number(booking.durationHours)) || durMin < 60 || durMin > 4 * 60) {
       return res.status(400).json({ message: "This booking has no usable duration — please contact support" });
     }
     const startedAt = new Date();
+    // Wall-clock strings are IST (business timezone), never server-local.
+    const fmtClock = (d) => {
+      const mins = istNowMinutes(d);
+      return minutesToTime(mins);
+    };
     // Late-start overlap guard: the rewrite below moves the window to
     // (now → now+duration). On the booking's own day that can collide with
     // another live booking for the same cook — refuse with 409 so support can
@@ -2843,28 +3307,99 @@ exports.startService = async (req, res, next) => {
         // non-fatal: verification unavailable, proceed with the start
       }
     }
-    booking.serviceStartedAt = startedAt;
-    booking.serviceEndsAt = new Date(startedAt.getTime() + durMin * 60 * 1000);
-    // Redefine the service window from the actual start: the scheduled
-    // start/end shift to (actual start → actual start + duration) so the
-    // stored endTime always reflects real cooking time, not the slot guess.
-    // Wall-clock strings are IST (business timezone), never server-local.
-    const fmtClock = (d) => {
-      const mins = istNowMinutes(d);
-      return minutesToTime(mins);
-    };
-    booking.startTime = fmtClock(startedAt);
-    booking.endTime = fmtClock(booking.serviceEndsAt);
-    // OTP verified ⇒ cook is on site: record arrival (manual taps disabled).
-    await markArrivedIfNeeded(booking);
-    const serviceNote = `Service started (OTP verified) ${booking.startTime}–${booking.endTime}`;
-    if (booking.status !== "in_progress") {
-      booking.status = "in_progress";
-      booking.statusHistory.push({ status: "in_progress", note: serviceNote });
+    // Atomic start claim (production DB path): two concurrent correct OTPs
+    // must not both set the clock and double-push history — the conditional
+    // update admits exactly one starter (serviceStartedAt must still be
+    // unset, booking still live+paid). The loser re-reads and receives the
+    // idempotent started state. Skipped without a DB connection (unit-test
+    // path keeps the legacy flow).
+    const serviceNotePreview = `Service started (OTP verified)`;
+    if (dbReady()) {
+      const claimFilter = {
+        _id: booking._id,
+        serviceStartedAt: null,
+        status: { $in: ["confirmed", "in_progress", "accepted"] },
+        "payment.status": "paid",
+      };
+      if (String(req.user.role).toUpperCase() !== "ADMIN") claimFilter.cook = req.user.id;
+      let claimed = null;
+      try {
+        claimed = await Booking.findOneAndUpdate(
+          claimFilter,
+          {
+            $set: {
+              serviceStartedAt: startedAt,
+              serviceEndsAt: new Date(startedAt.getTime() + durMin * 60 * 1000),
+              startTime: fmtClock(startedAt),
+              endTime: fmtClock(new Date(startedAt.getTime() + durMin * 60 * 1000)),
+              serviceOtpAttempts: 0,
+              serviceOtpLockedUntil: null,
+              status: "in_progress",
+            },
+            $push: {
+              statusHistory: {
+                status: "in_progress",
+                note: `${serviceNotePreview} ${fmtClock(startedAt)}–${fmtClock(new Date(startedAt.getTime() + durMin * 60 * 1000))}`,
+              },
+            },
+          },
+          { new: true }
+        );
+      } catch {
+        claimed = null;
+      }
+      if (!claimed) {
+        // Lost the race (already started) or the state moved — return truth.
+        let latest = null;
+        try {
+          latest = await Booking.findOne(filter);
+        } catch {
+          latest = null;
+        }
+        if (latest?.serviceStartedAt) {
+          const obj = stripServiceOtp(latest);
+          return res.json({ ...obj, serviceStarted: true });
+        }
+        return res.status(409).json({
+          message: "This booking was just updated — please refresh to see its current status.",
+          code: "BOOKING_INVALID_STATE",
+        });
+      }
+      booking = claimed;
     } else {
-      booking.statusHistory.push({ status: "in_progress", note: serviceNote });
+      booking.serviceOtpAttempts = 0;
+      booking.serviceOtpLockedUntil = undefined;
+      booking.serviceStartedAt = startedAt;
+      booking.serviceEndsAt = new Date(startedAt.getTime() + durMin * 60 * 1000);
+      // Redefine the service window from the actual start: the scheduled
+      // start/end shift to (actual start → actual start + duration) so the
+      // stored endTime always reflects real cooking time, not the slot guess.
+      // Wall-clock strings are IST (business timezone), never server-local.
+      booking.startTime = fmtClock(startedAt);
+      booking.endTime = fmtClock(booking.serviceEndsAt);
+      // OTP verified ⇒ cook is on site: record arrival (manual taps disabled).
+      await markArrivedIfNeeded(booking);
+      const serviceNote = `Service started (OTP verified) ${booking.startTime}–${booking.endTime}`;
+      if (booking.status !== "in_progress") {
+        booking.status = "in_progress";
+        booking.statusHistory.push({ status: "in_progress", note: serviceNote });
+      } else {
+        booking.statusHistory.push({ status: "in_progress", note: serviceNote });
+      }
+      await booking.save();
     }
-    await booking.save();
+    // OTP verified ⇒ cook is on site (production path arrives here with the
+    // claimed doc; legacy path already arrived+saved above — the
+    // cookArrived guard inside makes this second call a no-op there).
+    if (dbReady()) {
+      try {
+        await markArrivedIfNeeded(booking);
+        const freshAfterArrival = await Booking.findOne(filter);
+        if (freshAfterArrival) booking = freshAfterArrival;
+      } catch {
+        // non-fatal: the start itself already succeeded
+      }
+    }
     try {
       await Notification.create({
         user: booking.customer,
@@ -2886,6 +3421,8 @@ exports.startService = async (req, res, next) => {
     } catch {
       // non-fatal
     }
+    // WhatsApp push to BOTH sides (fire-and-forget).
+    notifyWhatsApp("started", booking);
     const obj = stripServiceOtp(booking);
     res.json({ ...obj, serviceStarted: true });
   } catch (error) {
@@ -3138,17 +3675,10 @@ exports.payBooking = async (req, res, next) => {
       if (!storedOrderId || storedOrderId !== String(razorpayOrderId)) {
         return res.status(402).json({
           message: "This payment does not belong to this booking. Please start a fresh payment.",
+          code: "PAYMENT_AMOUNT_MISMATCH",
         });
       }
     }
-    // Dev-only test checkout (no real money): allowed solely when the server
-    // explicitly opts in via ALLOW_TEST_PAYMENTS=true AND is not running in
-    // production. This double-guard means a forgotten env var can never
-    // enable fake payments on the live site.
-    const allowTest =
-      req.body?.testMode === true &&
-      process.env.ALLOW_TEST_PAYMENTS === "true" &&
-      process.env.NODE_ENV !== "production";
     // Fully-discounted session (100% coupon): nothing is charged, so the
     // booking confirms at ₹0 without any gateway money. Same atomic claim,
     // same notifications — payment never reaches Razorpay. A zero payable
@@ -3160,14 +3690,12 @@ exports.payBooking = async (req, res, next) => {
       });
     }
     // Bind the genuine triple to this booking's stored fee (blocks replay
-    // of a cheaper order's payment onto this booking). Enforced whenever a
-    // real triple is presented — including test mode — so testMode can never
-    // launder a cheap genuine payment onto an expensive booking. The payment
-    // itself must also be captured for the full fee (not merely authorized).
+    // of a cheaper order's payment onto this booking). The payment itself
+    // must also be captured for the full fee (not merely authorized).
     if (hasPayment) {
       const orderErr = await assertRazorpayOrderAmount(razorpayOrderId, Number(booking.amount || 0) * 100);
       if (orderErr) {
-        return res.status(402).json({ message: orderErr });
+        return res.status(402).json({ message: orderErr, code: "PAYMENT_AMOUNT_MISMATCH" });
       }
       const captureErr = await assertRazorpayPaymentCaptured(
         razorpayOrderId,
@@ -3175,13 +3703,14 @@ exports.payBooking = async (req, res, next) => {
         Number(booking.amount || 0) * 100
       );
       if (captureErr) {
-        return res.status(402).json({ message: captureErr });
+        return res.status(402).json({ message: captureErr, code: "PAYMENT_AMOUNT_MISMATCH" });
       }
     }
-    if (!hasPayment && !allowTest && !zeroAmount) {
+    if (!hasPayment && !zeroAmount) {
       return res.status(400).json({
         message:
           "Online payment is required — please complete the UPI/card payment to confirm this booking.",
+        code: "PAYMENT_REQUIRED",
       });
     }
     const method = String(req.body?.method || "upi").toLowerCase();
@@ -3200,22 +3729,16 @@ exports.payBooking = async (req, res, next) => {
           status: "paid",
           paidAmount: booking.amount,
           paidAt: now,
-          testMode: allowTest,
-          ...(allowTest
-            ? {
-                razorpayOrderId: `order_test_${booking._id.toString().slice(-10)}`,
-                razorpayPaymentId: `pay_test_${booking._id.toString().slice(-10)}_${now.getTime()}`,
-                razorpaySignature: "test_mode_no_signature",
-              }
-            : { razorpayOrderId, razorpayPaymentId, razorpaySignature }),
+          testMode: false,
+          razorpayOrderId,
+          razorpayPaymentId,
+          razorpaySignature,
         };
     const confirmEntry = zeroAmount
       ? { status: "confirmed", note: "100% discount — no payment required" }
       : {
           status: "confirmed",
-          note: allowTest
-            ? `Test payment (no real money) via ${method}`
-            : `Payment received via ${method}`,
+          note: `Payment received via ${method}`,
         };
     // Atomic claim: only one concurrent pay attempt flips accepted+unpaid to
     // confirmed. A lost race re-reads — paid elsewhere means success (the
@@ -3231,7 +3754,7 @@ exports.payBooking = async (req, res, next) => {
         const freshObj = fresh.toObject ? fresh.toObject() : fresh;
         return res.json({ ...freshObj, alreadyPaid: true });
       }
-      return res.status(409).json({ message: "Payment is already being processed — please check your bookings." });
+      return res.status(409).json({ message: "Payment is already being processed — please check your bookings.", code: "PAYMENT_ALREADY_PROCESSED" });
     }
     booking = claimed;
 
@@ -3249,7 +3772,7 @@ exports.payBooking = async (req, res, next) => {
       source: "checkout",
       razorpayOrderId: booking.payment?.razorpayOrderId || "",
       razorpayPaymentId: booking.payment?.razorpayPaymentId || "",
-      reason: zeroAmount ? "100% discount — no charge" : allowTest ? "Test payment (no real money)" : "Razorpay payment confirmed",
+      reason: zeroAmount ? "100% discount — no charge" : "Razorpay payment confirmed",
     });
 
     // Post-claim overlap verification: the pre-claim check and the atomic
@@ -3400,6 +3923,15 @@ exports.payBooking = async (req, res, next) => {
       // non-fatal: the confirmation itself already succeeded
     }
 
+    // 4) Automatic WhatsApp push to BOTH sides (cook job sheet + customer
+    //    confirmation). Fire-and-forget — never delays the pay response.
+    notifyWhatsApp("confirmed", booking, {
+      cookName: cookUser?.name,
+      cookPhone: cookUser?.phone,
+      customerName: customer?.name,
+      customerPhone: customer?.phone,
+    });
+
     const obj = booking.toObject ? booking.toObject() : booking;
     res.json({ ...obj, cookWhatsappUrl, customerWhatsappUrl });
   } catch (error) {
@@ -3495,9 +4027,8 @@ exports.getAdminBookings = async (req, res, next) => {
     return sendList(
       res,
       bookings.map((b) => {
-        const obj = b.toObject ? b.toObject() : b;
+        const obj = stripServiceOtp(b.toObject ? b.toObject() : b);
         // Admin list never carries customer OTPs (bulk leak surface).
-        delete obj.serviceOtp;
         return { ...obj, review: reviewByBookingId[b._id.toString()] || null };
       }),
       pg,

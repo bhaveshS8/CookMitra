@@ -36,9 +36,7 @@ import {
   Users,
 } from "lucide-react";
 import cookMitraLogo from "../assets/logo.png";
-// Google sign-in intentionally disabled for now — re-enable together with the
-// commented <GoogleSignInButton /> block below.
-// import GoogleSignInButton from "../components/GoogleSignInButton";
+import GoogleSignInButton from "../components/GoogleSignInButton";
 
 const Register = () => {
   const [searchParams] = useSearchParams();
@@ -578,7 +576,7 @@ const Register = () => {
             </p>
           </form>
 
-          {/* <div className="auth-divider">
+          <div className="auth-divider">
             <span>or</span>
           </div>
 
@@ -587,7 +585,7 @@ const Register = () => {
             text="signup_with"
             onError={setError}
             next={next}
-          /> */}
+          />
 
           <div className="auth-footer-prompt">
             Already have an account? <Link to={loginTo}>Sign in</Link>

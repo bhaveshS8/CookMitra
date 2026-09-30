@@ -33,10 +33,13 @@
 //
 // Run (scratch database ONLY — this script creates ~40 users + bookings):
 //   MONGODB_URI=mongodb://localhost:27017/festivecook_adv node seeds/seed.js
-//   MONGODB_URI=mongodb://localhost:27017/festivecook_adv ALLOW_TEST_PAYMENTS=true node server.js
+//   MONGODB_URI=mongodb://localhost:27017/festivecook_adv node server.js
 //   ALLOW_LIVE_TESTS=1 BASE_URL=http://localhost:5000/api \
 //     MONGODB_URI=mongodb://localhost:27017/festivecook_adv \
 //     node backend/concurrency-adversarial.e2e.js
+// NOTE: simulated test payments were removed — payment-gated tests (T07,
+// T12b, T15) SKIP unless the server has live Razorpay keys. Set SKIP_PAY=1
+// to skip them explicitly.
 //
 // Env knobs:
 //   FLOOD_N        customers in T01 (default 30; use 100 with raised auth limits)
@@ -367,7 +370,9 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
       record("SETUP", "server/suite database match", "ENV-LIMITED", String((e && e.message) || e));
     }
   }
-  // Probe test-payments availability (throwaway booking).
+  // Probe simulated payments (removed feature): the probe booking's pay call
+  // now returns 400, so testPayLive stays false and payment-gated tests SKIP
+  // unless the server has live Razorpay keys.
   let testPayLive = false;
   if (!SKIP_PAY) {
     const probe = await api("POST", "/bookings", {
@@ -386,7 +391,7 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
       await api("PATCH", `/bookings/${pid}/cancel`, { token: customers[0].token, body: {} });
     }
     record("SETUP", "test-payments probe", testPayLive ? "PASS" : "SKIP",
-      testPayLive ? "ALLOW_TEST_PAYMENTS live on test server" : "gateway path enforced — payment tests will SKIP");
+      testPayLive ? "simulated payments live on test server" : "gateway path enforced — payment tests will SKIP");
   }
 
   const snapCount = async () => (await snapshotBookings(admin.token)).length;

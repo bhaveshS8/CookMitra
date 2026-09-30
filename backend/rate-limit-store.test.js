@@ -152,8 +152,8 @@ const main = async () => {
   await withEnv(undefined, () => {
     const { shared, memory } = describeRateLimitStores();
     check(
-      "default: auth + strict are shared, general + visit stay in-memory",
-      shared.join(",") === "auth,strict" && memory.join(",") === "general,visit",
+      "default: auth + strict + otp are shared, general + visit stay in-memory",
+      shared.join(",") === "auth,strict,otp" && memory.join(",") === "general,visit",
       `shared=[${shared}] memory=[${memory}]`
     );
     check(
@@ -180,7 +180,7 @@ const main = async () => {
     const { shared, memory } = describeRateLimitStores();
     check(
       '"all" -> every bucket shared',
-      shared.length === 4 && memory.length === 0,
+      shared.length === 5 && memory.length === 0,
       `shared=[${shared}]`
     );
   });
@@ -189,7 +189,7 @@ const main = async () => {
     const { shared, memory } = describeRateLimitStores();
     check(
       "custom list is honoured",
-      shared.join(",") === "visit" && memory.length === 3,
+      shared.join(",") === "visit" && memory.length === 4,
       `shared=[${shared}] memory=[${memory}]`
     );
   });

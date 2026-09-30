@@ -140,14 +140,34 @@ const makeFindOne = (getDoc) => async (filter) => {
 };
 // Atomic compare-and-set claim: check + apply with NO await between, so two
 // interleaved invocations behave exactly like MongoDB's findOneAndUpdate.
+// Supports dotted $set paths ("payment.status") like the driver does.
+const setDeep = (obj, dotted, value) => {
+  const parts = String(dotted).split(".");
+  let cur = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (cur[parts[i]] === undefined || cur[parts[i]] === null) cur[parts[i]] = {};
+    cur = cur[parts[i]];
+  }
+  cur[parts[parts.length - 1]] = value;
+};
 const makeClaim = (getDoc, log) => async (filter, update) => {
   const d = getDoc();
   if (!d || String(filter._id) !== String(d._id)) return null;
   if (filter.status && d.status !== filter.status) return null;
   const pne = filter["payment.status"] && filter["payment.status"].$ne;
   if (pne !== undefined && d.payment && d.payment.status === pne) return null;
+  if (filter.$or && Array.isArray(filter.$or)) {
+    const hit = filter.$or.some((clause) => {
+      const oid = clause["payment.razorpayOrderId"];
+      if (oid !== undefined && d.payment?.razorpayOrderId === oid) return true;
+      const oids = clause["payment.razorpayOrderIds"];
+      if (oids !== undefined && (d.payment?.razorpayOrderIds || []).includes(oids)) return true;
+      return false;
+    });
+    if (!hit) return null;
+  }
   const set = update.$set || {};
-  for (const k of Object.keys(set)) d[k] = set[k];
+  for (const k of Object.keys(set)) setDeep(d, k, set[k]);
   if (update.$push && update.$push.statusHistory) d.statusHistory.push(update.$push.statusHistory);
   if (log) log.push("claim-won");
   return d;
@@ -437,31 +457,29 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     const r = await callPay(doc, "custA", { method: "upi", payment: { status: "paid", paidAmount: 349 } });
     check("T17b injected paid flag rejected", r.status === 400 && doc.payment.status === "pending", `s=${r.status}`);
   }
-  // T17c: testMode without server opt-in.
+  // T17c: testMode is removed — always rejected (no simulated checkout).
   {
     const doc = mkBooking({});
     useDoc(doc);
     const r = await callPay(doc, "custA", { method: "upi", testMode: true });
-    check("T17c testMode without opt-in rejected", r.status === 400, `s=${r.status}`);
+    check("T17c testMode rejected (feature removed)", r.status === 400 && doc.payment.status === "pending", `s=${r.status}`);
   }
-  // T18: testMode with prod configuration → refused.
+  // T18: testMode with prod configuration → still refused.
   {
     const doc = mkBooking({});
     useDoc(doc);
-    const keepNode = process.env.NODE_ENV, keepAllow = process.env.ALLOW_TEST_PAYMENTS;
+    const keepNode = process.env.NODE_ENV;
     process.env.NODE_ENV = "production";
-    process.env.ALLOW_TEST_PAYMENTS = "true";
     let r;
     try {
       r = await callPay(doc, "custA", { method: "upi", testMode: true });
     } finally {
       if (keepNode === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = keepNode;
-      if (keepAllow === undefined) delete process.env.ALLOW_TEST_PAYMENTS; else process.env.ALLOW_TEST_PAYMENTS = keepAllow;
     }
     snapLeak("T18", r.status, r.payload);
     check("T18 testMode in prod config refused", r.status === 400 && doc.payment.status === "pending", `s=${r.status}`);
   }
-  // T18b positive control: opted-in non-prod test payment works.
+  // T18b: opted-in test payment no longer exists — env opt-in changes nothing.
   {
     const doc = mkBooking({});
     useDoc(doc);
@@ -473,7 +491,7 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     } finally {
       if (keepAllow === undefined) delete process.env.ALLOW_TEST_PAYMENTS; else process.env.ALLOW_TEST_PAYMENTS = keepAllow;
     }
-    check("T18b opted-in test payment confirms (control)", r.status === 200 && doc.payment.testMode === true, `s=${r.status}`);
+    check("T18b testMode rejected even when opted in", r.status === 400 && doc.payment.status === "pending", `s=${r.status}`);
   }
 
   console.log("\n═══ refunds & foreign payments ═══");
@@ -547,6 +565,7 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     // W1: happy-path reconcile (accepted + exact amount).
     const doc = mkBooking({ _id: "bW", status: "accepted", amount: 349, payment: { status: "pending", razorpayOrderId: "order_w1" } });
     Booking.findOne = makeFindOne(() => doc);
+    Booking.findOneAndUpdate = makeClaim(() => doc);
     const w1 = await sendWebhook(capEvent("order_w1", "pay_w1", 34900));
     check("W1 captured webhook confirms", w1.payload?.handled === true && doc.status === "confirmed" &&
       doc.payment.webhookReconciled === true, JSON.stringify(w1.payload));

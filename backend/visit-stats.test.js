@@ -53,7 +53,10 @@ const testHelpers = () => {
   Date.now = () => new Date("2024-03-01T01:00:00.000Z").getTime(); // Mar 1 06:30 IST (leap year)
   check("istDayRange leap day", JSON.stringify(istDayRange(2)) === JSON.stringify(["2024-02-29", "2024-03-01"]));
   Date.now = () => new Date("2026-09-29T05:00:00.000Z").getTime();
-  check("istDayRange empty -> 30 days ending today", istDayRange().length === 30 && istDayRange()[29] === istDayString());
+  // NOTE: istDayString() with no args reads the REAL clock (new Date()),
+  // while istDayRange() reads Date.now() — compare against the frozen clock
+  // explicitly so the freeze doesn't leak into the assertion.
+  check("istDayRange empty -> 30 days ending today", istDayRange().length === 30 && istDayRange()[29] === istDayString(new Date(Date.now())));
   check("istDayRange clamps huge", istDayRange(999999).length === 365);
   check("istDayRange clamps zero", istDayRange(0).length === 30);
   Date.now = realNow;

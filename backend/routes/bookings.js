@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const { body, query } = require("express-validator");
 const rateLimit = require("express-rate-limit");
+const { rateLimitStore } = require("../utils/rateLimitStore");
 const validate = require("../middleware/validate");
 const { auth, authorize } = require("../middleware/auth");
 const {
@@ -91,8 +92,10 @@ router.patch("/:id/reject", auth, authorize("cook", "admin"), rejectBooking);
 router.patch("/:id/complete", auth, authorize("cook", "admin"), completeBooking);
 router.patch("/:id/arrived", auth, authorize("cook", "admin"), markCookArrived);
 // OTP start is brute-force sensitive (4 digits + 10-try lockout): own
-// tighter bucket on top of the general limiter.
+// tighter bucket on top of the general limiter. Shared (MongoDB-backed) so
+// the budget holds across replicas — see utils/rateLimitStore.js.
 const otpLimiter = rateLimit({
+  store: rateLimitStore("otp"),
   standardHeaders: false,
   legacyHeaders: false,
   windowMs: 15 * 60 * 1000,

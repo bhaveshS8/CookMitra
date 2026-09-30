@@ -155,12 +155,26 @@ router.put(
       .optional()
       .trim()
       .notEmpty()
-      .withMessage("Phone is required"),
+      .withMessage("Phone is required")
+      .custom((v) => {
+        let digits = String(v).replace(/\D/g, "");
+        if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+        else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+        if (!/^[6-9]\d{9}$/.test(digits)) throw new Error("Enter a valid 10-digit mobile number");
+        return true;
+      }),
     body("mobile")
       .optional()
       .trim()
       .notEmpty()
-      .withMessage("Mobile is required"),
+      .withMessage("Mobile is required")
+      .custom((v) => {
+        let digits = String(v).replace(/\D/g, "");
+        if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+        else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+        if (!/^[6-9]\d{9}$/.test(digits)) throw new Error("Enter a valid 10-digit mobile number");
+        return true;
+      }),
     body("address").optional().trim().isLength({ max: 500 }).withMessage("Address is too long"),
   ],
   validate,

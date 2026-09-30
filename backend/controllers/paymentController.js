@@ -92,7 +92,7 @@ exports.createOrder = async (req, res, next) => {
       ? activeBookings.filter((b) => String(b._id) !== String(bookingId))
       : activeBookings;
     if (findOverlapBooking(othersBookings, startTime, endTime)) {
-      return res.status(409).json({ message: "This time is already booked. Please pick another start time." });
+      return res.status(409).json({ message: "This time is already booked. Please pick another start time.", code: "SLOT_UNAVAILABLE" });
     }
 
     const startMin = timeToMinutes(startTime);
@@ -380,12 +380,15 @@ exports.handleWebhook = async (req, res) => {
       if (e?.code === 11000) {
         return res.status(200).json({ received: true, handled: "duplicate" });
       }
-      // A dedup-store outage must not lose money events: fall through to the
-      // paid-status idempotency below (fail-open narrowly, logged loudly).
+      // Dedup store unavailable: FAIL CLOSED. Acknowledging now would
+      // permanently mark a valid money event as processed while a concurrent
+      // redelivery could double-confirm below. A non-2xx makes Razorpay
+      // retry; the content-key dedup then admits exactly one processing.
       console.error(`WEBHOOK DEDUP STORE FAILED order=${orderId} pay=${paymentId}: ${e?.message || e}`);
+      return res.status(500).json({ received: true, handled: false, retry: true });
     }
 
-    const booking = await Booking.findOne({
+    let booking = await Booking.findOne({
       $or: [
         { "payment.razorpayOrderId": orderId },
         { "payment.razorpayOrderIds": orderId },
@@ -403,23 +406,61 @@ exports.handleWebhook = async (req, res) => {
       return res.status(200).json({ received: true, handled: false });
     }
     if (booking.status === "accepted" && Number(entity.amount) === expectedPaise) {
-      booking.payment = {
-        ...(booking.payment?.toObject ? booking.payment.toObject() : booking.payment || {}),
-        razorpayOrderId: orderId,
-        razorpayPaymentId: paymentId,
-        razorpaySignature: "",
-        webhookReconciled: true,
-        status: "paid",
-        paidAmount: booking.amount,
-        paidAt: new Date(),
-        testMode: false,
-      };
-      booking.status = "confirmed";
-      booking.statusHistory.push({
-        status: "confirmed",
-        note: "Payment captured (confirmed via Razorpay webhook after the app confirm call was missed)",
-      });
-      await booking.save();
+      // Atomic confirm: only one concurrent writer (checkout verify vs
+      // webhook redelivery) flips accepted+unpaid to confirmed. The loser
+      // re-reads below and is acknowledged as already-handled.
+      const now = new Date();
+      const claimed = await Booking.findOneAndUpdate(
+        {
+          _id: booking._id,
+          status: "accepted",
+          "payment.status": { $ne: "paid" },
+          $or: [
+            { "payment.razorpayOrderId": orderId },
+            { "payment.razorpayOrderIds": orderId },
+          ],
+        },
+        {
+          $set: {
+            "payment.razorpayOrderId": orderId,
+            "payment.razorpayPaymentId": paymentId,
+            "payment.razorpaySignature": "",
+            "payment.webhookReconciled": true,
+            "payment.status": "paid",
+            "payment.paidAmount": booking.amount,
+            "payment.paidAt": now,
+            "payment.testMode": false,
+            status: "confirmed",
+          },
+          $push: {
+            statusHistory: {
+              status: "confirmed",
+              note: "Payment captured (confirmed via Razorpay webhook after the app confirm call was missed)",
+            },
+          },
+        },
+        { new: true }
+      );
+      if (!claimed) {
+        // Lost the race (checkout confirmed concurrently) or the booking
+        // moved: re-read the truth instead of overwriting it.
+        let latest = null;
+        try {
+          latest = await Booking.findOne({
+            $or: [
+              { "payment.razorpayOrderId": orderId },
+              { "payment.razorpayOrderIds": orderId },
+            ],
+          });
+        } catch {
+          latest = null;
+        }
+        if (latest?.payment?.status === "paid") {
+          return res.status(200).json({ received: true, handled: true });
+        }
+        return res.status(200).json({ received: true, handled: false });
+      }
+      booking = claimed;
       try {
         const WebhookEvent = require("../models/WebhookEvent");
         await WebhookEvent.updateOne({ key: webhookKey }, { $set: { booking: booking._id } });

@@ -1,0 +1,38 @@
+﻿
+  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       
+32180
+  TCP    0.0.0.0:5000           0.0.0.0:0              LISTENING       
+28088
+  TCP    [::]:5000              [::]:0                 LISTENING       
+28088
+
+
+
+
+ProcessId    : 29404
+CreationDate : 30-09-2026 11:13:19
+CommandLine  : "C:\Program Files\nodejs\node.exe" C:\Users\bhave\AppData\Ro
+               aming\npm/node_modules/npm/bin/npm-cli.js start
+
+ProcessId    : 7212
+CreationDate : 30-09-2026 11:13:19
+CommandLine  : "node"   "H:\Festive_Cook\frontend\node_modules\.bin\\..\rea
+               ct-scripts\bin\react-scripts.js" start
+
+ProcessId    : 32180
+CreationDate : 30-09-2026 11:13:20
+CommandLine  : "C:\Program Files\nodejs\node.exe" H:\Festive_Cook\frontend\
+               node_modules\react-scripts\scripts\start.js
+
+ProcessId    : 15796
+CreationDate : 30-09-2026 11:23:23
+CommandLine  : "C:\Program Files\nodejs\node.exe" C:\Users\bhave\AppData\Ro
+               aming\npm/node_modules/npm/bin/npm-cli.js start
+
+ProcessId    : 28088
+CreationDate : 30-09-2026 11:23:24
+CommandLine  : node  server.js
+
+
+
+PROBE DONE

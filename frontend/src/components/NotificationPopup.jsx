@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Bell, X, ChevronRight } from "lucide-react";
 import API from "../api/axios";
 
@@ -30,6 +30,14 @@ const normalizeList = (data) => {
 const NotificationPopup = () => {
   const user = useSelector((s) => s.auth.user);
   const navigate = useNavigate();
+  const location = useLocation();
+  // Booking flow must stay interruption-free: bottom-right notification
+  // cards cover the slot picker / Pay button, so suppress them while the
+  // customer is planning, waiting or paying. Polling continues in the
+  // background (badge stays fresh); only the visual popup is held back.
+  const isBookingRoute = /^\/(cook-on-demand|cooks(\/|$)|bookings(\/|$))/.test(
+    location.pathname || ""
+  );
   const [popups, setPopups] = useState([]);
   const knownIds = useRef(new Set());
   const initialized = useRef(false);
@@ -46,6 +54,16 @@ const NotificationPopup = () => {
 
   const queuePopup = useCallback(
     (n) => {
+      // Never pop a card over the booking flow — the notification is still
+      // recorded and the navbar badge still refreshes via the event below.
+      if (isBookingRoute) {
+        try {
+          window.dispatchEvent(new CustomEvent("notifications-updated"));
+        } catch {
+          // non-fatal
+        }
+        return;
+      }
       const id = String(n._id || n.id || `${Date.now()}-${Math.random()}`);
       setPopups((prev) => {
         if (prev.some((p) => String(p._id) === id)) return prev;
@@ -69,8 +87,15 @@ const NotificationPopup = () => {
         // non-fatal
       }
     },
-    [dismiss]
+    [dismiss, isBookingRoute]
   );
+
+  // Leaving the booking flow must not strand a stale card either: entering
+  // it clears anything already on screen (e.g. a popup that arrived just
+  // before the user tapped "Book").
+  useEffect(() => {
+    if (isBookingRoute) setPopups([]);
+  }, [isBookingRoute]);
 
   useEffect(() => {
     // Reset baseline when the account changes so a new login doesn't pop

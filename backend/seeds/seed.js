@@ -13,11 +13,23 @@ const { INITIAL_COUPONS, RETIRED_COUPON_CODES } = require("../utils/couponCatalo
 
 dotenv.config();
 
+// Production guard: demo seeding wipes collections and creates publicly
+// guessable credentials (admin@festivecook.com / admin123). It must never
+// run against production — refuse unless an explicit escape hatch is set.
+// The --coupons-only path below is non-destructive and stays allowed.
+const isCouponsOnly = process.argv.includes("--coupons-only");
+if (process.env.NODE_ENV === "production" && !isCouponsOnly && process.env.ALLOW_PROD_SEED !== "true") {
+  console.error(
+    "Refusing to seed: NODE_ENV=production. Demo seeding wipes collections and creates known credentials. " +
+      "Run against a non-production database, or set ALLOW_PROD_SEED=true if you fully accept the wipe."
+  );
+  process.exit(1);
+}
+
+const seedData = async () => {
 // Promo coupons now live in ../utils/couponCatalog (pure data, so the pricing
 // tests can assert every live code is redeemable against the launch slabs).
 // See that file for the ladder design and the rationale per code.
-
-const seedData = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log("MongoDB connected for seeding");
@@ -80,10 +92,8 @@ const seedData = async () => {
     });
 
     console.log("Seed data created successfully!");
-    console.log("Admin: admin@festivecook.com / admin123");
-    console.log("Customer: neha@example.com / password123");
-    console.log("Cook 1: priya@example.com / password123");
-    console.log("Cook 2: sunita@example.com / password123");
+    console.log("Seeded accounts: admin@festivecook.com, neha@example.com, priya@example.com, sunita@example.com");
+    console.log("(Passwords are demo-only defaults — change them immediately and never use them in production.)");
 
     // Cook profiles: one approved (bookable), one pending (admin approval demo)
     await CookProfile.create({

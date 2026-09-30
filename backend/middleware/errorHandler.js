@@ -11,7 +11,15 @@ const errorHandler = (err, req, res, next) => {
     return res.status(400).json({ message: err.message || "Validation failed" });
   }
 
-  console.error(err.stack);
+  // Correlate 5xx with the access log line (req id is minted per request in
+  // server.js). err.code carries the stable machine-readable code when the
+  // thrower set one — surfaces to clients so integrations need not
+  // string-match messages.
+  try {
+    console.error(`[${req?.id || "-"}]`, err.stack);
+  } catch {
+    console.error(err.stack);
+  }
 
   const statusCode = err.statusCode || 500;
   // Never reflect internal failure detail (Mongo errors, stack fragments,
@@ -22,6 +30,7 @@ const errorHandler = (err, req, res, next) => {
       : err.message || "Internal Server Error";
   res.status(statusCode).json({
     message,
+    ...(err.code ? { code: err.code } : {}),
     ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
   });
 };

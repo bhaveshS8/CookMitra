@@ -185,12 +185,12 @@ exports.requestRefund = async (req, res, next) => {
         return res.status(404).json({ message: "Booking not found" });
       }
       if ((latest.payment?.refundStatus || "none") !== "none") {
-        return res.status(409).json({ message: "A refund request already exists for this booking." });
+        return res.status(409).json({ message: "A refund request already exists for this booking.", code: "REFUND_ALREADY_PROCESSED" });
       }
       if (latest.status === "completed") {
-        return res.status(400).json({ message: "This booking has already been completed and is not eligible for this refund request." });
+        return res.status(400).json({ message: "This booking has already been completed and is not eligible for this refund request.", code: "REFUND_NOT_ELIGIBLE" });
       }
-      return res.status(409).json({ message: "This booking was just updated — please refresh to see its current state." });
+      return res.status(409).json({ message: "This booking was just updated — please refresh to see its current state.", code: "BOOKING_INVALID_STATE" });
     }
 
     await recordLedger({
