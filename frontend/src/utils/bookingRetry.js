@@ -1,8 +1,9 @@
 // Snapshot of a dead request (expired / rejected) so "Find another cook" can
-// land straight on step 3 (venue + cook list) with the same date/slot, minus
-// the cook who didn't respond. CookBooking.jsx consumes this via
-// location.state. Used by BookingWaiting.jsx (waiting-screen redirect) and
-// CustomerDashboard.jsx (expired-within-grace card).
+// land straight on step 3 (venue + summary) with the same date/slot for a
+// FRESH Find-Cook search — never by mutating the dead booking back to
+// life. CookBooking.jsx consumes this via location.state. Used by
+// BookingWaiting.jsx (waiting-screen redirect) and CustomerDashboard.jsx
+// (expired-within-grace card).
 const toLocalDayStr = (d) => {
   if (!d) return "";
   const dt = d instanceof Date ? d : new Date(d);

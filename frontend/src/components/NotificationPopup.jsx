@@ -64,6 +64,17 @@ const NotificationPopup = () => {
         }
         return;
       }
+      // Cooks already get the Accept/Decline request dialog for a new
+      // booking request — skip the generic message card so only the
+      // request popup shows.
+      if (user?.role === "cook" && n?.type === "booking_request") {
+        try {
+          window.dispatchEvent(new CustomEvent("notifications-updated"));
+        } catch {
+          // non-fatal
+        }
+        return;
+      }
       const id = String(n._id || n.id || `${Date.now()}-${Math.random()}`);
       setPopups((prev) => {
         if (prev.some((p) => String(p._id) === id)) return prev;
@@ -87,7 +98,7 @@ const NotificationPopup = () => {
         // non-fatal
       }
     },
-    [dismiss, isBookingRoute]
+    [dismiss, isBookingRoute, user?.role]
   );
 
   // Leaving the booking flow must not strand a stale card either: entering

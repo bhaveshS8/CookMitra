@@ -27,7 +27,6 @@ import API from "../api/axios";
 import { formatCurrency, localTodayStr, localTomorrowStr, slabPriceForDuration, LAUNCH_SLAB_PRICES } from "../utils/constants";
 import CouponApply from "../components/CouponApply";
 import CustomCalendar from "../components/CustomCalendar";
-import CookAvatar from "../components/CookAvatar";
 import { useDispatch, useSelector } from "react-redux";
 import { updateUser } from "../store/authSlice";
 import { useShowToast, useSiteLocation } from "../store/hooks";
@@ -175,7 +174,10 @@ const CookBooking = () => {
   const [matches, setMatches] = useState([]);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
-  const [bookingLoading, setBookingLoading] = useState(null);
+  // Find-Cook submit lock: disables the CTA the instant it is tapped so a
+  // double-click can never fire two creates (the idempotency key below is
+  // the server-side backstop for retries/refreshes).
+  const [findingCook, setFindingCook] = useState(false);
   const [locMsg, setLocMsg] = useState("");
   const [coords, setCoords] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -439,7 +441,7 @@ const CookBooking = () => {
         if (stillFree) {
           setSelectedSlot(d.selectedSlot);
           setStep(3);
-          showToast("Welcome back — your booking is restored. Just tap Book.", "success");
+          showToast("Welcome back — your booking is restored. Just tap Find Cook.", "success");
         } else {
           setSelectedSlot(null);
           setStep(2);
@@ -710,11 +712,11 @@ const CookBooking = () => {
     }
   };
 
-  // Retry after a dead request (cook never responded / declined): the waiting
+  // Retry after a dead request (no cook accepted in time): the waiting
   // screen navigates here with the dead booking's plan + slot. Restore the
-  // form, re-check live availability, drop the unresponsive cook from the
-  // list, and land straight on step 3 so the customer picks another chef
-  // without re-typing anything. Runs once per navigation state.
+  // form, re-check live availability, and land straight on step 3 (the
+  // summary) so the customer starts a fresh Find-Cook search for the same
+  // slot without re-typing anything. Runs once per navigation state.
   const retryHandled = useRef(false);
   useEffect(() => {
     const retry = location.state?.retryFromBooking;
@@ -740,30 +742,20 @@ const CookBooking = () => {
           date: retry.form.date,
           durationHours: retry.form.durationHours,
         });
-        // The cook who didn't respond shouldn't be offered again for this retry.
-        const filtered = retry.excludeCookId
-          ? r.available.filter((c) => {
-              const id =
-                c?.user?._id ||
-                (typeof c?.user === "string" ? c.user : null) ||
-                c?._id;
-              return String(id || "") !== String(retry.excludeCookId);
-            })
-          : r.available;
-        setMatches(filtered);
-        setSlotOptions(aggregateSlots(filtered));
+        setMatches(r.available);
+        setSlotOptions(aggregateSlots(r.available));
         setSlotSuggestions(r.suggestions);
         setTotalCooksFound(r.totalCooks);
         setSearched(true);
-        const stillFree = (aggregateSlots(filtered)).some(
+        const stillFree = (aggregateSlots(r.available)).some(
           (o) =>
             o.startTime === retry.selectedSlot.startTime &&
             o.endTime === retry.selectedSlot.endTime
         );
-        if (stillFree && filtered.length > 0) {
+        if (stillFree && r.available.length > 0) {
           setSelectedSlot(retry.selectedSlot);
           setStep(3);
-          showToast("The last cook didn't respond — pick another chef for the same slot.", "info");
+          showToast("No cook accepted last time — review your booking and tap Find Cook to try again.", "info");
         } else {
           setSelectedSlot(null);
           setStep(2);
@@ -787,8 +779,8 @@ const CookBooking = () => {
     handleSeeSlots(null, v);
   };
 
-  // Step 2 → 3: a time slot must be picked before cooks are shown.
-  const handleChooseCook = async () => {
+  // Step 2 → 3: a time slot must be picked before the summary is shown.
+  const handleContinueToSummary = async () => {
     if (!selectedSlot) {
       setFormError("Please pick a time slot first");
       return;
@@ -837,20 +829,9 @@ const CookBooking = () => {
     setStep(3);
   };
 
-  // Cooks free at the step-2 slot, each carrying its matching slot object
-  // for one-tap booking.
-  // Slots built by aggregateSlots ({ startTime, endTime, freeCooks }) carry
-  // no _id — key the per-card "Booking…" state by cook + slot time so only
-  // the tapped card disables (keying by slot._id is always undefined, which
-  // makes `undefined === undefined` true for EVERY card).
-  const bookingKey = (cook, slot) => {
-    const cookId =
-      cook?.user?._id || (typeof cook?.user === "string" ? cook.user : null) || cook?._id || "";
-    return `${cookId}_${slot?.startTime || ""}_${slot?.endTime || ""}`;
-  };
   // Idempotency keys per booking attempt: retries (double-click, network
-  // retry) reuse the same key so the server returns the original hold
-  // instead of minting a duplicate. A new slot/cook gets a fresh key.
+  // retry, refresh) reuse the same key so the server returns the original
+  // hold instead of minting a duplicate. A new slot/plan gets a fresh key.
   const clientKeysRef = useRef(new Map());
   const clientKeyFor = (key) => {
     let k = clientKeysRef.current.get(key);
@@ -866,6 +847,8 @@ const CookBooking = () => {
     }
     return k;
   };
+  // Cooks free at the step-2 slot — counted for the summary ("N cooks
+  // free"), never shown as a pick list: Find-Cook assigns atomically.
   const cooksForSlot = selectedSlot
     ? matches
         .map((c) => ({
@@ -879,7 +862,11 @@ const CookBooking = () => {
         .filter((c) => c.slot)
     : [];
 
-  const handleBook = async (cook, slot) => {
+  // Find-Cook: create ONE broadcast request (no cook id is ever sent — the
+  // server ignores any cook/cookId and creates cook = null, status =
+  // requested). The first cook to accept atomically wins the booking.
+  const handleFindCook = async () => {
+    if (findingCook) return;
     if (!user) {
       // Remember the unfinished booking across the login wall — form,
       // picked slot, pin and coupon code all come back after sign-in.
@@ -900,71 +887,30 @@ const CookBooking = () => {
     }
     setFieldErrors({});
     setFormError("");
-    setBookingLoading(bookingKey(cook, slot));
+    // Double-click protection: the button disables immediately; the
+    // idempotency key below makes server-side retries safe too.
+    setFindingCook(true);
     try {
-      // Last-second availability check: the slot card was rendered from the
-      // step-2 search, but another customer may have booked this cook for the
-      // same hours since. Re-verify the exact [startTime, endTime] is still
-      // free so a busy cook can never be booked from a stale card.
-      const cookIdForCheck =
-        cook?.user?._id || (typeof cook?.user === "string" ? cook.user : null) || cook?._id;
-      try {
-        const chk = await API.get(`/availability/${encodeURIComponent(cookIdForCheck)}`, {
-          params: { date: form.date, startTime: slot.startTime, endTime: slot.endTime },
-        });
-        if (chk?.data && typeof chk.data === "object" && "free" in chk.data && chk.data.free !== true) {
-          setFormError(chk.data.reason || "This cook just got booked for those hours — please pick another cook or time.");
-          // Refresh the cook list so the busy cook disappears immediately.
-          try {
-            const verify = await API.get("/cooks", {
-              params: {
-                date: form.date,
-                durationHours: form.durationHours,
-                startTime: selectedSlot.startTime,
-                endTime: selectedSlot.endTime,
-              },
-            });
-            const fresh = Array.isArray(verify.data) ? verify.data : verify.data?.cooks || verify.data?.data || [];
-            const freshIds = new Set(
-              fresh.map((c) => String(c?.user?._id || (typeof c?.user === "string" ? c.user : null) || c?._id || ""))
-            );
-            const stillFree = matches.filter((c) => {
-              const id = String(c?.user?._id || (typeof c?.user === "string" ? c.user : null) || c?._id || "");
-              if (!freshIds.has(id)) return false;
-              return (c.slots || []).some(
-                (s) => s.startTime === selectedSlot.startTime && s.endTime === selectedSlot.endTime
-              );
-            });
-            setMatches(stillFree);
-            setSlotOptions(aggregateSlots(stillFree));
-          } catch {
-            // ignore — the error above already explains the state
-          }
-          return;
-        }
-      } catch (chkErr) {
-        // A 4xx here means the slot is invalid/gone — surface it. Network
-        // failures fall through to the booking attempt (server re-checks).
-        if (chkErr?.response?.status >= 400 && chkErr?.response?.status < 500) {
-          setFormError(chkErr.response?.data?.message || "That slot is no longer free — please pick another time.");
-          return;
-        }
-      }
-      // No online payment — create the booking request directly, then take
-      // the customer back to the available-cooks listing. Priced from the
-      // launch slab (server recomputes + enforces it).
+      // No online payment — create the broadcast booking request directly,
+      // then wait for a cook on the live waiting screen. Priced from the
+      // launch slab (the server recomputes + enforces it — amount/cook
+      // sent here are never trusted).
       const hours = Number(form.durationHours);
       if (!Number.isInteger(hours) || hours < 1 || hours > 4 || slab == null) {
         setFormError("Please choose 1, 2, 3 or 4 hours");
         scrollToVenueError();
         return;
       }
+      if (!selectedSlot?.startTime || !selectedSlot?.endTime) {
+        setFormError("Please pick a time slot first");
+        setStep(2);
+        return;
+      }
       const payload = {
-        cook: cook?.user?._id || (typeof cook?.user === "string" ? cook.user : null) || cook?._id,
         serviceType: DEFAULT_SERVICE_TYPE,
         date: form.date,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
+        startTime: selectedSlot.startTime,
+        endTime: selectedSlot.endTime,
         address: buildAddress(),
         addressDetails: {
           flatNo: form.flatNo.trim(),
@@ -977,28 +923,37 @@ const CookBooking = () => {
         notes: form.notes.trim(),
         selectedItems: buildSelectedItems(),
         couponCode: coupon?.code || "",
-        amount: finalPayable,
       };
       if (coords) payload.location = coords;
-      payload.clientKey = clientKeyFor(`${form.date}_${slot.startTime}_${slot.endTime}_${payload.cook}`);
+      // One key per plan+slot: retries (double-click, network retry, back
+      // button) reuse it so the server returns the original hold instead
+      // of minting a duplicate booking.
+      payload.clientKey = clientKeyFor(`${form.date}_${selectedSlot.startTime}_${selectedSlot.endTime}`);
       const res = await API.post("/bookings", payload);
       // Idempotent retry: the server returns the original hold with
       // alreadyExists instead of a duplicate — treat it as success.
       clearBookingDraft();
-      showToast("Booking request sent! Your slot is held for 5 minutes while the cook decides.", "success");
-      // Live waiting screen while the cook decides (5-minute window).
+      showToast("Finding a cook for you — we're contacting available cooks now.", "success");
+      // Live waiting screen while cooks decide (5-minute window).
       navigate(`/bookings/${res.data?._id}/wait`);
     } catch (err) {
-      showToast(err.response?.data?.message || err.message || "Booking failed", "error");
+      const msg = err.response?.data?.message || err.message || "Booking failed";
+      // Nobody free anymore (or the slot just filled): send the customer
+      // back to live slots instead of stranding them on a dead summary.
+      if (err.response?.status === 409) {
+        setFormError(`${msg} Please pick another time.`);
+      } else {
+        showToast(msg, "error");
+      }
     } finally {
-      setBookingLoading(null);
+      setFindingCook(false);
     }
   };
 
   const steps = [
     { label: "Plan", desc: "Date & hours" },
     { label: "Time Slot", desc: "Pick when" },
-    { label: "Venue & Cook", desc: "Address & book" },
+    { label: "Venue & Confirm", desc: "Address & find cook" },
   ];
 
   return (
@@ -1321,9 +1276,9 @@ const CookBooking = () => {
               type="button"
               className="btn btn-primary btn-block btn-lg od-cta"
               disabled={!selectedSlot || searching}
-              onClick={handleChooseCook}
+              onClick={handleContinueToSummary}
             >
-              {searching ? "Checking live availability…" : <>Choose Cook <ArrowRight size={17} /></>}
+              {searching ? "Checking live availability…" : <>Continue <ArrowRight size={17} /></>}
             </button>
           </div>
         </div>
@@ -1331,7 +1286,7 @@ const CookBooking = () => {
 
       {step === 3 && selectedSlot && (
         <div>
-          <h3>Step 3 — Venue &amp; Cook</h3>
+          <h3>Step 3 — Venue &amp; Confirm</h3>
           <div className="ondemand-form-card od-venue-card">
             <SecTitle n="03" icon={<MapPin size={15} />}>Where should the cook come?</SecTitle>
             <div className="ondemand-locate-box">
@@ -1545,77 +1500,92 @@ const CookBooking = () => {
 
             {formError && <div ref={venueErrorRef} className="error-message">{formError}</div>}
           </div>
-          <div className="match-results-head">
-            <h3 className="match-count-title">
-              {cooksForSlot.length > 0
-                ? `${cooksForSlot.length} cook${cooksForSlot.length > 1 ? "s" : ""} free ${fmtTime(selectedSlot.startTime)} – ${fmtTime(selectedSlot.endTime)} on ${form.date}`
-                : `No cooks free ${fmtTime(selectedSlot.startTime)} – ${fmtTime(selectedSlot.endTime)} on ${form.date}`}
-            </h3>
-          </div>
-          {cooksForSlot.length === 0 && (
-            <div className="no-data">
-              <p>That slot just filled up — pick another time.</p>
-              <button className="btn btn-outline btn-sm" onClick={() => setStep(2)}>
-                ← Back to slots
-              </button>
-            </div>
-          )}
-          <div className="bookings-list">
-            {cooksForSlot.map((cook) => {
-              const fee = finalPayable;
-              return (
-                <div key={cook._id} className="match-card">
-                  <div className="match-card-top">
-                    <div className="match-avatar">
-                      <CookAvatar
-                        photoUrl={cook.photoUrl}
-                        name={cook.user?.name}
-                        loading="lazy"
-                      />
-                    </div>
-                    <div className="match-id">
-                      <h3>{cook.user?.name}</h3>
-                      <p className="match-meta">
-                        {cook.serviceArea} • {cook.experienceYears} yrs exp • ★{" "}
-                        {cook.rating?.average?.toFixed(1) || "New"} ({cook.rating?.count || 0} reviews)
-                      </p>
-                    </div>
-                    <span className="match-rate" title={`Launch price · ${form.durationHours} hr`}>
-                      {slab != null ? formatCurrency(slab) : `₹${cook.rate}/hr`}
-                    </span>
-                  </div>
-                  <div className="tags">
-                    {cook.specialties?.slice(0, 4).map((s, i) => (
-                      <span key={i} className="tag">{s}</span>
-                    ))}
-                  </div>
-                  <div className="od-bookbox">
-                    <div className="od-bookslot">
-                      <span className="od-bookslot-time">
-                        <Clock3 size={15} /> {fmtTime(cook.slot.startTime)} – {fmtTime(cook.slot.endTime)}
-                      </span>
-                      <span className="od-bookfee">{formatCurrency(fee)} total</span>
-                    </div>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-block btn-lg od-bookbtn"
-                      disabled={bookingLoading === bookingKey(cook, cook.slot)}
-                      onClick={() => handleBook(cook, cook.slot)}
-                      title={`Book ${cook.user?.name || "this cook"} for ${formatCurrency(fee)}`}
-                    >
-                      {bookingLoading === bookingKey(cook, cook.slot)
-                        ? <span className="bk-submit-loading">Booking…</span>
-                        : <>Book {(cook.user?.name || "Cook").split(" ")[0]} <ArrowRight size={17} /></>}
-                    </button>
-                  </div>
-                  {!user && (
-                    <p className="field-hint">
-                      <LogIn size={13} /> Login as a customer to book this slot
-                    </p>
-                  )}
+          {/* Final booking summary — the customer confirms the plan, then
+              Find Cook broadcasts ONE request. No cook list: the server
+              assigns the first cook to accept atomically. */}
+          <div className="ondemand-form-card od-summary-card">
+            <SecTitle n="06" icon={<CalendarCheck size={15} />}>Review your booking</SecTitle>
+            <div className="price-rows">
+              <div className="price-row">
+                <span>Service</span>
+                <span>{serviceLabel}</span>
+              </div>
+              <div className="price-row">
+                <span>Date</span>
+                <span>{dateLabel(form.date)} · {form.date}</span>
+              </div>
+              <div className="price-row">
+                <span>Time</span>
+                <span>{fmtTime(selectedSlot.startTime)} – {fmtTime(selectedSlot.endTime)}</span>
+              </div>
+              <div className="price-row">
+                <span>Duration</span>
+                <span>{form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
+              </div>
+              <div className="price-row">
+                <span>Guests</span>
+                <span>{form.guests || "–"}</span>
+              </div>
+              <div className="price-row">
+                <span>Address</span>
+                <span>{buildAddress()}</span>
+              </div>
+              {form.notes.trim() && (
+                <div className="price-row">
+                  <span>Notes</span>
+                  <span>{form.notes.trim()}</span>
                 </div>
-              );
-            })}
+              )}
+              {parseDishes().length > 0 && (
+                <div className="price-row">
+                  <span>Dishes</span>
+                  <span>{parseDishes().join(", ")}</span>
+                </div>
+              )}
+              <div className="price-row">
+                <span>Service Price · {form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
+                <span>{slab != null ? formatCurrency(slab) : "—"}</span>
+              </div>
+              {coupon && (
+                <div className="price-row discount">
+                  <span>Coupon {coupon.code}</span>
+                  <span>−{formatCurrency(couponDiscount)}</span>
+                </div>
+              )}
+              <div className="price-row total">
+                <span>Final Amount</span>
+                <strong>{slab != null ? formatCurrency(finalPayable) : "—"}</strong>
+              </div>
+            </div>
+            <p className="field-hint">
+              <ShieldCheck size={13} /> {cooksForSlot.length > 0
+                ? `${cooksForSlot.length} verified cook${cooksForSlot.length > 1 ? "s" : ""} free at this time — the first to accept gets your booking.`
+                : "We'll contact verified cooks free at this time — the first to accept gets your booking."}
+            </p>
+            {!user && (
+              <p className="field-hint">
+                <LogIn size={13} /> Login as a customer to find a cook for this slot
+              </p>
+            )}
+            <div className="od-stickybar">
+              <div className="od-summary" aria-live="polite">
+                <span>{fmtTime(selectedSlot.startTime)} – {fmtTime(selectedSlot.endTime)}</span>
+                <strong className="od-summary-price">{slab != null ? formatCurrency(finalPayable) : "—"}</strong>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary btn-block btn-lg od-cta"
+                disabled={findingCook}
+                onClick={handleFindCook}
+              >
+                {findingCook ? (
+                  <span className="bk-submit-loading">Finding a cook…</span>
+                ) : (
+                  <>Find Cook <ArrowRight size={17} /></>
+                )}
+              </button>
+              <p className="od-sticky-note">One tap · no payment now · free to cancel while waiting</p>
+            </div>
           </div>
         </div>
       )}

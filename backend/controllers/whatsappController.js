@@ -115,6 +115,23 @@ const reply = async (to, text) => {
   }
 };
 
+// Meta retries any non-200 delivery with decreasing frequency for up to 7
+// days, so the same tap can arrive many times. De-duplicate on the Meta
+// message id (wamid) via the shared WebhookEvent collection: the loser is
+// acknowledged without re-processing. A dedup-store outage fails OPEN here
+// (unlike the Razorpay path) because the accept/reject claims below are
+// atomic — the worst case is a repeated reply text, never a double booking.
+const seenMessageBefore = async (wamid) => {
+  if (!wamid) return false;
+  try {
+    const WebhookEvent = require("../models/WebhookEvent");
+    await WebhookEvent.create({ key: `wa:${wamid}`, event: "whatsapp.inbound" });
+    return false;
+  } catch (e) {
+    return e?.code === 11000;
+  }
+};
+
 // Parse an inbound message into { action: "accept"|"reject"|null, bookingId }.
 const parseInboundAction = (msg) => {
   const interactive = msg?.interactive?.button_reply;
@@ -135,24 +152,54 @@ const parseInboundAction = (msg) => {
 
 const loadPendingForCook = async (cookId) => {
   try {
-    return await Booking.find({
-      cook: cookId,
-      status: "requested",
-      requestExpiresAt: { $gt: new Date() },
-    })
-      .select("_id serviceType date startTime endTime status")
-      .sort({ requestExpiresAt: 1 })
-      .limit(5);
+    const now = new Date();
+    const [direct, broadcast] = await Promise.all([
+      Booking.find({
+        cook: cookId,
+        status: "requested",
+        requestExpiresAt: { $gt: now },
+      })
+        .select("_id serviceType date startTime endTime status")
+        .sort({ requestExpiresAt: 1 })
+        .limit(5),
+      // Find-Cook broadcast: unassigned live requests this cook hasn't
+      // ignored. Eligibility (window/overlap) is re-checked at accept time.
+      Booking.find({
+        cook: null,
+        status: "requested",
+        requestExpiresAt: { $gt: now },
+        ignoredBy: { $ne: cookId },
+      })
+        .select("_id serviceType date startTime endTime status")
+        .sort({ requestExpiresAt: 1 })
+        .limit(5),
+    ]);
+    const seen = new Set();
+    const merged = [];
+    for (const b of [...(direct || []), ...(broadcast || [])]) {
+      const key = String(b?._id || "");
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(b);
+    }
+    return merged.slice(0, 5);
   } catch {
     return [];
   }
 };
 
 const acceptViaWhatsApp = async (cook, booking, senderE164) => {
-  // Ownership: the tap only ever affects the sender's own booking.
-  if (String(booking.cook) !== String(cook._id)) {
+  // Ownership: assigned bookings tap only for their own cook; broadcast
+  // (Find-Cook) requests are open to any verified cook — the atomic claim
+  // below decides the single winner.
+  const isBroadcast = !booking.cook;
+  if (!isBroadcast && String(booking.cook) !== String(cook._id)) {
     await reply(senderE164, "This booking isn't assigned to you — please check your Cook Dashboard.");
     return { ok: false, reason: "not-owner" };
+  }
+  if (isBroadcast && Array.isArray(booking.ignoredBy) && booking.ignoredBy.map(String).includes(String(cook._id))) {
+    await reply(senderE164, "You already ignored this request — please check your Cook Dashboard for live ones.");
+    return { ok: false, reason: "ignored" };
   }
   await expireBookingIfNeeded(booking);
   if (booking.status !== "requested") {
@@ -175,11 +222,13 @@ const acceptViaWhatsApp = async (cook, booking, senderE164) => {
     await reply(senderE164, "This request already expired (5-minute window). The slot is open again.");
     return { ok: false, reason: "expired" };
   }
-  // Overlap pre-check (same rule as the dashboard endpoint).
+  // Overlap pre-check (same rule as the dashboard endpoint) — always
+  // against the ACCEPTING cook's own calendar (broadcast requests have no
+  // cook yet, so booking.cook would check nobody's calendar).
   try {
     const { start: dayStart, end: dayEnd } = dayBounds(booking.date);
     const rivals = await Booking.find({
-      cook: booking.cook,
+      cook: isBroadcast ? cook._id : booking.cook,
       _id: { $ne: booking._id },
       date: { $gte: dayStart, $lte: dayEnd },
       status: { $in: ["accepted", "confirmed", "in_progress"] },
@@ -200,15 +249,22 @@ const acceptViaWhatsApp = async (cook, booking, senderE164) => {
     return { ok: false, reason: "verify-unavailable" };
   }
   // Atomic accept claim — exactly one of (dashboard tap, WhatsApp tap) wins.
+  // Broadcast claims additionally pin cook:null + a live window and set the
+  // winner; assigned claims keep their cook scope.
   let claimed = false;
   try {
-    const claim = await Booking.updateOne(
-      { _id: booking._id, status: "requested" },
-      {
-        $set: { status: "accepted", paymentExpiresAt: new Date(Date.now() + PAYMENT_WINDOW_MS) },
-        $push: { statusHistory: { status: "accepted", note: "Accepted by cook via WhatsApp" } },
-      }
-    );
+    const claimFilter = { _id: booking._id, status: "requested", requestExpiresAt: { $gt: new Date() } };
+    const claimUpdate = {
+      $set: { status: "accepted", paymentExpiresAt: new Date(Date.now() + PAYMENT_WINDOW_MS) },
+      $push: { statusHistory: { status: "accepted", note: "Accepted by cook via WhatsApp" } },
+    };
+    if (isBroadcast) {
+      claimFilter.cook = null;
+      claimUpdate.$set.cook = cook._id;
+    } else {
+      claimFilter.cook = cook._id;
+    }
+    const claim = await Booking.updateOne(claimFilter, claimUpdate);
     claimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
   } catch {
     claimed = false;
@@ -253,7 +309,8 @@ const acceptViaWhatsApp = async (cook, booking, senderE164) => {
 };
 
 const rejectViaWhatsApp = async (cook, booking, senderE164) => {
-  if (String(booking.cook) !== String(cook._id)) {
+  const isBroadcast = !booking.cook;
+  if (!isBroadcast && String(booking.cook) !== String(cook._id)) {
     await reply(senderE164, "This booking isn't assigned to you — please check your Cook Dashboard.");
     return { ok: false, reason: "not-owner" };
   }
@@ -261,6 +318,20 @@ const rejectViaWhatsApp = async (cook, booking, senderE164) => {
   if (booking.status !== "requested") {
     await reply(senderE164, `This request is already ${booking.status} — no action needed.`);
     return { ok: false, reason: `already-${booking.status}` };
+  }
+  // Broadcast Ignore: record this cook's pass, keep the request REQUESTED
+  // for everyone else. No customer rejection, no coupon release.
+  if (isBroadcast) {
+    try {
+      await Booking.updateOne(
+        { _id: booking._id, status: "requested" },
+        { $addToSet: { ignoredBy: cook._id } }
+      );
+    } catch {
+      // non-fatal: the reply below still confirms the pass
+    }
+    await reply(senderE164, `Ignored. ${bookingLine(booking)}\nOther cooks can still accept it.`);
+    return { ok: true, ignored: true };
   }
   let claimed = false;
   try {
@@ -426,6 +497,10 @@ exports.handleInbound = async (req, res) => {
     }
     const results = [];
     for (const msg of messages) {
+      if (msg?.id && (await seenMessageBefore(msg.id))) {
+        results.push({ ok: false, reason: "duplicate" });
+        continue;
+      }
       // eslint-disable-next-line no-await-in-loop
       results.push(await handleOneMessage(msg));
     }

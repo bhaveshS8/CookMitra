@@ -138,6 +138,11 @@ exports.createOrder = async (req, res, next) => {
     if (bookingForOrder.status !== "accepted" || bookingForOrder.payment?.status === "paid") {
       return res.status(400).json({ message: "This booking is not awaiting payment" });
     }
+    // Find-Cook invariant: payment is only possible for a server-assigned
+    // cook. A REQUESTED (unassigned) booking must never reach the gateway.
+    if (!bookingForOrder.cook) {
+      return res.status(400).json({ message: "No cook has accepted this request yet — payment unlocks after a cook accepts." });
+    }
     // The payment window may have elapsed while the customer sat on the
     // payment page — never mint an order for a dead window (they'd pay in
     // Checkout and land on a 410 with captured money).

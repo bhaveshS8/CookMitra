@@ -29,7 +29,16 @@ const customerLocationLabel = (booking) => {
 };
 
 const CookDashboard = () => {
-  const { data: bookings, loading: loadingBookings, error: bookingError, refetch: refetchBookings } = useFetch("/bookings/cook");
+  const { data: bookings, loading: loadingBookings, refreshing: refreshingBookings, error: bookingError, refetch: refetchBookings } = useFetch("/bookings/cook");
+  // Find-Cook broadcast: unassigned REQUESTED bookings this cook is eligible
+  // for. Polled with the same tick below; each pops the Accept/Ignore
+  // dialog exactly once (same queue as direct requests).
+  const { data: broadcastRequests, refetch: refetchBroadcast } = useFetch("/bookings/cook/requests");
+  // Payment-gated schedule (backend-enforced): ONLY paid + schedule-eligible
+  // bookings for the IST day. Accepted-but-unpaid never appears here — it
+  // lives in Upcoming as "Awaiting payment" until the backend verifies pay.
+  const { data: scheduledToday, refetch: refetchToday } = useFetch("/bookings/cook/schedule?day=today");
+  const { data: scheduledTomorrow, refetch: refetchTomorrow } = useFetch("/bookings/cook/schedule?day=tomorrow");
   const { data: cookProfile, loading: loadingProfile, refetch: refetchCookProfile } = useFetch("/cooks/me");
   const { data: myReviews, loading: loadingReviews } = useFetch("/reviews/cook-me");
   const { data: myComplaints } = useFetch("/complaints/my");
@@ -57,6 +66,11 @@ const CookDashboard = () => {
   // each new request pops the Accept/Decline dialog exactly once.
   const seenRequestIds = useRef(new Set());
   const requestsInit = useRef(false);
+  // Ids this cook already acted on / dismissed this session. Bridges the
+  // refetch gap: a just-ignored broadcast request is still `requested` in
+  // stale state, so the queue must not re-pop it before the server truth
+  // (ignored → hidden) arrives.
+  const handledRequestIds = useRef(new Set());
 
   // Cooks miss the 5-minute window without OS-level pings — ask once for
   // browser-notification permission so new requests can alert even loudly.
@@ -71,12 +85,19 @@ const CookDashboard = () => {
     }
   }, []);
 
-  // Poll bookings so new requests pop up without refresh.
-  // 15s + hidden-tab pause: fast enough for the 5-minute accept window, but
-  // a dashboard left open in a background tab stops hitting the API entirely.
+  // Poll bookings + broadcast requests + payment-gated schedule so new
+  // requests pop up and paid bookings land in Today/Tomorrow without
+  // refresh. 15s + hidden-tab pause: fast enough for the 5-minute accept
+  // window, but a dashboard left open in a background tab stops hitting
+  // the API entirely.
   useEffect(() => {
     const tick = () => {
-      if (!document.hidden) refetchBookings();
+      if (!document.hidden) {
+        refetchBookings();
+        refetchBroadcast();
+        refetchToday();
+        refetchTomorrow();
+      }
     };
     const id = setInterval(tick, 15000);
     document.addEventListener("visibilitychange", tick);
@@ -84,7 +105,13 @@ const CookDashboard = () => {
       clearInterval(id);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [refetchBookings]);
+  }, [refetchBookings, refetchBroadcast, refetchToday, refetchTomorrow]);
+  const refetchAllRequests = () => {
+    refetchBookings();
+    refetchBroadcast();
+    refetchToday();
+    refetchTomorrow();
+  };
 
   // Alarm once per booking when hours complete (skip state that already
   // existed on first load to avoid noise).
@@ -151,32 +178,44 @@ const CookDashboard = () => {
   // Direct Accept / Ignore from the booking card itself (same endpoints
   // as the request modal). Closes the modal when it shows this booking and
   // queues the next waiting request, so stacked arrivals are each answered.
+  // Ignore on a broadcast request keeps the customer's booking REQUESTED
+  // (server) — the card just drops off this cook's queue via refetch.
   const handleRequestAction = async (booking, action) => {
     if (actingOn || !booking?._id) return;
     setActingOn(booking._id);
     try {
-      await API.patch(`/bookings/${booking._id}/${action}`);
-      showToast(
-        action === "accept"
-          ? "Booking accepted — the customer has 5 minutes to pay."
-          : "Booking request ignored.",
-        action === "reject" ? "info" : "success"
-      );
+      const res = await API.patch(`/bookings/${booking._id}/${action}`);
+      if (action === "accept") {
+        showToast("Booking accepted — the customer has 5 minutes to pay.", "success");
+      } else if (res.data?.ignored) {
+        showToast("Request ignored — the customer is still waiting for another cook.", "info");
+      } else {
+        showToast("Booking request ignored.", "info");
+      }
+      handledRequestIds.current.add(String(booking._id));
       if (String(requestModalBooking?._id) === String(booking._id)) {
         setRequestModalBooking(null);
       }
-      refetchBookings();
+      refetchAllRequests();
       popNextPendingRequest(booking._id);
     } catch (err) {
       const gone = err.response?.status === 410 || err.response?.status === 409;
-      showToast(err.response?.data?.message || `Failed to ${action} booking`, "error");
+      // A lost accept race tells the truth: another cook already won it.
+      showToast(
+        err.response?.data?.code === "BOOKING_ALREADY_ASSIGNED"
+          ? "This request has already been accepted by another cook."
+          : err.response?.data?.message || `Failed to ${action} booking`,
+        "error"
+      );
       if (gone) {
-        // The request died meanwhile (expired / slot taken) — drop the dead
-        // row and move on instead of stranding it as actionable.
+        // The request died meanwhile (expired / won by another cook / slot
+        // taken) — drop the dead row and move on instead of stranding it
+        // as actionable.
+        handledRequestIds.current.add(String(booking._id));
         if (String(requestModalBooking?._id) === String(booking._id)) {
           setRequestModalBooking(null);
         }
-        refetchBookings();
+        refetchAllRequests();
         popNextPendingRequest(booking._id);
       }
     } finally {
@@ -184,11 +223,20 @@ const CookDashboard = () => {
     }
   };
 
-  const getStatusLabel = (status) => {
+  // Assigned ≠ scheduled: an ACCEPTED booking whose payment is still
+  // pending is "Awaiting Payment", never "Scheduled". Only backend-verified
+  // PAID bookings earn the Scheduled badge (and the Today/Tomorrow slots).
+  const isPaidBooking = (b) => b?.payment?.status === "paid";
+  const getStatusLabel = (booking) => {
+    const status = typeof booking === "string" ? booking : booking?.status;
     switch (status) {
       case "requested":
         return <span className="badge badge-amber">Action Needed</span>;
       case "accepted":
+        if (typeof booking !== "string" && !isPaidBooking(booking)) {
+          return <span className="badge badge-amber">Awaiting Payment</span>;
+        }
+        return <span className="badge badge-blue">Scheduled</span>;
       case "confirmed":
         return <span className="badge badge-blue">Scheduled</span>;
       case "in_progress":
@@ -208,9 +256,12 @@ const CookDashboard = () => {
     }
   };
 
-  // Counts for the greeting + tabs. Per-booking payment badges show earnings
-  // where they matter (on each card).
-  const pendingRequests = bookings?.filter((b) => b.status === "requested")?.length || 0;
+  // Counts for the greeting + tabs. Broadcast (unassigned) requests count
+  // alongside direct ones — both need this cook's decision. Per-booking
+  // payment badges show earnings where they matter (on each card).
+  const directPending = bookings?.filter((b) => b.status === "requested")?.length || 0;
+  const broadcastPending = (broadcastRequests || []).filter((b) => b.status === "requested")?.length || 0;
+  const pendingRequests = directPending + broadcastPending;
 
   // Views: needs-action (new requests) vs today/tomorrow (that date, minus
   // cancelled) vs upcoming (all live) vs previous (settled history).
@@ -241,20 +292,48 @@ const CookDashboard = () => {
   const byNewest = (a, b) =>
     createdMs(b) - createdMs(a) ||
     String(b._id || "").localeCompare(String(a._id || ""));
-  const visibleBookings = [...(bookings || [])]
+  // Schedule-eligible mirror of the backend rule (defense in depth — the
+  // /schedule endpoint already enforces this server-side): paid + a status
+  // that means scheduled. ACCEPTED+UNPAID is awaiting payment, never shown
+  // in Today/Tomorrow.
+  const SCHEDULED_STATUSES = ["accepted", "confirmed", "in_progress", "completed"];
+  const isScheduledBooking = (b) =>
+    isPaidBooking(b) && SCHEDULED_STATUSES.includes(b?.status);
+  // needs-action shows BOTH direct requests and broadcast (Find-Cook)
+  // requests awaiting this cook — both carry Accept/Ignore actions.
+  // Today/Tomorrow render the backend's payment-gated schedule lists.
+  // Every other view lists only this cook's own (assigned) bookings.
+  const scheduledTodayList = [...(scheduledToday || [])].filter(isScheduledBooking);
+  const scheduledTomorrowList = [...(scheduledTomorrow || [])].filter(isScheduledBooking);
+  const visibleBookings = (view === 'needs-action'
+    ? [...(bookings || []), ...(broadcastRequests || [])]
+    : view === 'today'
+      ? scheduledTodayList
+      : view === 'tomorrow'
+        ? scheduledTomorrowList
+        : [...(bookings || [])]
+  )
     .filter((b) => {
-      if (view === 'today') return isTodayBooking(b) && isNotCancelled(b);
-      if (view === 'tomorrow') return isTomorrowBooking(b) && isNotCancelled(b);
+      if (view === 'today') return isTodayBooking(b) && isNotCancelled(b) && isScheduledBooking(b);
+      if (view === 'tomorrow') return isTomorrowBooking(b) && isNotCancelled(b) && isScheduledBooking(b);
       if (view === 'needs-action') return b.status === 'requested';
       if (view === 'upcoming') return !isPrevious(b);
       if (view === 'previous') return isPrevious(b);
       // 'all' (and any future view) shows every booking.
       return true;
     })
-    .sort(byNewest);
+    .sort((a, b) =>
+      // Today/Tomorrow run in service order (startTime) — the schedule
+      // endpoint already returns them chronologically; every other tab
+      // shows newest first.
+      view === 'today' || view === 'tomorrow'
+        ? String(a.startTime || "").localeCompare(String(b.startTime || "")) || byNewest(a, b)
+        : byNewest(a, b)
+    );
   const previousCount = (bookings || []).filter(isPrevious).length;
-  const todayCount = (bookings || []).filter((b) => isTodayBooking(b) && isNotCancelled(b)).length;
-  const tomorrowCount = (bookings || []).filter((b) => isTomorrowBooking(b) && isNotCancelled(b)).length;
+  // Tab badges count what the tab shows: the payment-gated schedule lists.
+  const todayCount = scheduledTodayList.length;
+  const tomorrowCount = scheduledTomorrowList.length;
   const upcomingCount = (bookings || []).filter((b) => !isPrevious(b)).length;
   const completedCount = bookings?.filter((b) => b.status === "completed")?.length || 0;
   // Paid-out earnings (real gateway payments only — mirrors the server rule).
@@ -276,35 +355,23 @@ const CookDashboard = () => {
   const firstName = user?.name?.split(" ")[0] || "Chef";
   const approval = cookProfile?.approvalStatus;
 
-  // Loud alert for a (new) booking request: toast + alarm sound + OS
-  // notification. Shared by the first-load pop and every later arrival.
-  const alertNewRequest = (booking, extra = "") => {
-    showToast(
-      `New booking request from ${booking?.customer?.name || "a customer"} — accept or decline!${extra}`,
-      "warning",
-      8000
-    );
+  // Loud alert for a (new) booking request: alarm sound only — the
+  // Accept/Decline request popup already shows the details, so no
+  // message toast / OS notification on top of it.
+  const alertNewRequest = () => {
     playAlarmSound();
-    try {
-      if ("Notification" in window && Notification.permission === "granted") {
-        new Notification("New booking request!", {
-          body: `${booking?.customer?.name || "A customer"} wants to book you — open the dashboard to accept or decline.${extra}`,
-        });
-      }
-    } catch {
-      // optional
-    }
   };
 
   // Auto-popup: whenever a new `requested` booking appears in the polled
-  // list, open it in the Accept/Decline dialog automatically so the cook
-  // never misses the 5-minute window. While a dialog is already open the
-  // newcomer only rings (no yanking the cook mid-decision) and is queued —
-  // closing the dialog pops the next waiting request.
+  // lists (direct + Find-Cook broadcast), open it in the Accept/Decline
+  // dialog automatically so the cook never misses the 5-minute window.
+  // While a dialog is already open the newcomer only rings (no yanking the
+  // cook mid-decision) and is queued — closing the dialog pops the next
+  // waiting request.
   useEffect(() => {
-    if (!bookings) return;
-    const requested = [...bookings]
-      .filter((b) => b?.status === "requested")
+    if (!bookings && !broadcastRequests) return;
+    const requested = [...(bookings || []), ...(broadcastRequests || [])]
+      .filter((b) => b?.status === "requested" && !handledRequestIds.current.has(String(b?._id)))
       .sort(byNewest);
     if (!requestsInit.current) {
       requestsInit.current = true;
@@ -316,7 +383,7 @@ const CookDashboard = () => {
       seenRequestIds.current.add(String(newest._id));
       if (!requestModalBooking) {
         setRequestModalBooking(newest);
-        alertNewRequest(newest);
+        alertNewRequest();
       }
       return;
     }
@@ -326,31 +393,32 @@ const CookDashboard = () => {
     if (!requestModalBooking) {
       const newest = [...fresh].sort(byNewest)[0];
       setRequestModalBooking(newest);
-      alertNewRequest(newest, fresh.length > 1 ? ` (+${fresh.length - 1} more waiting)` : "");
+      alertNewRequest();
     } else {
-      // Dialog busy — ring so the queued request isn't missed.
-      showToast(
-        `${fresh.length} new booking request${fresh.length === 1 ? "" : "s"} waiting — finish this one first.`,
-        "warning",
-        8000
-      );
+      // Dialog busy — ring so the queued request isn't missed (no message
+      // popup; the next request dialog pops as soon as this one closes).
       playAlarmSound();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookings]);
+  }, [bookings, broadcastRequests]);
 
   // After a dialog closes (accept / decline / dismiss), pop the next still-
   // pending request so stacked arrivals are each answered in turn.
   const popNextPendingRequest = (excludeId) => {
-    const next = [...(bookings || [])]
-      .filter((b) => b?.status === "requested" && String(b._id) !== String(excludeId || ""))
+    const next = [...(bookings || []), ...(broadcastRequests || [])]
+      .filter(
+        (b) =>
+          b?.status === "requested" &&
+          String(b._id) !== String(excludeId || "") &&
+          !handledRequestIds.current.has(String(b._id))
+      )
       .sort(byNewest)[0];
     if (next) {
       seenRequestIds.current.add(String(next._id));
       // Defer a tick so the current dialog's close animation/state settles.
       setTimeout(() => {
         setRequestModalBooking(next);
-        alertNewRequest(next);
+        alertNewRequest();
       }, 350);
     }
   };
@@ -362,7 +430,7 @@ const CookDashboard = () => {
         <div className="cook-modern-hero-inner">
           <Link
             to="/dashboard/cook-profile"
-            className="cook-modern-avatar-wrap cook-modern-avatar-link"
+            className="cook-modern-avatar-wrap cook-modern-avatar-link cook-hero-avatar-hide-mobile"
             title="Go to your profile"
             aria-label="Go to your profile"
           >
@@ -389,7 +457,7 @@ const CookDashboard = () => {
                 ? `${pendingRequests} new request${pendingRequests === 1 ? "" : "s"} waiting for you`
                 : "You're all caught up — relax!"}
             </p>
-            <div className="cook-hero-badges">
+            <div className="cook-hero-badges cook-hero-badges-hide-mobile">
               {approval === "approved" ? (
                 <span className="hero-pill ok">Verified cook</span>
               ) : approval === "rejected" ? (
@@ -412,19 +480,21 @@ const CookDashboard = () => {
               availabilityStatus={cookProfile?.availabilityStatus}
               onChanged={() => refetchCookProfile()}
             />
-            <button type="button" className="cook-glass-btn" onClick={() => setView("profile")}>
-              <UserRound size={15} /> Profile
-            </button>
-            <Link className="cook-glass-btn" to="/dashboard/cook-reviews">
-              <Star size={15} /> Reviews
-            </Link>
+            <div className="cook-hero-btn-row">
+              <button type="button" className="cook-glass-btn" onClick={() => setView("profile")}>
+                <UserRound size={15} /> Profile
+              </button>
+              <Link className="cook-glass-btn" to="/dashboard/cook-reviews">
+                <Star size={15} /> Reviews
+              </Link>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Stat shortcuts */}
       <div className="cook-stats-grid">
-        <button type="button" className="cook-stat-card" onClick={() => setView("needs-action")}>
+        <button type="button" className="cook-stat-card cook-stat-mob-hide" onClick={() => setView("needs-action")}>
           <div className="cook-stat-icon amber">
             <Inbox size={24} />
           </div>
@@ -433,7 +503,7 @@ const CookDashboard = () => {
             <div className="cook-stat-label">New requests</div>
           </div>
         </button>
-        <button type="button" className="cook-stat-card" onClick={() => setView("upcoming")}>
+        <button type="button" className="cook-stat-card cook-stat-mob-hide" onClick={() => setView("upcoming")}>
           <div className="cook-stat-icon blue">
             <CalendarDays size={24} />
           </div>
@@ -451,7 +521,7 @@ const CookDashboard = () => {
             <div className="cook-stat-label">Earned · {completedCount} done</div>
           </div>
         </button>
-        <Link className="cook-stat-card" to="/dashboard/cook-reviews">
+        <Link className="cook-stat-card cook-stat-mob-hide" to="/dashboard/cook-reviews">
           <div className="cook-stat-icon brand">
             <Star size={24} />
           </div>
@@ -461,6 +531,7 @@ const CookDashboard = () => {
           </div>
         </Link>
       </div>
+
 
       {!loadingProfile && (!cookProfile || approval !== "approved") && (
         <div className="cook-notice cook-notice-amber">
@@ -529,11 +600,21 @@ const CookDashboard = () => {
       {view !== "profile" && view !== "reports" && (
         <div>
 
+          {/* First-load spinner — only shown before any data has arrived */}
           {loadingBookings && <p className="cook-loading-text">Loading bookings...</p>}
+
+          {/* Subtle background-sync pill — data stays visible, just a quiet indicator */}
+          {!loadingBookings && refreshingBookings && (
+            <div className="cook-syncing-pill" aria-live="polite" aria-label="Syncing bookings">
+              <span className="cook-syncing-dot" />
+              Syncing…
+            </div>
+          )}
 
           {bookingError && <p className="error">{bookingError}</p>}
 
-          {!loadingBookings && bookings && bookings.length > 0 ? (
+          {/* Show the list whenever we have data — even while a background refresh is running */}
+          {bookings && bookings.length > 0 ? (
             visibleBookings.length > 0 ? (
             <div className="bookings-list-modern cook-bookings-grid">
               {visibleBookings.map((booking) => (
@@ -585,7 +666,7 @@ const CookDashboard = () => {
                         </p>
                       </div>
                     </div>
-                    <div className="cb-badges">{getStatusLabel(booking.status)}</div>
+                    <div className="cb-badges">{getStatusLabel(booking)}</div>
                   </div>
 
                   <div className="cb-meta">
@@ -673,7 +754,14 @@ const CookDashboard = () => {
                     </div>
                   )}
 
-                  {["accepted", "confirmed", "in_progress"].includes(booking.status) && (
+                  {booking.status === "accepted" && !isPaidBooking(booking) && (
+                    <div className="cb-hours-done" style={{ borderStyle: "dashed" }}>
+                      <BellRing size={16} />
+                      <span>Booking accepted — waiting for customer payment. It will appear in Today/Tomorrow once paid.</span>
+                    </div>
+                  )}
+
+                  {["accepted", "confirmed", "in_progress"].includes(booking.status) && isPaidBooking(booking) && (
                     <div className="booking-actions-row cb-actions">
                       <Link to={`/bookings/${booking._id}`} className="btn btn-outline btn-sm">
                         {booking.serviceStartedAt ? "View more" : "Start with OTP"} <ArrowRight size={15} />
@@ -692,6 +780,17 @@ const CookDashboard = () => {
                           <XCircle size={16} /> {cancellingId === booking._id ? "Cancelling…" : "Cancel Booking"}
                         </button>
                       )}
+                    </div>
+                  )}
+                  {booking.status === "accepted" && !isPaidBooking(booking) && !booking.serviceStartedAt && !isCancelLocked(booking) && (
+                    <div className="booking-actions-row cb-actions">
+                      <button
+                        className="btn btn-danger-outline btn-sm"
+                        onClick={() => setPendingCancelId(booking._id)}
+                        disabled={cancellingId === booking._id}
+                      >
+                        <XCircle size={16} /> {cancellingId === booking._id ? "Cancelling…" : "Cancel Booking"}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -727,9 +826,9 @@ const CookDashboard = () => {
                   {view === "needs-action"
                     ? "You're all caught up — new booking requests will pop up here."
                     : view === "today"
-                    ? "Bookings scheduled for today will show up here."
+                    ? "Paid, confirmed bookings for today will show up here. Accepted requests appear once the customer pays."
                     : view === "tomorrow"
-                    ? "Bookings scheduled for tomorrow will show up here."
+                    ? "Paid, confirmed bookings for tomorrow will show up here. Accepted requests appear once the customer pays."
                     : view === "upcoming"
                     ? "Accepted bookings will appear here with everything you need for the day."
                     : "Settled bookings (done or declined) will show up here."}
@@ -839,13 +938,14 @@ const CookDashboard = () => {
       )}
 
       {/* Booking request modal — auto-pops for every new `requested`
-          booking (polling + queue above) and on "Respond to Request".
-          Lives here so it sees requestModalBooking state + refetchBookings.
-          Shows the job summary with Accept / Decline buttons. */}
+          booking, direct or Find-Cook broadcast (polling + queue above).
+          Lives here so it sees requestModalBooking state + refetches.
+          Shows the job summary with Accept / Ignore buttons. */}
       <BookingRequestModal
         open={!!requestModalBooking}
         onClose={() => {
           const closedId = requestModalBooking?._id;
+          if (closedId) handledRequestIds.current.add(String(closedId));
           setRequestModalBooking(null);
           popNextPendingRequest(closedId);
         }}
@@ -854,7 +954,8 @@ const CookDashboard = () => {
           /* Modal handles its own API call + toast + close; we just
              refetch here in case parent state is stale. */
           const actedId = requestModalBooking?._id;
-          refetchBookings();
+          if (actedId) handledRequestIds.current.add(String(actedId));
+          refetchAllRequests();
           popNextPendingRequest(actedId);
         }}
       />

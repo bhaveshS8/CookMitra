@@ -15,6 +15,10 @@ const ProtectedRoute = ({ children, roles }) => {
     return <Navigate to={`/login?next=${next}`} replace />;
   }
   if (roles && !roles.includes(user.role)) {
+    // Send each role straight to its own landing page so cooks/admins
+    // never fall through to the marketing home page.
+    if (user.role === "admin") return <Navigate to="/admin" replace />;
+    if (user.role === "cook") return <Navigate to="/dashboard/cook-bookings" replace />;
     return <Navigate to="/" replace />;
   }
 

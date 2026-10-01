@@ -253,6 +253,32 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       check("ambiguous text lists pendings, writes nothing", r.body?.handled === 0 && wrote === false && /2 pending/.test(cookTexts), cookTexts.slice(0, 80));
     }
 
+    // ── Meta retry of the same tap (same wamid) -> deduped, single claim ──
+    {
+      sent.length = 0; notifs.length = 0;
+      const doc = mkBooking();
+      mockParties();
+      Booking.findById = async () => doc;
+      Booking.find = mockFind();
+      let claims = 0;
+      Booking.updateOne = async () => { claims += 1; doc.status = "accepted"; return { modifiedCount: 1 }; };
+      const WebhookEvent = require("./models/WebhookEvent");
+      const savedWE = WebhookEvent.create;
+      const seen = new Set();
+      WebhookEvent.create = async (e) => {
+        if (seen.has(e.key)) { const err = new Error("dup"); err.code = 11000; throw err; }
+        seen.add(e.key);
+        return e;
+      };
+      // reset to requested between the two deliveries (same tap retried)
+      const retryMsg = { from: COOK_WA, id: "wamid.retry1", type: "interactive", interactive: { type: "button_reply", button_reply: { id: `accept:${BID}`, title: "Accept" } } };
+      const raw = inboundBody([retryMsg]);
+      const r1 = await postInbound(raw, sign(raw));
+      const r2 = await postInbound(raw, sign(raw));
+      WebhookEvent.create = savedWE;
+      check("retry deduped: one claim only", r1.body?.handled === 1 && r2.body?.handled === 0 && claims === 1, `h1=${r1.body?.handled} h2=${r2.body?.handled} claims=${claims}`);
+    }
+
     // ── race lost (dashboard won) -> truthful reply ──
     {
       sent.length = 0;

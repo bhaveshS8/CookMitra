@@ -108,6 +108,8 @@
 .cook-hero-sub { color: rgba(255, 255, 255, 0.82); margin: 0; font-size: 0.92rem; }
 .cook-hero-badges { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.65rem; }
 .cook-hero-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; align-items: center; }
+/* Wrapper keeping Profile + Reviews buttons in a row at all breakpoints */
+.cook-hero-btn-row { display: inline-flex; gap: 0.5rem; flex-wrap: nowrap; }
 
 /* ---- 5. Stats (clickable shortcut cards) ---- */
 .cook-stats-grid {
@@ -640,8 +642,38 @@
   padding: 0.5rem 0.7rem;
 }
 
-/* ---- 14. Loading text ---- */
+/* ---- 14. Loading / syncing indicators ---- */
 .cook-loading-text { color: var(--cook-ink-faint); font-weight: 600; }
+
+/* Subtle background-sync pill: floats top-right of the bookings area,
+   never shifts layout, disappears as soon as the poll resolves. */
+.cook-syncing-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--cook-ink-faint);
+  background: var(--slate-50);
+  border: 1px solid var(--cook-card-border);
+  border-radius: 99px;
+  padding: 0.22rem 0.65rem;
+  margin-bottom: 0.6rem;
+  user-select: none;
+  pointer-events: none;
+}
+.cook-syncing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  animation: cookSyncPulse 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes cookSyncPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.4; transform: scale(0.75); }
+}
 
 /* ---- 15. Responsive + reduced motion ---- */
 @media (max-width: 640px) {
@@ -650,10 +682,33 @@
   .cook-modal-card { padding: 1.4rem 1.1rem; }
   .cook-customer-row h3 { white-space: normal; }
   .cook-page-head-title h1 { font-size: 1.4rem; }
+
+  /* Hero: hide avatar and verification/rating badges on mobile */
+  .cook-hero-avatar-hide-mobile { display: none; }
+  .cook-hero-badges-hide-mobile { display: none; }
+
+  /* Profile + Reviews buttons always sit side-by-side in a row on mobile */
+  .cook-hero-btn-row {
+    display: flex;
+    flex-direction: row;
+    gap: 0.5rem;
+    width: 100%;
+  }
+  .cook-hero-btn-row .cook-glass-btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  /* Stats grid: only show the Earned card on mobile */
+  .cook-stat-mob-hide { display: none; }
+  .cook-stats-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .cook-dash, .cook-stat-card, .cook-card { animation: none; }
   .cook-btn, .cook-avail, .cook-stat-card, .cook-card, .cook-svc, .cook-tab { transition: none; }
   .cook-btn:hover, .cook-avail:hover, .cook-stat-card:hover, .cook-card:hover, .cook-svc:hover { transform: none; }
+  .cook-syncing-dot { animation: none; }
 }

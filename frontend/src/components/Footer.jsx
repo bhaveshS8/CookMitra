@@ -60,19 +60,6 @@ const Footer = () => {
             </ul>
           </div>
 
-          {/* Services */}
-          {!hideCustomerPages && (
-            <div className="footer-links-col">
-              <h4>Services</h4>
-              <ul className="footer-links-list">
-                <li><Link to="/cook-on-demand?serviceType=cook_for_me">Cook For Me</Link></li>
-                <li><Link to="/cook-on-demand?serviceType=cook_with_me">Cook With Me</Link></li>
-                <li><Link to="/cook-on-demand?serviceType=teach_me">Teach Me</Link></li>
-                <li><Link to="/cook-on-demand?serviceType=preparation_help">Preparation Help</Link></li>
-              </ul>
-            </div>
-          )}
-
           {/* Contact & Support */}
           <div className="footer-links-col">
             <h4>Reach Us</h4>

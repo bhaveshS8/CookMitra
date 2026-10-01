@@ -505,12 +505,12 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     setFormData((prev) => ({ ...prev, ...d.form }));
     if (d.coords?.lat != null) setCoords(d.coords);
     setStep(1);
-    showToast("Welcome back — your booking details were restored. Just tap Send Request.", "success");
+    showToast("Welcome back — your booking details were restored. Just tap Find Cook.", "success");
     clearBookingDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, cookId]);
 
-  /* ── Submit ── */
+  /* ── Submit (Find-Cook broadcast) ── */
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!user) {
@@ -529,7 +529,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     if (!formData.durationHours || !Number.isInteger(serviceHours) || serviceHours < DURATION_MIN || serviceHours > DURATION_MAX) {
       fail("Please choose 1, 2, 3 or 4 hours"); return;
     }
-    if (!resolvedCookUserId) { fail("Cook details loading — retry"); return; }
     if (!formData.startTime || !derivedEndTime) { fail("Pick a start time"); return; }
     if (endsAfterServiceDay) { fail("Must end by 8 PM"); return; }
     if (startInPast) { fail("Time passed — pick later"); return; }
@@ -537,23 +536,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     // the slot can fill while the customer types the address on step 1).
     if (slotBusyError) { fail(slotBusyError); return; }
     if (checkingSlot) { fail("Checking live availability — one moment…"); return; }
-    // Final guard at submit: re-verify the exact window is still free so a
-    // stale review screen can never book a cook who just got booked.
-    try {
-      const chk = await API.get(`/availability/${encodeURIComponent(resolvedCookUserId)}`, {
-        params: { date: formData.date, startTime: formData.startTime, endTime: derivedEndTime },
-      });
-      if (chk?.data && typeof chk.data === "object" && "free" in chk.data && chk.data.free !== true) {
-        fail(chk.data.reason || "This cook just got booked for those hours — please pick another time.");
-        return;
-      }
-    } catch (chkErr) {
-      if (chkErr?.response?.status >= 400 && chkErr?.response?.status < 500) {
-        fail(chkErr.response?.data?.message || "That slot is no longer free — please pick another time.");
-        return;
-      }
-      // Network failure: fall through — the server re-checks at creation.
-    }
 
     if (!formData.flatNo.trim()) { fail("Enter flat / house number"); return; }
     if (!formData.society.trim()) { fail("Enter society / street"); return; }
@@ -565,8 +547,10 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     setSubmitting(true); setError("");
     try {
       const selectedItems = formData.notes.split(/[,;]+/).map((d) => d.trim()).filter(Boolean);
+      // Find-Cook: never send a cook id — the server always creates
+      // cook = null and the first atomic accept wins. (A slot found on this
+      // profile page is a hint, not a reservation.)
       const payload = {
-        cook: resolvedCookUserId,
         serviceType: DEFAULT_SERVICE_TYPE,
         date: formData.date,
         startTime: formData.startTime,
@@ -583,7 +567,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
         guests: formData.guests === "" ? undefined : Number(formData.guests),
         durationHours: serviceHours,
         couponCode: coupon?.code || "",
-        amount: finalAmount,
       };
       if (coords) payload.location = coords;
       const res = await API.post("/bookings", payload);
@@ -594,9 +577,8 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
         duration_hours: serviceHours,
         amount: Number(finalAmount) || 0,
         ...(coupon?.code ? { coupon_code: coupon.code } : {}),
-        ...(cookId ? { cook_id: String(cookId) } : {}),
       });
-      showToast("Request sent — slot held for 5 min.", "success", 7000);
+      showToast("Finding a cook for you — we're contacting available cooks now.", "success", 7000);
       onSubmit?.(res.data);
       navigate(`/bookings/${res.data._id}/wait`);
     } catch (err) {
@@ -1129,7 +1111,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
                 </>
               )}
             </button>
-            <p className="bk-foot-note"><ShieldCheck size={12} /> No payment now — slot held for 5 min while {cookFirst || "the cook"} decides. Free cancellation before acceptance.</p>
+            <p className="bk-foot-note"><ShieldCheck size={12} /> No payment now — we contact free cooks for your slot and the first to accept gets your booking. Free cancellation while waiting.</p>
           </div>
         </>
       )}
@@ -1161,7 +1143,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
           )}
           {step === 1 && (
             <button type="submit" className="bk-next-btn bk-send-btn" disabled={submitting || checkingSlot || Boolean(slotBusyError)}>
-              {submitting ? "Sending…" : (<>Send Request <ArrowRight size={16} /></>)}
+              {submitting ? "Finding…" : (<>Find Cook <ArrowRight size={16} /></>)}
             </button>
           )}
         </div>

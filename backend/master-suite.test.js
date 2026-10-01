@@ -151,12 +151,19 @@ async function testCustomer() {
 
   // 4.1 createBooking blocks escalation: customer override, status flip and
   //     injected lifecycle flags (cookArrived/hoursCompleted/cookLocation) are ignored.
+  //     Find-Cook: a tampered `cook` id is ALSO ignored — every booking is
+  //     created unassigned (cook = null) for atomic claiming.
   {
-    const oCP = CookProfile.findOne, oAF = Availability.find, oBF = Booking.find, oBC = Booking.create, oN = Notification.create, oUF = User.findById;
+    const oCP = CookProfile.findOne, oCPF = CookProfile.find, oAF = Availability.find, oBF = Booking.find, oBC = Booking.create, oN = Notification.create, oUF = User.findById;
+    const slots = require("./utils/slots");
+    const oW = slots.getDayWindows, oA = slots.resolveCookAvailability;
+    slots.getDayWindows = async () => [{ startTime: "08:00", endTime: "20:00" }];
+    slots.resolveCookAvailability = async () => true;
     let createdDoc = null;
     const userId = new Types.ObjectId().toString();
     const cookId = new Types.ObjectId().toString();
     CookProfile.findOne = async () => ({ rate: 500, liveLocation: null });
+    CookProfile.find = () => ({ populate: () => ({ lean: async () => [{ user: { _id: cookId, name: "Chef", status: "active" }, approvalStatus: "approved", serviceTypes: [] }] }) });
     Availability.find = () => ({ sort: () => Promise.resolve([win]) });
     Booking.find = () => ({ select: () => ({ lean: async () => [] }) });
     Booking.create = async (d) => { createdDoc = d; return { _id: new Types.ObjectId(), ...d, toObject: () => createdDoc }; };
@@ -184,10 +191,10 @@ async function testCustomer() {
         },
         r, next
       );
-      check("4.1 booking create ignores customer tamper", r.statusCode === 201 && String(createdDoc.customer) === userId, `s=${r.statusCode} customer=${String(createdDoc?.customer) === userId}`);
+      check("4.1 booking create ignores customer tamper", r.statusCode === 201 && String(createdDoc.customer) === userId && createdDoc.cook === null, `s=${r.statusCode} customer=${String(createdDoc?.customer) === userId} cook=${createdDoc?.cook}`);
       check("4.1 booking create ignores injected lifecycle flags", createdDoc?.status === "requested" && createdDoc?.cookArrived === undefined && createdDoc?.hoursCompleted === undefined && createdDoc?.cookLocation === undefined && createdDoc?.payment?.status === "pending", `status=${createdDoc?.status} arrived=${createdDoc?.cookArrived}`);
     } catch (e) { check("4.1 booking create escalation", false, e.message); }
-    finally { CookProfile.findOne = oCP; Availability.find = oAF; Booking.find = oBF; Booking.create = oBC; Notification.create = oN; User.findById = oUF; }
+    finally { CookProfile.findOne = oCP; CookProfile.find = oCPF; Availability.find = oAF; Booking.find = oBF; Booking.create = oBC; Notification.create = oN; User.findById = oUF; slots.getDayWindows = oW; slots.resolveCookAvailability = oA; }
   }
 
   // 4.2 cancelBooking refuses terminal states (rejected stays rejected)

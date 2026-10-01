@@ -44,8 +44,8 @@ const UNATTENDED_STATUSES = ["unattended"];
 // emerald "Confirmed" badge already states it, so "Confirmed — paid" was
 // redundant noise on the customer's own card.
 const ACTION_FOR = {
-  requested: { label: "Waiting for the cook to respond" },
-  accepted: { label: "Accepted — payment needed" },
+  requested: { label: "Finding a cook…" },
+  accepted: { label: "Cook found — payment required" },
   in_progress: { label: "Session live" },
 };
 
@@ -270,7 +270,9 @@ const CustomerDashboard = () => {
   // OTP/call strip, chevron, action footer) for Active/Expired/Unattended/
   // Cancelled/Declined rows — keeping each row's own action line and CTA.
   const renderActiveCard = (booking, { actionIcon: ActionIcon, actionTitle, footHint, cta }) => {
-    const cookName = booking.cook?.name || "Your cook";
+    // Broadcast requests have no cook yet — show the search state, never a
+    // fake cook name. The server-assigned cook appears after acceptance.
+    const cookName = booking.cook?.name || (booking.status === "requested" ? "Finding your cook…" : "Your cook");
     const initial = (cookName || "C").charAt(0).toUpperCase();
     const ref = booking._id?.substring(18).toUpperCase();
     const dishes = booking.selectedItems || [];
@@ -439,10 +441,15 @@ const CustomerDashboard = () => {
               const showReschedule =
                 !needsPayment &&
                 canRescheduleBooking(booking, { role: "customer" });
+              const stillFinding = booking.status === "requested";
               return renderActiveCard(booking, {
                 actionIcon: needsPayment ? Wallet : booking.status === "requested" ? Clock3 : Calendar,
                 actionTitle: needsPayment ? "Complete your payment" : action.label,
-                footHint: needsPayment ? "Complete payment to confirm your slot." : null,
+                footHint: needsPayment
+                  ? "Complete payment to confirm your slot."
+                  : stillFinding
+                    ? "We're contacting available cooks — watch it live."
+                    : null,
                 cta: needsPayment ? (
                   <Link
                     to={`/bookings/${booking._id}/pay`}
@@ -450,6 +457,14 @@ const CustomerDashboard = () => {
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Wallet size={14} /> Pay now
+                  </Link>
+                ) : stillFinding ? (
+                  <Link
+                    to={`/bookings/${booking._id}/wait`}
+                    className="btn btn-primary btn-sm my-active-cta"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Clock3 size={14} /> View live status
                   </Link>
                 ) : showReschedule ? (
                   <Link
@@ -509,15 +524,15 @@ const CustomerDashboard = () => {
       {expiredBookings.length > 0 && (
         <section className="my-active-section" aria-label="Expired requests — find another cook">
           <h2 className="my-section-title">
-            <XCircle size={17} /> Time&apos;s up — find another cook
+            <XCircle size={17} /> No cook was available
             <span className="my-section-count">{expiredBookings.length}</span>
           </h2>
           <div className="bookings-list-modern my-bookings-list my-active-list">
             {expiredBookings.map((booking) =>
               renderActiveCard(booking, {
                 actionIcon: XCircle,
-                actionTitle: "No response from cook",
-                footHint: "The cook didn't respond in time.",
+                actionTitle: "No cook accepted in time",
+                footHint: "No cook was available — start a fresh search for the same slot.",
                 cta: (
                   <button
                     type="button"

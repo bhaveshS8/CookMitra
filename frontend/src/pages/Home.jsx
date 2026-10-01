@@ -13,9 +13,6 @@ import {
   ArrowRight,
   CalendarClock,
   ChefHat,
-  Users,
-  GraduationCap,
-  HandHelping,
   Star,
   CheckCircle2,
   CalendarCheck,
@@ -312,53 +309,6 @@ const Home = () => {
     return () => io.disconnect();
   }, []);
 
-  const services = [
-    {
-      id: "cook_for_me",
-      title: "Cook for Me",
-      tagline: "Most Popular",
-      description: "Host effortlessly while a skilled chef prepares authentic festival meals right in your home kitchen.",
-      icon: <ChefHat size={24} />,
-      bg: "linear-gradient(135deg, #fff7ed, #ffedd5)",
-      color: "#c2410c",
-      accent: "linear-gradient(135deg, #f59e0b, #ea580c)",
-      perks: ["Full meal prep & plating", "Traditional authentic spices", "Kitchen left clean & tidy"],
-    },
-    {
-      id: "cook_with_me",
-      title: "Cook With Me",
-      tagline: "Family Favourite",
-      description: "Team up with an experienced home chef to knead, fry, shape, and cook festive snacks together.",
-      icon: <Users size={24} />,
-      bg: "linear-gradient(135deg, #ecfdf5, #d1fae5)",
-      color: "#047857",
-      accent: "linear-gradient(135deg, #10b981, #047857)",
-      perks: ["Hands-on partnership", "Great for family bonding", "Share traditional recipes"],
-    },
-    {
-      id: "teach_me",
-      title: "Teach Me",
-      tagline: "Learn Heritage",
-      description: "Master intricate culinary techniques like one-string sugar syrup, chakli spiral shaping, and modak pleating.",
-      icon: <GraduationCap size={24} />,
-      bg: "linear-gradient(135deg, #eff6ff, #dbeafe)",
-      color: "#1d4ed8",
-      accent: "linear-gradient(135deg, #3b82f6, #1d4ed8)",
-      perks: ["Step-by-step guidance", "Troubleshooting tips", "Heritage secret ratios"],
-    },
-    {
-      id: "preparation_help",
-      title: "Preparation Help",
-      tagline: "Save Hours",
-      description: "Get reliable helping hands for labor-intensive tasks like grating coconut, chopping, kneading, and deep-frying.",
-      icon: <HandHelping size={24} />,
-      bg: "linear-gradient(135deg, #f5f3ff, #ede9fe)",
-      color: "#6d28d9",
-      accent: "linear-gradient(135deg, #8b5cf6, #6d28d9)",
-      perks: ["Saves hours of prep time", "Ideal for large gatherings", "Focused prep assistance"],
-    },
-  ];
-
   const testimonials = [
     {
       name: "Ananya Deshpande",
@@ -432,9 +382,6 @@ const Home = () => {
                   <Link to="/cook-on-demand" className="btn btn-lg hero-v2-btn-primary">
                     <ChefHat size={18} /> Book a Cook <ArrowRight size={18} />
                   </Link>
-                  <a href="#services" className="btn btn-lg hero-v2-btn-ghost">
-                    Explore Services ↓
-                  </a>
                 </>
               )}
             </div>
@@ -604,54 +551,6 @@ const Home = () => {
             <h3>4. Savor & Review</h3>
             <p>Enjoy delicious authentic flavors with your family, then share your review and experience with the community.</p>
           </div>
-        </div>
-      </section>
-
-      {/* Services Showcase */}
-      <section className="services-section" id="services">
-        <div className="section-header">
-          <span className="section-eyebrow">Tailored For Your Occasion</span>
-          <h2 className="section-title">Flexible Cooking Services</h2>
-          <p className="section-description">
-            Whether you need hands-off catering or a private masterclass, our verified cooks adapt to your preferences.
-          </p>
-        </div>
-
-        <div className="services-grid-modern">
-          {services.map((svc) => (
-            <article key={svc.id} className="service-card-modern">
-              <span className="service-accent-bar" style={{ background: svc.accent }} aria-hidden="true" />
-              <div className="service-card-top">
-                <div
-                  className="service-icon-wrapper"
-                  style={{ background: svc.bg, color: svc.color }}
-                >
-                  {svc.icon}
-                </div>
-                <span className="service-tagline" style={{ color: svc.color, background: svc.bg }}>
-                  {svc.tagline}
-                </span>
-              </div>
-              <h3>{svc.title}</h3>
-              <p className="service-desc">{svc.description}</p>
-              <ul className="service-card-perks">
-                {svc.perks.map((perk, i) => (
-                  <li key={i}>
-                    <CheckCircle2 size={16} style={{ color: svc.color }} /> {perk}
-                  </li>
-                ))}
-              </ul>
-              <Link
-                to={`/cook-on-demand?serviceType=${svc.id}`}
-                className="service-learn-more"
-                style={{ color: svc.color }}
-                aria-label={`Book now - ${svc.title}`}
-              >
-                <span>Book now</span>
-                <ArrowRight size={15} />
-              </Link>
-            </article>
-          ))}
         </div>
       </section>
 

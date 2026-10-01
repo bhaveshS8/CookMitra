@@ -684,37 +684,93 @@ const pickBookingCustomerFields = (obj) => {
   return out;
 };
 
+// ── Find-Cook broadcast: eligible-cook resolution ─────────────────────────
+// A cook is eligible for a broadcast request only if EVERY check passes:
+// approved profile, live (non-suspended) account, currently available
+// toggle, service-type membership (when the profile declares one), the
+// requested window fits inside the cook's open windows, and no conflicting
+// live booking/hold overlaps the slot. Optionally excludes cooks who
+// already ignored this request. Batched: one profile query + one bookings
+// $in query, then in-memory math per cook (same pattern as the
+// availability search). Snapshot only — acceptance re-checks everything.
+const findEligibleCooks = async ({ date, startTime, endTime, serviceType, excludeCookIds = [] }) => {
+  const excluded = new Set((excludeCookIds || []).map((id) => String(id)));
+  let profiles = [];
+  try {
+    profiles = await CookProfile.find({ approvalStatus: "approved" })
+      .populate("user", "name status")
+      .lean();
+  } catch {
+    return [];
+  }
+  const live = [];
+  for (const p of profiles || []) {
+    const userId = p?.user?._id || p?.user;
+    if (!userId) continue;
+    if (excluded.has(String(userId))) continue;
+    // Service-type membership — only when the profile declares a list
+    // (legacy profiles with an empty list can perform any service).
+    if (
+      Array.isArray(p.serviceTypes) &&
+      p.serviceTypes.length > 0 &&
+      serviceType &&
+      !p.serviceTypes.includes(serviceType)
+    ) {
+      continue;
+    }
+    if (!p.user || p.user.status === "suspended") continue;
+    let available = false;
+    try {
+      available = await resolveCookAvailability(p);
+    } catch {
+      available = false;
+    }
+    if (!available) continue;
+    live.push({ profile: p, userId: String(userId) });
+  }
+  if (!live.length) return [];
+  // One bookings lookup for every candidate on that day, then in-memory
+  // window + overlap math per cook.
+  let byCook = new Map();
+  try {
+    const { start: dayStart, end: dayEnd } = dayBounds(date);
+    const allBookings = await Booking.find({
+      cook: { $in: live.map((c) => c.userId) },
+      date: { $gte: dayStart, $lte: dayEnd },
+      $or: activeSlotMatch(),
+    })
+      .select("cook startTime endTime status")
+      .lean();
+    for (const b of allBookings || []) {
+      const key = String(b.cook);
+      if (!byCook.has(key)) byCook.set(key, []);
+      byCook.get(key).push(b);
+    }
+  } catch {
+    byCook = new Map();
+  }
+  const eligible = [];
+  for (const { profile, userId } of live) {
+    let windows = [];
+    try {
+      windows = await getDayWindows(userId, date);
+    } catch {
+      windows = [];
+    }
+    if (!findContainingWindow(windows, startTime, endTime)) continue;
+    if (findOverlapBooking(byCook.get(userId) || [], startTime, endTime)) continue;
+    eligible.push({ profile, userId });
+  }
+  return eligible;
+};
+exports.findEligibleCooks = findEligibleCooks;
+
 exports.createBooking = async (req, res, next) => {
   try {
-    const { cook, date, startTime, endTime } = req.body;
-
-    const cookProfile = await CookProfile.findOne({
-      user: cook,
-      approvalStatus: "approved",
-    });
-    if (!cookProfile) {
-      return res.status(400).json({ message: "Cook not found or not approved" });
-    }
-
-    // A suspended account can't take new bookings even while the profile
-    // still reads approved (discovery filters hide it; direct POSTs must
-    // not bypass that). Skipped without a DB connection (unit-test path).
-    if (dbReady()) {
-      try {
-        const cookAccount = await User.findById(cook).select("status");
-        if (!cookAccount || cookAccount.status === "suspended") {
-          return res.status(400).json({ message: "Cook not found or not approved" });
-        }
-      } catch {
-        return res.status(400).json({ message: "Cook not found or not approved" });
-      }
-    }
-
-    // The cook's own unavailable toggle is the only opt-out from the
-    // default all-hours availability (auto-resets the next day).
-    if (!(await resolveCookAvailability(cookProfile))) {
-      return res.status(400).json({ message: "Cook is currently unavailable — please try another cook or date" });
-    }
+    // Find-Cook flow: the client NEVER chooses the cook. Any `cook` /
+    // `cookId` in the body is untrusted input and is ignored — the booking
+    // is created unassigned (cook = null) and the first atomic accept wins.
+    const { date, startTime, endTime } = req.body;
 
     // Strict date/time validation (server-side, IST): full HH:MM shape,
     // real calendar day, 30-minute grid, whole-hour 1–4h sessions. Frontend
@@ -766,35 +822,59 @@ exports.createBooking = async (req, res, next) => {
       }
     }
 
-    // The requested window must fit inside one of the cook's open windows.
-    // Overlap is checked against every booking currently occupying the
-    // calendar: accepted/confirmed/in_progress (permanent) AND pending
-    // "requested" ones inside their 5-minute hold (see getDayBookings), so a
-    // held slot is invisible and unbookable for all other customers.
-    const windows = await getDayWindows(cook, date);
-    const containing = findContainingWindow(windows, startTime, endTime);
-    if (!containing) {
-      return res.status(400).json({ message: "Cook is not available for the selected time" });
+    // The requested window must be servable by at least one eligible cook
+    // right now (approved + live + available + window fits + no overlap).
+    // Eligibility is a snapshot — acceptance re-checks everything — but a
+    // request nobody can serve must fail fast instead of stranding the
+    // customer on the waiting screen.
+    let eligibleCooks = [];
+    try {
+      eligibleCooks = await findEligibleCooks({
+        date,
+        startTime,
+        endTime,
+        serviceType: req.body.serviceType,
+      });
+    } catch {
+      eligibleCooks = [];
     }
-    const activeBookings = await getDayBookings(cook, date);
-    const clash = findOverlapBooking(activeBookings, startTime, endTime);
-    if (clash) {
-      // Same-key retry racing its own winner: the clash may be with the hold
-      // this very request created a millisecond ago (true-concurrent double
-      // submit). Return the original instead of a confusing 409 — idempotency
-      // must hold under concurrency, not just sequentially.
-      if (clientKey && dbReady()) {
-        try {
-          const mine = await Booking.findOne({ clientKey, customer: req.user.id });
-          if (mine) {
-            const mineObj = mine.toObject ? mine.toObject() : mine;
-            return res.status(200).json({ ...mineObj, alreadyExists: true });
+    if (!eligibleCooks.length) {
+      return res.status(409).json({ message: "No cooks are free for that slot right now — please try another time." });
+    }
+    // The customer cannot hold two overlapping live bookings for the same
+    // window (double-booking themselves).
+    try {
+      if (dbReady()) {
+        const { start: custDayStart, end: custDayEnd } = dayBounds(date);
+        const ownLive = await Booking.find({
+          customer: req.user.id,
+          date: { $gte: custDayStart, $lte: custDayEnd },
+          $or: activeSlotMatch(),
+        }).select("startTime endTime status");
+        const mine = timeToMinutes(startTime);
+        const mineEnd = timeToMinutes(endTime);
+        const selfClash = (ownLive || []).some((r) => {
+          const rs = timeToMinutes(r.startTime);
+          const re = timeToMinutes(r.endTime);
+          return rs != null && re != null && intervalsOverlap(mine, mineEnd, rs, re);
+        });
+        if (selfClash) {
+          if (clientKey) {
+            try {
+              const existing = await Booking.findOne({ clientKey, customer: req.user.id });
+              if (existing) {
+                const existingObj = existing.toObject ? existing.toObject() : existing;
+                return res.status(200).json({ ...existingObj, alreadyExists: true });
+              }
+            } catch {
+              // non-fatal: fall through to the 409 below
+            }
           }
-        } catch {
-          // non-fatal: fall through to the 409 below
+          return res.status(409).json({ message: "You already have a booking for that time." });
         }
       }
-      return res.status(409).json({ message: "This slot is no longer available — it's booked or on hold for another request. Please pick a different start time." });
+    } catch {
+      // non-fatal: the per-cook eligibility above already gated the request
     }
 
     // Payment is optional (online pay-before-booking removed): when Razorpay
@@ -956,7 +1036,9 @@ exports.createBooking = async (req, res, next) => {
     try {
       booking = await Booking.create({
         customer: req.user.id,
-        cook,
+        // Find-Cook: always unassigned at creation — never from the client.
+        cook: null,
+        ignoredBy: [],
         ...pickBookingCustomerFields(req.body),
         // billedHours is validated above to match any stated duration, so it is
         // the authoritative duration — persisting it keeps the start/pay flows
@@ -1026,16 +1108,16 @@ exports.createBooking = async (req, res, next) => {
       throw createErr;
     }
 
-    // Close the two-user race: two customers can pass the pre-create overlap
-    // check at the same moment. Re-check AFTER inserting — if an older rival
-    // (smaller _id = created earlier) occupies an overlapping interval, this
-    // request loses: delete it and tell this customer the slot went elsewhere.
-    // The older request never deletes itself, so at most one of two racing
-    // requests survives and the slot can never end up double-booked.
+    // Close the two-customer race: two customers can pass the eligibility
+    // snapshot at the same moment. Re-check AFTER inserting — if this
+    // customer's own older overlapping live booking (smaller _id = created
+    // earlier) occupies the interval, this request loses: delete it and
+    // return the surviving original. (Per-cook double-booking is closed at
+    // accept time by the atomic claim + overlap re-check there.)
     try {
       const { start: raceDayStart, end: raceDayEnd } = dayBounds(booking.date);
       const rivals = await Booking.find({
-        cook,
+        customer: req.user.id,
         _id: { $ne: booking._id },
         date: { $gte: raceDayStart, $lte: raceDayEnd },
         $or: activeSlotMatch(),
@@ -1147,15 +1229,37 @@ exports.createBooking = async (req, res, next) => {
 
     // Build WhatsApp URLs for cook notification
 
-    // Non-fatal: the booking already exists — a notification outage must not
-    // 500 the request (the client would retry and double-book).
+    // Broadcast the request to every eligible cook (same bookingId). The
+    // booking already exists — a notification outage must not 500 the
+    // request (the client would retry and double-book). Eligibility is
+    // re-resolved here so the notify set matches the final persisted slot.
     try {
-      await Notification.create({
-        user: cook,
+      let notifyCooks = eligibleCooks;
+      try {
+        const fresh = await findEligibleCooks({
+          date,
+          startTime,
+          endTime,
+          serviceType: req.body.serviceType,
+        });
+        if (fresh.length) notifyCooks = fresh;
+      } catch {
+        // fall back to the pre-create snapshot
+      }
+      const notifDocs = (notifyCooks || []).map((c) => ({
+        user: c.userId,
         type: "booking_request",
         booking: booking._id,
         message: `New booking request from ${req.user.name || "a customer"}`,
-      });
+      }));
+      // Insert one row per cook; duplicates impossible (fresh booking id).
+      for (const doc of notifDocs) {
+        try {
+          await Notification.create(doc);
+        } catch {
+          // per-cook best effort — one failure must not block the rest
+        }
+      }
     } catch {
       // non-fatal: booking creation already succeeded
     }
@@ -1691,17 +1795,227 @@ exports.getCookBookings = async (req, res, next) => {
   }
 };
 
+// Broadcast request feed for cooks: unassigned REQUESTED bookings inside
+// their 5-minute window that THIS cook is currently eligible for
+// (approved + live + available + window fits + no overlap + not ignored).
+// Snapshot only — the atomic accept claim decides the winner. Cooks poll
+// this alongside /bookings/cook; each request pops the Accept/Ignore dialog.
+exports.getCookRequests = async (req, res, next) => {
+  try {
+    const me = String(req.user.id);
+    const now = new Date();
+    const candidates = await Booking.find({
+      status: "requested",
+      $and: [{ cook: null }, { requestExpiresAt: { $gt: now } }],
+      ignoredBy: { $ne: req.user.id },
+    })
+      .populate("customer", "name")
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+    // Eligibility snapshot for THIS cook (same rules as acceptance).
+    let profile = null;
+    try {
+      profile = await CookProfile.findOne({ user: req.user.id }).lean();
+    } catch {
+      profile = null;
+    }
+    const eligibleNow = async (b) => {
+      if (!profile || profile.approvalStatus !== "approved") return false;
+      if (dbReady()) {
+        try {
+          const account = await User.findById(req.user.id).select("status").lean();
+          if (!account || account.status === "suspended") return false;
+        } catch {
+          return false;
+        }
+      }
+      try {
+        if (!(await resolveCookAvailability(profile))) return false;
+      } catch {
+        return false;
+      }
+      if (
+        Array.isArray(profile.serviceTypes) &&
+        profile.serviceTypes.length > 0 &&
+        b.serviceType &&
+        !profile.serviceTypes.includes(b.serviceType)
+      ) {
+        return false;
+      }
+      const dayStr = istDayString(b.date);
+      let windows = [];
+      try {
+        windows = await getDayWindows(req.user.id, dayStr);
+      } catch {
+        return false;
+      }
+      if (!findContainingWindow(windows, b.startTime, b.endTime)) return false;
+      try {
+        const rivals = await getDayBookings(req.user.id, dayStr);
+        if (findOverlapBooking(rivals.filter((r) => String(r._id) !== String(b._id)), b.startTime, b.endTime)) return false;
+      } catch {
+        return false;
+      }
+      return true;
+    };
+    const out = [];
+    for (const b of candidates || []) {
+      // Belt-and-braces with the ignoredBy:$ne query above: a request this
+      // cook already ignored must never re-surface here.
+      if (Array.isArray(b.ignoredBy) && b.ignoredBy.map((id) => String(id)).includes(me)) continue;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        if (!(await eligibleNow(b))) continue;
+      } catch {
+        continue;
+      }
+      const obj = { ...b };
+      // Privacy: broadcast readers see the customer name + venue, never the
+      // phone/email. The full contact arrives only after this cook accepts.
+      if (obj.customer && typeof obj.customer === "object") {
+        delete obj.customer.email;
+        delete obj.customer.phone;
+      }
+      out.push(stripServiceOtp(obj));
+    }
+    res.json(out);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── Payment-gated cook schedule ──────────────────────────────────────────
+// ASSIGNED ≠ SCHEDULED: a booking appears in the cook's Today/Tomorrow only
+// after backend-verified payment. Enforced HERE at the query layer — the
+// frontend only displays what this returns, so forged client state, stale
+// tabs, refreshes or direct API calls can never surface an unpaid booking
+// as scheduled.
+//
+// Eligible = cook is me AND date in the requested IST day AND
+// payment.status is "paid" AND status is schedule-eligible. ACCEPTED+UNPAID
+// (waiting for the customer) is therefore invisible here by construction;
+// it stays reachable via /bookings/cook (Upcoming) and /bookings/:id.
+const SCHEDULE_ELIGIBLE_STATUSES = ["accepted", "confirmed", "in_progress", "completed"];
+exports.SCHEDULE_ELIGIBLE_STATUSES = SCHEDULE_ELIGIBLE_STATUSES;
+
+// GET /api/bookings/cook/schedule?day=today|tomorrow|YYYY-MM-DD
+exports.getCookSchedule = async (req, res, next) => {
+  try {
+    const rawDay = String(req.query?.day || "today").trim().toLowerCase();
+    let dayStr;
+    if (rawDay === "today") {
+      dayStr = istDayString(new Date());
+    } else if (rawDay === "tomorrow") {
+      const t = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      dayStr = istDayString(t);
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(rawDay) && parseDayStrict(rawDay)) {
+      dayStr = rawDay;
+    } else {
+      return res.status(400).json({ message: "day must be today, tomorrow, or YYYY-MM-DD" });
+    }
+    const { start: dayStart, end: dayEnd } = dayBounds(dayStr);
+    const filter = {
+      cook: req.user.id,
+      date: { $gte: dayStart, $lte: dayEnd },
+      status: { $in: SCHEDULE_ELIGIBLE_STATUSES },
+      "payment.status": "paid",
+    };
+    const bookings = await Booking.find(filter)
+      .populate("customer", "name phone")
+      .sort({ startTime: 1 })
+      .limit(HARD_CAP)
+      .lean();
+    // Lazy hours-complete flagging (same as the main cook list); re-check
+    // eligibility afterwards so a transition mid-read can't leak a dead row.
+    for (const b of bookings || []) {
+      try {
+        await markHoursCompleteIfNeeded(b);
+      } catch {
+        // non-fatal
+      }
+    }
+    const out = [];
+    for (const b of bookings || []) {
+      if (!SCHEDULE_ELIGIBLE_STATUSES.includes(b.status)) continue;
+      if (!b.payment || b.payment.status !== "paid") continue;
+      const obj = stripServiceOtp(b);
+      const end = sessionEndDate(b);
+      if (obj.customer && typeof obj.customer === "object" && !Array.isArray(obj.customer)) {
+        delete obj.customer.email;
+      }
+      out.push({ ...obj, sessionEnd: end ? end.toISOString() : null });
+    }
+    await attachCookPhotoUrls(out);
+    res.json(out);
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.acceptBooking = async (req, res, next) => {
   try {
-    // Cooks act only on their own bookings; admins may moderate any booking.
-    const filter = { _id: req.params.id };
-    if (String(req.user.role).toUpperCase() !== "ADMIN") filter.cook = req.user.id;
-    let booking = await Booking.findOne(filter);
+    const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
+    // Fetch by id only first: broadcast requests (cook == null) are
+    // claimable by any eligible cook; assigned bookings stay scoped to
+    // their own cook (admins may moderate any booking).
+    let booking = await Booking.findOne({ _id: req.params.id });
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
     }
+    const assignedCookId = booking.cook ? String(booking.cook) : null;
+    if (!isAdmin) {
+      if (assignedCookId && assignedCookId !== String(req.user.id)) {
+        // Someone already won this request: say so truthfully (409) so the
+        // losing cook's popup closes with "accepted by another cook" instead
+        // of a mystery 404. A still-pending request owned by another cook
+        // stays invisible (404) — same as before Find-Cook.
+        if (booking.status === "accepted") {
+          return res.status(409).json({
+            success: false,
+            code: "BOOKING_ALREADY_ASSIGNED",
+            message: "This booking has already been accepted by another cook.",
+          });
+        }
+        return res.status(404).json({ message: "Booking not found" });
+      }
+      // Broadcast (unassigned): any authenticated cook may attempt — the
+      // atomic claim + eligibility re-check below decide the winner.
+    }
+    // Never accept on someone else's identity: the cook always comes from
+    // the authenticated session, never from the request body.
+    const actingCookId = isAdmin
+      ? assignedCookId || String(req.body?.cookId || req.body?.cook || "")
+      : String(req.user.id);
+    if (isAdmin && !assignedCookId && !actingCookId) {
+      return res.status(400).json({ message: "Choose the cook to assign this request to." });
+    }
     if (booking.status !== "requested") {
+      // Idempotent winner re-accept: the assigned cook double-tapping Accept
+      // (or retrying after a timeout) gets success, not an error — no state
+      // changes, no duplicate history, no second payment window.
+      const wonByMe =
+        booking.status === "accepted" &&
+        assignedCookId &&
+        (isAdmin || assignedCookId === String(req.user.id));
+      if (wonByMe) {
+        const obj = stripServiceOtp(booking.toObject ? booking.toObject() : booking);
+        return res.json({ success: true, ...obj, alreadyAccepted: true });
+      }
       return res.status(400).json({ message: "Only pending requests can be accepted" });
+    }
+    // A cook who already ignored this broadcast request cannot accept it.
+    if (
+      !isAdmin &&
+      !assignedCookId &&
+      Array.isArray(booking.ignoredBy) &&
+      booking.ignoredBy.map((id) => String(id)).includes(String(req.user.id))
+    ) {
+      return res.status(409).json({
+        success: false,
+        code: "BOOKING_IGNORED_BY_YOU",
+        message: "You already ignored this request.",
+      });
     }
 
     // 5-minute window: a late accept is refused so the customer never waits
@@ -1729,8 +2043,105 @@ exports.acceptBooking = async (req, res, next) => {
       });
     }
 
-    // First accept wins: refuse if the slot has been booked since the request.
-    const cookIdForCheck = String(req.user.role).toUpperCase() === "ADMIN" ? booking.cook : req.user.id;
+    // Acceptance-time eligibility re-check (broadcast requests): the cook
+    // who was eligible at notify time may no longer be — approval, live
+    // account, availability toggle, service-type membership, open window
+    // and slot overlap are ALL re-verified here. First accept wins: refuse
+    // if the acting cook's slot has been booked since the request.
+    const cookIdForCheck = isAdmin ? actingCookId : req.user.id;
+    if (!isAdmin && !assignedCookId) {
+      try {
+        const profile = await CookProfile.findOne({ user: req.user.id });
+        if (!profile || profile.approvalStatus !== "approved") {
+          return res.status(409).json({
+            success: false,
+            code: "COOK_NOT_ELIGIBLE",
+            message: "Your cook profile is not approved for new requests right now.",
+          });
+        }
+        if (dbReady()) {
+          try {
+            const account = await User.findById(req.user.id).select("status");
+            if (!account || account.status === "suspended") {
+              return res.status(409).json({
+                success: false,
+                code: "COOK_NOT_ELIGIBLE",
+                message: "Your account cannot accept requests right now.",
+              });
+            }
+          } catch {
+            return res.status(500).json({ message: "Could not verify your account right now. Please try again." });
+          }
+        }
+        if (!(await resolveCookAvailability(profile))) {
+          return res.status(409).json({
+            success: false,
+            code: "COOK_NOT_ELIGIBLE",
+            message: "You are marked unavailable — flip back to Available to accept requests.",
+          });
+        }
+        if (
+          Array.isArray(profile.serviceTypes) &&
+          profile.serviceTypes.length > 0 &&
+          booking.serviceType &&
+          !profile.serviceTypes.includes(booking.serviceType)
+        ) {
+          return res.status(409).json({
+            success: false,
+            code: "COOK_NOT_ELIGIBLE",
+            message: "This request is for a service you don't offer.",
+          });
+        }
+        const dayStrForWindows = istDayString(booking.date);
+        let windows = [];
+        try {
+          windows = await getDayWindows(req.user.id, dayStrForWindows);
+        } catch {
+          windows = [];
+        }
+        if (!findContainingWindow(windows, booking.startTime, booking.endTime)) {
+          return res.status(409).json({
+            success: false,
+            code: "COOK_NOT_ELIGIBLE",
+            message: "You are not available for that time anymore.",
+          });
+        }
+      } catch (e) {
+        if (e?.statusCode) throw e;
+        return res.status(500).json({ message: "Could not verify eligibility right now. Please try again." });
+      }
+    }
+    // Admin assigning a broadcast request to an explicit cook: verify that
+    // cook the same way (never assign a suspended/unapproved cook).
+    if (isAdmin && !assignedCookId && actingCookId) {
+      try {
+        const profile = await CookProfile.findOne({ user: actingCookId });
+        if (!profile || profile.approvalStatus !== "approved") {
+          return res.status(409).json({
+            success: false,
+            code: "COOK_NOT_ELIGIBLE",
+            message: "That cook is not approved for new requests.",
+          });
+        }
+        if (dbReady()) {
+          try {
+            const account = await User.findById(actingCookId).select("status");
+            if (!account || account.status === "suspended") {
+              return res.status(409).json({
+                success: false,
+                code: "COOK_NOT_ELIGIBLE",
+                message: "That cook's account cannot take requests right now.",
+              });
+            }
+          } catch {
+            return res.status(500).json({ message: "Could not verify that cook right now. Please try again." });
+          }
+        }
+      } catch (e) {
+        if (e?.statusCode) throw e;
+        return res.status(500).json({ message: "Could not verify that cook right now. Please try again." });
+      }
+    }
     try {
       const { start: dayStart, end: dayEnd } = dayBounds(booking.date);
       const rivals = await Booking.find({
@@ -1748,6 +2159,8 @@ exports.acceptBooking = async (req, res, next) => {
       });
       if (overlaps) {
         return res.status(409).json({
+          success: false,
+          code: "SLOT_UNAVAILABLE",
           message: "This slot has already been booked (another request was accepted). Please decline this request.",
         });
       }
@@ -1759,28 +2172,55 @@ exports.acceptBooking = async (req, res, next) => {
       });
     }
 
-    // F-14: atomic accept claim (production DB path). The read-then-save below
-    // lets two concurrent accepts both succeed; the conditional update admits
-    // exactly one winner (status must still be "requested"). The loser
-    // re-reads and gets a truthful 404/400/409. Skipped without a DB
-    // connection (unit-test path keeps the legacy flow).
+    // Atomic accept claim (production DB path). The conditional update admits
+    // exactly one winner:
+    //   broadcast cook claim:  status still "requested" AND cook still null
+    //                          AND request not expired  →  sets the cook.
+    //   assigned cook claim:   status still "requested" AND cook still mine.
+    // The loser re-reads and gets a truthful 404/409/410. Skipped without a
+    // DB connection (unit-test path keeps the legacy flow).
     const acceptNote =
-      String(req.user.role).toUpperCase() === "ADMIN" ? "Accepted by admin on behalf of the cook" : undefined;
+      isAdmin ? "Accepted by admin on behalf of the cook" : undefined;
     let acceptClaimed = false;
     if (dbReady()) {
       try {
-        const claimFilter = { _id: booking._id, status: "requested" };
-        if (String(req.user.role).toUpperCase() !== "ADMIN") claimFilter.cook = req.user.id;
-        const claimUpdate = {
-          $set: {
-            status: "accepted",
-            paymentExpiresAt: new Date(Date.now() + PAYMENT_WINDOW_MS),
-          },
-        };
-        if (acceptNote) {
-          claimUpdate.$push = { statusHistory: { status: "accepted", note: acceptNote } };
+        const nowForClaim = new Date();
+        const claimFilter = { _id: booking._id, status: "requested", requestExpiresAt: { $gt: nowForClaim } };
+        let claimUpdate;
+        if (!isAdmin && !assignedCookId) {
+          claimFilter.cook = null;
+          claimUpdate = {
+            $set: {
+              cook: req.user.id,
+              status: "accepted",
+              paymentExpiresAt: new Date(Date.now() + PAYMENT_WINDOW_MS),
+            },
+            $push: { statusHistory: { status: "accepted", note: `Accepted by cook ${req.user.id}` } },
+          };
+        } else if (isAdmin && !assignedCookId) {
+          claimFilter.cook = null;
+          claimUpdate = {
+            $set: {
+              cook: actingCookId,
+              status: "accepted",
+              paymentExpiresAt: new Date(Date.now() + PAYMENT_WINDOW_MS),
+            },
+            $push: { statusHistory: { status: "accepted", note: acceptNote } },
+          };
         } else {
-          claimUpdate.$push = { statusHistory: { status: "accepted" } };
+          if (!isAdmin) claimFilter.cook = req.user.id;
+          else if (assignedCookId) claimFilter.cook = booking.cook;
+          claimUpdate = {
+            $set: {
+              status: "accepted",
+              paymentExpiresAt: new Date(Date.now() + PAYMENT_WINDOW_MS),
+            },
+          };
+          if (acceptNote) {
+            claimUpdate.$push = { statusHistory: { status: "accepted", note: acceptNote } };
+          } else {
+            claimUpdate.$push = { statusHistory: { status: "accepted" } };
+          }
         }
         const claim = await Booking.updateOne(claimFilter, claimUpdate);
         if ((claim.modifiedCount ?? claim.nModified ?? 0) === 1) {
@@ -1791,7 +2231,7 @@ exports.acceptBooking = async (req, res, next) => {
       }
       if (acceptClaimed) {
         try {
-          const fresh = await Booking.findOne(filter);
+          const fresh = await Booking.findById(booking._id);
           if (fresh) booking = fresh;
         } catch {
           // non-fatal: continue with the in-memory doc
@@ -1800,7 +2240,7 @@ exports.acceptBooking = async (req, res, next) => {
         // Lost the race (or the state moved) — report the current truth.
         let latest = null;
         try {
-          latest = await Booking.findOne(filter);
+          latest = await Booking.findById(booking._id);
         } catch {
           latest = null;
         }
@@ -1808,22 +2248,46 @@ exports.acceptBooking = async (req, res, next) => {
           return res.status(404).json({ message: "Booking not found" });
         }
         if (latest.status !== "requested") {
+          const alreadyWon = latest.cook && latest.status === "accepted";
           return res.status(409).json({
-            message: "This request was just handled — please refresh to see its current status.",
+            success: false,
+            code: alreadyWon ? "BOOKING_ALREADY_ASSIGNED" : "BOOKING_INVALID_STATE",
+            message: alreadyWon
+              ? "This booking has already been accepted by another cook."
+              : "This request was just handled — please refresh to see its current status.",
+          });
+        }
+        if (latest.requestExpiresAt && latest.requestExpiresAt <= new Date()) {
+          return res.status(410).json({
+            success: false,
+            code: "BOOKING_REQUEST_EXPIRED",
+            message: "This cook request has expired.",
+          });
+        }
+        if (latest.cook && String(latest.cook) !== String(cookIdForCheck)) {
+          return res.status(409).json({
+            success: false,
+            code: "BOOKING_ALREADY_ASSIGNED",
+            message: "This booking has already been accepted by another cook.",
           });
         }
         return res.status(409).json({
+          success: false,
+          code: "BOOKING_INVALID_STATE",
           message: "Another accept is being processed for this request. Please try again.",
         });
       }
     }
     if (!acceptClaimed) {
+      // Unit-test / no-DB path: claim the booking in memory.
+      if (!assignedCookId) booking.cook = cookIdForCheck;
       booking.status = "accepted";
       // Audit trail: mark admin-assisted accepts so the booking history shows
-      // that an admin pressed the button on the cook's behalf.
+      // that an admin pressed the button on the cook's behalf; broadcast
+      // cook accepts record the winning cook id (single authoritative entry).
       booking.statusHistory.push({
         status: "accepted",
-        ...(acceptNote ? { note: acceptNote } : {}),
+        ...(acceptNote ? { note: acceptNote } : !assignedCookId ? { note: `Accepted by cook ${cookIdForCheck}` } : {}),
       });
       // Customer now has 5 minutes to pay before the slot is released.
       booking.paymentExpiresAt = new Date(Date.now() + PAYMENT_WINDOW_MS);
@@ -1882,6 +2346,9 @@ exports.acceptBooking = async (req, res, next) => {
       }
       latest.status = "requested";
       latest.paymentExpiresAt = null;
+      // Broadcast claims must also release the cook — otherwise the losing
+      // winner's id stays on a REQUESTED row and no other cook can claim it.
+      if (!assignedCookId) latest.cook = null;
       // Renew the hold from now — rolling back onto the old (possibly
       // already-expired) requestExpiresAt would revive a dead hold.
       latest.requestExpiresAt = new Date(Date.now() + REQUEST_WINDOW_MS);
@@ -1962,7 +2429,7 @@ exports.acceptBooking = async (req, res, next) => {
     }
 
     const obj = stripServiceOtp(booking);
-    res.json({ ...obj, customerWhatsappUrl, cookPhone: cookPhoneForCustomer });
+    res.json({ success: true, ...obj, customerWhatsappUrl, cookPhone: cookPhoneForCustomer });
   } catch (error) {
     next(error);
   }
@@ -1970,19 +2437,68 @@ exports.acceptBooking = async (req, res, next) => {
 
 exports.rejectBooking = async (req, res, next) => {
   try {
-    // Cooks act only on their own bookings; admins may moderate any booking.
-    // Only pending "requested" bookings can be declined (ignore/cancel path).
-    const filter = { _id: req.params.id };
-    if (String(req.user.role).toUpperCase() !== "ADMIN") filter.cook = req.user.id;
-    let booking = await Booking.findOne(filter);
+    const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
+    // Fetch by id first: broadcast requests (cook == null) are visible to
+    // every eligible cook for Ignore; assigned bookings stay scoped.
+    let booking = await Booking.findOne({ _id: req.params.id });
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
+    }
+    const assignedCookId = booking.cook ? String(booking.cook) : null;
+    const filter = { _id: req.params.id };
+    if (!isAdmin && assignedCookId) {
+      if (assignedCookId !== String(req.user.id)) {
+        return res.status(404).json({ message: "Booking not found" });
+      }
+      filter.cook = req.user.id;
     }
     // Expire first: a hold past its window is `expired`, not `rejected` —
     // the label, history, and customer message all differ.
     await expireBookingIfNeeded(booking);
     if (booking.status !== "requested") {
       return res.status(400).json({ message: "Only pending requests can be declined" });
+    }
+
+    // ── Broadcast Ignore: one cook passing does NOT reject the customer's
+    // booking. Record the cook in ignoredBy (idempotent) and keep the
+    // booking REQUESTED for everyone else. No customer notification, no
+    // coupon release, no WhatsApp — the request is still live.
+    if (!assignedCookId && !isAdmin) {
+      const me = String(req.user.id);
+      try {
+        if (dbReady()) {
+          await Booking.updateOne(
+            { _id: booking._id, status: "requested" },
+            { $addToSet: { ignoredBy: req.user.id } }
+          );
+          const fresh = await Booking.findById(booking._id);
+          if (fresh) booking = fresh;
+          if (booking.status !== "requested") {
+            return res.status(409).json({
+              success: false,
+              code: "BOOKING_INVALID_STATE",
+              message: "This request was just handled — please refresh to see its current status.",
+            });
+          }
+        } else {
+          booking.ignoredBy = booking.ignoredBy || [];
+          if (!booking.ignoredBy.map((id) => String(id)).includes(me)) {
+            booking.ignoredBy.push(req.user.id);
+          }
+          if (typeof booking.save === "function") await booking.save();
+        }
+      } catch {
+        // non-fatal: the ignore is best-effort below
+      }
+      const out = stripServiceOtp(booking.toObject ? booking.toObject() : booking);
+      return res.json({
+        success: true,
+        ...out,
+        status: "requested",
+        ignored: true,
+        code: "BOOKING_STILL_REQUESTED",
+        message: "Request ignored — the customer is still waiting for another cook.",
+      });
     }
 
     // Atomic reject claim (production DB path): a concurrent accept (also
@@ -2077,8 +2593,9 @@ exports.rejectBooking = async (req, res, next) => {
     });
 
     // Tell the cook when an admin declined on their behalf so they know the
-    // request was handled and the slot stayed open.
-    if (String(req.user.role).toUpperCase() === "ADMIN") {
+    // request was handled and the slot stayed open. Broadcast requests have
+    // no single cook — every notified cook already holds a request card.
+    if (String(req.user.role).toUpperCase() === "ADMIN" && booking.cook) {
       try {
         await Notification.create({
           user: booking.cook,
@@ -2280,16 +2797,19 @@ exports.deleteBooking = async (req, res, next) => {
       await releaseCouponUsage(booking);
     }
     // The cook was notified of the request at creation — tell them it's
-    // gone so a vanishing row isn't a mystery.
-    try {
-      await Notification.create({
-        user: booking.cook,
-        type: "booking_cancelled",
-        booking: booking._id,
-        message: "The customer withdrew their pending booking request — the slot is free again.",
-      });
-    } catch {
-      // non-fatal: the delete itself already succeeded
+    // gone so a vanishing row isn't a mystery (broadcast requests have no
+    // single cook; those cards go stale via status polling).
+    if (booking.cook) {
+      try {
+        await Notification.create({
+          user: booking.cook,
+          type: "booking_cancelled",
+          booking: booking._id,
+          message: "The customer withdrew their pending booking request — the slot is free again.",
+        });
+      } catch {
+        // non-fatal: the delete itself already succeeded
+      }
     }
     res.json({ message: "Booking deleted", id: req.params.id });
   } catch (error) {
@@ -2305,7 +2825,7 @@ exports.cancelBooking = async (req, res, next) => {
     }
 
     const isCustomer = booking.customer.toString() === req.user.id;
-    const isCook = booking.cook.toString() === req.user.id;
+    const isCook = booking.cook != null && booking.cook.toString() === req.user.id;
     const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
     if (!isCustomer && !isCook && !isAdmin) {
       return res.status(403).json({ message: "Not authorized" });
@@ -2460,15 +2980,19 @@ exports.cancelBooking = async (req, res, next) => {
     } catch {
       // non-fatal
     }
-    try {
-      await Notification.create({
-        user: booking.cook,
-        type: "booking_cancelled",
-        booking: booking._id,
-        message: cookMsg,
-      });
-    } catch {
-      // non-fatal
+    // Broadcast requests have no single cook — the request cards on every
+    // eligible cook's dashboard go stale via status polling.
+    if (booking.cook) {
+      try {
+        await Notification.create({
+          user: booking.cook,
+          type: "booking_cancelled",
+          booking: booking._id,
+          message: cookMsg,
+        });
+      } catch {
+        // non-fatal
+      }
     }
     // WhatsApp push to BOTH sides (fire-and-forget).
     notifyWhatsApp("cancelled", booking, {
@@ -2520,10 +3044,25 @@ exports.getRescheduleOptions = async (req, res, next) => {
       return res.status(400).json({ message: "This booking has no usable duration — please contact support" });
     }
 
-    const windows = await getDayWindows(booking.cook, dayStr);
-    const rivals = (await getDayBookings(booking.cook, dayStr)).filter(
-      (b) => String(b._id) !== String(booking._id)
-    );
+    // Broadcast (Find-Cook) requests have no assigned cook: offer the full
+    // service day minus the customer's own live holds. The move itself
+    // re-validates real cook eligibility, so an optimistic slot here can
+    // never book an unservable time.
+    const isBroadcastOptions = !booking.cook;
+    const windows = isBroadcastOptions
+      ? [{ startTime: "08:00", endTime: "20:00" }]
+      : await getDayWindows(booking.cook, dayStr);
+    const allRivals = isBroadcastOptions
+      ? await Booking.find({
+          customer: booking.customer,
+          _id: { $ne: booking._id },
+          date: { $gte: dayBounds(dayStr).start, $lte: dayBounds(dayStr).end },
+          $or: activeSlotMatch(),
+        }).select("startTime endTime status")
+      : (await getDayBookings(booking.cook, dayStr)).filter(
+          (b) => String(b._id) !== String(booking._id)
+        );
+    const rivals = allRivals;
     // Same 30-minute lead rule the move itself enforces; admins see all slots
     // (support can move a booking into the next slot if needed).
     const slots = computeStartOptions(windows, rivals, durHours).filter((s) => {
@@ -2890,10 +3429,30 @@ exports.rescheduleBooking = async (req, res, next) => {
     // Target cook: explicit swap (v2) or the currently assigned cook (v1).
     // Never trust the frontend's availability answer — every eligibility
     // check below is re-run server-side against live data.
-    const targetCookId = requestedCookId || String(booking.cook);
+    // Broadcast (Find-Cook) moves have no cook: the new slot just needs at
+    // least one eligible cook, and stale ignores reset for the fresh search.
+    const isBroadcastMove = !booking.cook && !requestedCookId;
+    const targetCookId = requestedCookId || (booking.cook ? String(booking.cook) : null);
     const cookChanged = String(targetCookId) !== String(booking.cook);
 
-    if (!cookChanged) {
+    if (isBroadcastMove) {
+      let freshEligible = [];
+      try {
+        freshEligible = await findEligibleCooks({
+          date: dayStr,
+          startTime,
+          endTime,
+          serviceType: booking.serviceType,
+        });
+      } catch {
+        freshEligible = [];
+      }
+      if (!freshEligible.length) {
+        return res.status(409).json({
+          message: "No cooks are free for that new time — please pick another slot.",
+        });
+      }
+    } else if (!cookChanged) {
       // The cook must still be able to take work: approved profile, live
       // account, availability toggle on — the checks booking creation runs.
       const cookProfile = await CookProfile.findOne({ user: booking.cook, approvalStatus: "approved" });
@@ -3022,6 +3581,9 @@ exports.rescheduleBooking = async (req, res, next) => {
               startTime,
               endTime,
               ...(cookChanged ? { cook: targetCookId } : {}),
+              // Broadcast moves re-open the search on the new slot: past
+              // ignores belonged to the old slot.
+              ...(isBroadcastMove ? { ignoredBy: [] } : {}),
               rescheduleCount: expectedCount + 1,
               ...renewedWindow,
             },
@@ -3063,40 +3625,72 @@ exports.rescheduleBooking = async (req, res, next) => {
       // (slot + cook together — never a half-applied swap). (This codebase uses no
       // Mongo transactions — accept/pay/start all re-verify overlaps too, so a
       // crash before the rollback can only surface as a refused accept.)
-      try {
-        const after = (await getDayBookings(targetCookId, dayStr)).filter(
-          (b) => String(b._id) !== String(booking._id)
-        );
-        const clash = findOverlapBooking(after, startTime, endTime);
-        if (clash && String(clash._id) < String(booking._id)) {
-          const reverted = await Booking.findOneAndUpdate(
-            { _id: booking._id, status: booking.status, rescheduleCount: expectedCount + 1 },
-            {
-              $set: {
-                date: oldDate,
-                startTime: oldStartTime,
-                endTime: oldEndTime,
-                ...(cookChanged ? { cook: oldCook } : {}),
-                rescheduleCount: expectedCount,
-                ...(booking.status === "requested" ? { requestExpiresAt: booking.requestExpiresAt } : {}),
-                ...(booking.status === "accepted" ? { paymentExpiresAt: booking.paymentExpiresAt } : {}),
-              },
-              $pop: { statusHistory: 1, reschedules: 1 },
+      // Broadcast moves have no target cook: re-verify the customer's own
+      // overlap plus live eligibility instead.
+      const rollbackMove = async (message) => {
+        const reverted = await Booking.findOneAndUpdate(
+          { _id: booking._id, status: booking.status, rescheduleCount: expectedCount + 1 },
+          {
+            $set: {
+              date: oldDate,
+              startTime: oldStartTime,
+              endTime: oldEndTime,
+              ...(cookChanged ? { cook: oldCook } : {}),
+              rescheduleCount: expectedCount,
+              ...(booking.status === "requested" ? { requestExpiresAt: booking.requestExpiresAt } : {}),
+              ...(booking.status === "accepted" ? { paymentExpiresAt: booking.paymentExpiresAt } : {}),
             },
-            { new: true }
-          );
-          if (reverted) {
-            return res.status(409).json({
-              message: cookChanged
-                ? "This cook was just booked for the selected time. Please choose another cook."
-                : "That time just got booked — please pick another start time",
-            });
-          }
-          return res.status(409).json({
-            message: "That time just got booked while your move was in flight — please refresh to check your booking.",
-          });
+            $pop: { statusHistory: 1, reschedules: 1 },
+          },
+          { new: true }
+        );
+        if (reverted) {
+          return res.status(409).json({ message });
         }
-      } catch {
+        return res.status(409).json({
+          message: "That time just got booked while your move was in flight — please refresh to check your booking.",
+        });
+      };
+      try {
+        if (isBroadcastMove) {
+          const { start: mvDayStart, end: mvDayEnd } = dayBounds(newDay);
+          const ownLive = await Booking.find({
+            customer: booking.customer,
+            _id: { $ne: booking._id },
+            date: { $gte: mvDayStart, $lte: mvDayEnd },
+            $or: activeSlotMatch(),
+          }).select("startTime endTime status");
+          const mvStart = timeToMinutes(startTime);
+          const mvEnd = timeToMinutes(endTime);
+          const selfClash = (ownLive || []).some((r) => {
+            const rs = timeToMinutes(r.startTime);
+            const re = timeToMinutes(r.endTime);
+            return rs != null && re != null && intervalsOverlap(mvStart, mvEnd, rs, re);
+          });
+          const stillEligible = await findEligibleCooks({
+            date: dayStr,
+            startTime,
+            endTime,
+            serviceType: booking.serviceType,
+          });
+          if (selfClash || !stillEligible.length) {
+            return await rollbackMove("That time just got booked — please pick another start time");
+          }
+        } else {
+          const after = (await getDayBookings(targetCookId, dayStr)).filter(
+            (b) => String(b._id) !== String(booking._id)
+          );
+          const clash = findOverlapBooking(after, startTime, endTime);
+          if (clash && String(clash._id) < String(booking._id)) {
+            return await rollbackMove(
+              cookChanged
+                ? "This cook was just booked for the selected time. Please choose another cook."
+                : "That time just got booked — please pick another start time"
+            );
+          }
+        }
+      } catch (e) {
+        if (e?.statusCode) throw e;
         // Non-fatal: the pre-check covered the common case, and every
         // downstream flow (accept/pay/start) re-verifies overlaps.
       }
@@ -3107,6 +3701,7 @@ exports.rescheduleBooking = async (req, res, next) => {
       booking.startTime = startTime;
       booking.endTime = endTime;
       if (cookChanged) booking.cook = targetCookId;
+      if (isBroadcastMove) booking.ignoredBy = [];
       booking.rescheduleCount = expectedCount + 1;
       Object.assign(booking, renewedWindow);
       booking.statusHistory.push(historyEntry);
@@ -3138,6 +3733,15 @@ exports.rescheduleBooking = async (req, res, next) => {
           isAdmin
             ? `Your booking was rescheduled to ${newSlotLabel} and a new cook has been assigned.`
             : `Your booking has been rescheduled to ${newSlotLabel} and a new cook has been assigned.`
+        );
+      } else if (isBroadcastMove) {
+        // Unassigned request moved to a new slot: only the customer hears
+        // about it (eligible cooks pick up the fresh slot from their feed).
+        await notifyMoved(
+          booking.customer,
+          isAdmin
+            ? `Your cook search was moved to ${newSlotLabel} by our support team (was ${oldSlotLabel}). We're contacting free cooks again.`
+            : `Your cook search has been moved to ${newSlotLabel} (was ${oldSlotLabel}). We're contacting free cooks again.`
         );
       } else if (isAdmin) {
         await notifyMoved(
@@ -3457,7 +4061,14 @@ exports.getBookingById = async (req, res, next) => {
     const isCustomer = booking.customer?._id?.toString() === req.user.id;
     const isCook = booking.cook?._id?.toString() === req.user.id;
     const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
-    if (!isCustomer && !isCook && !isAdmin) {
+    // Broadcast requests (no cook yet) are readable by any authenticated
+    // cook — they are the eligible recipients. Privacy strips below still
+    // hide phones while requested.
+    const isBroadcastReader =
+      !booking.cook &&
+      booking.status === "requested" &&
+      String(req.user.role).toUpperCase() === "COOK";
+    if (!isCustomer && !isCook && !isAdmin && !isBroadcastReader) {
       return res.status(403).json({ message: "Not authorized" });
     }
 
@@ -3478,14 +4089,16 @@ exports.getBookingById = async (req, res, next) => {
     // location tracking was removed — no cookLiveLocation here.
     let cookRate = null;
     let cookServiceArea = null;
-    try {
-      const profile = await CookProfile.findOne({ user: booking.cook._id }).select(
-        "rate serviceArea"
-      );
-      if (profile?.rate != null) cookRate = profile.rate;
-      if (profile?.serviceArea) cookServiceArea = profile.serviceArea;
-    } catch {
-      // non-fatal
+    if (booking.cook?._id) {
+      try {
+        const profile = await CookProfile.findOne({ user: booking.cook._id }).select(
+          "rate serviceArea"
+        );
+        if (profile?.rate != null) cookRate = profile.rate;
+        if (profile?.serviceArea) cookServiceArea = profile.serviceArea;
+      } catch {
+        // non-fatal
+      }
     }
 
     const fullObj = booking.toObject ? booking.toObject() : booking;
@@ -3504,6 +4117,12 @@ exports.getBookingById = async (req, res, next) => {
       if (isCook && obj.customer && typeof obj.customer === "object" && !Array.isArray(obj.customer)) {
         delete obj.customer.email;
         if (obj.status === "requested") delete obj.customer.phone;
+      }
+      // Broadcast readers (eligible cooks who haven't accepted) never see
+      // the customer's phone or email — only the name + venue area.
+      if (isBroadcastReader && obj.customer && typeof obj.customer === "object" && !Array.isArray(obj.customer)) {
+        delete obj.customer.email;
+        delete obj.customer.phone;
       }
     }
     // Cook avatar on the details page needs the profile photo (public like
@@ -3609,6 +4228,13 @@ exports.payBooking = async (req, res, next) => {
     if (booking.status !== "accepted") {
       return res.status(400).json({
         message: `This booking is not awaiting payment (status: ${booking.status}).`,
+      });
+    }
+    // Find-Cook invariant (server-authoritative): only an accepted booking
+    // with a server-assigned cook may confirm payment.
+    if (!booking.cook) {
+      return res.status(400).json({
+        message: "No cook has accepted this request yet — payment unlocks after a cook accepts.",
       });
     }
     // Overlap guard: two overlapping `accepted` holds can briefly coexist

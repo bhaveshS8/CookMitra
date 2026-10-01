@@ -11,6 +11,8 @@ const {
   getMyBookings,
   getMyLocations,
   getCookBookings,
+  getCookRequests,
+  getCookSchedule,
   getAdminBookings,
   getBookingById,
   acceptBooking,
@@ -34,7 +36,11 @@ router.post(
   auth,
   authorize("customer"),
   [
-    body("cook").isMongoId().withMessage("Valid cook id is required"),
+    // Find-Cook flow: the customer never sends a cook. A `cook`/`cookId`
+    // in the body is accepted by the validator but IGNORED by the
+    // controller (the booking is always created with cook = null).
+    body("cook").optional().isMongoId().withMessage("Valid cook id is required"),
+    body("cookId").optional().isMongoId().withMessage("Valid cook id is required"),
     body("serviceType")
       .isIn(["cook_for_me", "cook_with_me", "teach_me", "preparation_help"])
       .withMessage("Valid service type is required"),
@@ -83,6 +89,10 @@ router.post(
 router.get("/my", auth, authorize("customer"), getMyBookings);
 router.get("/my/locations", auth, authorize("customer"), getMyLocations);
 router.get("/cook", auth, authorize("cook"), getCookBookings);
+// Broadcast request feed (must sit before /:id so "requests" isn't a param).
+router.get("/cook/requests", auth, authorize("cook"), getCookRequests);
+// Payment-gated schedule for the cook's Today/Tomorrow tabs (paid only).
+router.get("/cook/schedule", auth, authorize("cook"), getCookSchedule);
 router.get("/:id", auth, getBookingById);
 router.get("/", auth, authorize("admin"), getAdminBookings);
 router.patch("/:id/accept", auth, authorize("cook", "admin"), acceptBooking);

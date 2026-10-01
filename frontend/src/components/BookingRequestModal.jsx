@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
-import { formatCurrency, formatDate, formatTimeRange12 } from "../utils/constants";
+import { formatCurrency, formatDate, formatTimeRange12, getLocalDateStr } from "../utils/constants";
 import {
   X,
   Check,
@@ -32,6 +32,40 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
   const acceptBtnRef = useRef(null);
   // Live 5-minute countdown, ticked while the dialog is open.
   const [nowMs, setNowMs] = useState(Date.now());
+  // Admin on-behalf accept of a BROADCAST (unassigned) request must name the
+  // winning cook — the server never picks one. Loaded from the same
+  // availability feed the booking flow uses (cooks free at this exact slot).
+  const needsCookPick = Boolean(onBehalf && !booking?.cook);
+  const [assignCookId, setAssignCookId] = useState("");
+  const [assignCooks, setAssignCooks] = useState([]);
+  const [assignLoading, setAssignLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open || !needsCookPick) return undefined;
+    setAssignCookId("");
+    setAssignCooks([]);
+    let cancelled = false;
+    setAssignLoading(true);
+    (async () => {
+      try {
+        const dayStr = getLocalDateStr(booking?.date);
+        const params = dayStr && booking?.startTime && booking?.endTime
+          ? { date: dayStr, startTime: booking.startTime, endTime: booking.endTime }
+          : {};
+        const res = await API.get("/cooks", { params });
+        if (cancelled) return;
+        const list = Array.isArray(res.data) ? res.data : res.data?.cooks || res.data?.data || [];
+        setAssignCooks(list);
+      } catch {
+        if (!cancelled) setAssignCooks([]);
+      } finally {
+        if (!cancelled) setAssignLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, needsCookPick, booking?._id, booking?.date, booking?.startTime, booking?.endTime]);
 
   useEffect(() => {
     if (open) {
@@ -92,10 +126,17 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
 
   const handleAction = async (action) => {
     if (acting || !booking?._id) return;
+    // Admin broadcast accept without a chosen cook is meaningless — the
+    // server refuses it (400). Block here with a clear inline error.
+    if (action === "accept" && needsCookPick && !assignCookId) {
+      setError("Choose the cook to assign this request to, then accept.");
+      return;
+    }
     setActing(action);
     setError("");
     try {
-      await API.patch(`/bookings/${booking._id}/${action}`);
+      const body = action === "accept" && needsCookPick ? { cookId: assignCookId } : undefined;
+      await API.patch(`/bookings/${booking._id}/${action}`, body);
       showToast(
         action === "accept"
           ? onBehalf
@@ -217,6 +258,38 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
         {error && (
           <div className="error-alert-banner" style={{ marginBottom: "0.75rem" }}>
             <AlertCircle size={16} /> {error}
+          </div>
+        )}
+
+        {needsCookPick && !expired && (
+          <div className="form-group" style={{ marginBottom: "0.75rem" }}>
+            <label htmlFor="brm-assign-cook">Assign to cook *</label>
+            <select
+              id="brm-assign-cook"
+              className="form-control"
+              value={assignCookId}
+              onChange={(e) => {
+                setAssignCookId(e.target.value);
+                if (error) setError("");
+              }}
+              disabled={busy || assignLoading}
+            >
+              <option value="">
+                {assignLoading ? "Loading free cooks…" : "Choose a cook for this slot…"}
+              </option>
+              {assignCooks.map((c) => {
+                const id = String(c?.user?._id || (typeof c?.user === "string" ? c.user : null) || c?._id || "");
+                const name = c?.user?.name || c?.name || "Verified cook";
+                return (
+                  <option key={id} value={id}>
+                    {name}{c?.serviceArea ? ` · ${c.serviceArea}` : ""}
+                  </option>
+                );
+              })}
+            </select>
+            {!assignLoading && assignCooks.length === 0 && (
+              <p className="field-hint">No cooks look free for this slot right now — declining keeps the request live for cooks.</p>
+            )}
           </div>
         )}
 

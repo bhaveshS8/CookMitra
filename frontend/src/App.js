@@ -85,7 +85,16 @@ function App() {
           <Navbar />
           <main className="main-content">
             <Routes>
-              <Route path="/" element={<Home />} />
+              {/* Cooks + admins never see the marketing home page —
+                  they land directly on their dashboard. */}
+              <Route
+                path="/"
+                element={
+                  <NonAdminRoute>
+                    <Home />
+                  </NonAdminRoute>
+                }
+              />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />

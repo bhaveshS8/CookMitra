@@ -17,9 +17,9 @@ import { buildRetryState } from "../utils/bookingRetry";
 import ConfirmDialog from "../components/ConfirmDialog";
 
 const WINDOW_MS = 5 * 60 * 1000; // 5-minute acceptance window
-// Calmed for scale: 4s x 1000 waiting users ~= 250 rps sustained. 8s halves
-// that; visibility-change pause below stops background-tab polling entirely.
-const POLL_MS = 8000;
+// Safe polling: 4s while the waiting page is open (spec: 2–5s), paused in
+// background tabs. Stops the moment the booking leaves REQUESTED.
+const POLL_MS = 4000;
 const REDIRECT_S = 6;
 
 const FACTS = [
@@ -35,12 +35,12 @@ const FACTS = [
 
 const SORRY_COPY = {
   expired: {
-    title: "Time's up — no response",
-    body: "The cook didn't accept within 5 minutes, so we've released your slot. Plenty of other chefs are ready for your date!",
+    title: "We couldn't find an available cook",
+    body: "No cook accepted within 5 minutes, so we've released your slot. Try again — plenty of other chefs take new requests every minute!",
   },
   rejected: {
     title: "Request declined",
-    body: "Unfortunately this cook can't take your booking. Let's find another chef who can.",
+    body: "Unfortunately this request can't be served. Let's start a fresh search for another chef.",
   },
   cancelled: {
     title: "Request cancelled",
@@ -228,7 +228,8 @@ const BookingWaiting = () => {
   const progress = Math.max(0, Math.min(1, remainingMs / WINDOW_MS));
   const RING = 2 * Math.PI * 54; // r = 54 in the SVG viewBox
   const service = SERVICE_DETAILS[booking?.serviceType] || {};
-  const cookName = booking?.cook?.name || "the cook";
+  // Accepted phase shows the server-assigned cook (authoritative state).
+  const cookName = booking?.cook?.name || "Your cook";
 
   if (phase === "loading") {
     return (
@@ -331,20 +332,23 @@ const BookingWaiting = () => {
           </div>
           <div className="bf-wait-copy">
             <h1 className="bf-title">
-              Waiting for <span className="bf-cook-name">{cookName}</span>
+              Finding a cook for you
               <span className="bf-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
             </h1>
             <p className="bf-sub">
-              Your request was sent successfully. The cook has about 5 minutes to accept — if they
-              don't respond in time, the slot is released automatically and we'll help you find
-              another chef right away.
+              Your request was sent successfully. We&apos;re contacting available cooks for your selected time —
+              the first to accept gets your booking. If nobody responds in about 5 minutes, the slot is
+              released automatically and you can start a fresh search right away.
+            </p>
+            <p className="bf-sub">
+              Booking ID: <b>{booking?._id ? String(booking._id).slice(-6).toUpperCase() : "—"}</b>
             </p>
           </div>
         </div>
 
         <div className="bf-steps">
           <div className="bf-step done"><CheckCircle2 size={18} /><span>Request sent</span></div>
-          <div className="bf-step active"><UtensilsCrossed size={18} /><span>Cook reviewing</span></div>
+          <div className="bf-step active"><UtensilsCrossed size={18} /><span>Cooks reviewing</span></div>
           <div className="bf-step"><Clock size={18} /><span>Slot confirmed</span></div>
         </div>
 

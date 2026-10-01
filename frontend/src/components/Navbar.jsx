@@ -158,12 +158,20 @@ const Navbar = () => {
       : user?.role === "cook"
         ? "/dashboard/cook-profile"
         : "/admin";
+  // Brand logo lands each role on its own home: cooks/admins go straight
+  // to their dashboard instead of the marketing home page.
+  const brandPath =
+    user?.role === "admin"
+      ? "/admin"
+      : user?.role === "cook"
+        ? "/dashboard/cook-bookings"
+        : "/";
 
   return (
     <nav className={`navbar ${scrolled ? "is-scrolled" : ""}`}>
       <div className="navbar-inner">
         {/* Brand Logo */}
-        <Link to="/" className="navbar-brand" onClick={closeMobile}>
+        <Link to={brandPath} className="navbar-brand" onClick={closeMobile}>
           <img
             src={cookMitraLogo}
             alt="Cook Mitra logo"

@@ -10,7 +10,17 @@ const bookingSchema = new mongoose.Schema(
     cook: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      // Find-Cook flow: a fresh REQUESTED booking has no cook yet — the
+      // first atomic accept claims it. Legacy direct bookings always set it.
+      required: false,
+      default: null,
+    },
+    // Cooks who tapped Ignore on a broadcast (cook == null) request. The
+    // booking stays REQUESTED for everyone else; ignored cooks stop seeing
+    // it and cannot later accept it.
+    ignoredBy: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+      default: [],
     },
     serviceType: {
       type: String,
@@ -269,6 +279,12 @@ bookingSchema.index({ cook: 1, date: 1, startTime: 1, endTime: 1 });
 // Hot read paths: "today's bookings" scans and status-sorted dashboards.
 bookingSchema.index({ date: 1, status: 1 });
 bookingSchema.index({ status: 1, createdAt: -1 });
+// Find-Cook broadcast: unassigned live requests + ignore filtering.
+bookingSchema.index({ status: 1, requestExpiresAt: 1 });
+bookingSchema.index({ status: 1, cook: 1, requestExpiresAt: 1 });
+// Payment-gated cook schedule (Today/Tomorrow): cook + IST day + paid +
+// schedule-eligible status, served by getCookSchedule.
+bookingSchema.index({ cook: 1, date: 1, "payment.status": 1, status: 1 });
 
 // A (orderId, paymentId, signature) triple is valid for exactly ONE booking.
 // Unique on the payment id — sparse partial index so unpaid/test bookings

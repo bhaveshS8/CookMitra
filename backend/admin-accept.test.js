@@ -192,7 +192,10 @@ const notifFor = (userId) => notificationLog.find((n) => String(n.user) === Stri
     // 2. Cook accepts their own request: no audit note, no self-notification.
     res = await runAccept({ id: "cook1", role: "cook" });
     check("cook accept succeeds on own booking", res.statusCode === 200 && bookingDoc.status === "accepted", `status=${res.statusCode} booking=${bookingDoc.status}`);
-    check("cook query IS scoped to own bookings", String(lastFilter.cook) === "cook1", JSON.stringify(lastFilter || {}));
+    // Find-Cook broadcast bookings (cook == null) are fetched by id and then
+    // ownership-checked in code (same pattern as cancelBooking): an assigned
+    // booking still 404s for any other cook (scenario 3 below proves it).
+    check("cook fetch targets only this booking id", String(lastFilter._id) === "booking1", JSON.stringify(lastFilter || {}));
     check("cook accept adds NO on-behalf note", !lastHistory(bookingDoc).note, JSON.stringify(lastHistory(bookingDoc) || {}));
     check("cook is NOT notified for their own accept", !notifFor("cook1"), JSON.stringify(notifFor("cook1") || {}));
     check("customer still notified on cook accept", (() => { const n = notifFor("cust1"); return !!n && n.type === "booking_accepted"; })(), "");
