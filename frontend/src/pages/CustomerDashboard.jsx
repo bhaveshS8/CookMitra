@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useFetch } from "../hooks/useFetch";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import API from "../api/axios";
 import { formatDate, formatTimeRange12, formatCurrency, canRescheduleBooking, getBookingDisplayState } from "../utils/constants";
 import { buildRetryState } from "../utils/bookingRetry";
@@ -52,7 +53,7 @@ const ACTION_FOR = {
 const CustomerDashboard = () => {
   // F-07: surface fetch failures as an error state with retry — a failed
   // /bookings/my must never render as a misleading "no bookings" empty page.
-  const { data: bookings, loading, error, refetch } = useFetch("/bookings/my");
+  const { data: bookings, loading, refreshing, error, refetch } = useFetch("/bookings/my");
   const navigate = useNavigate();
 
   // Local clock for time-aware display states (upcoming → in progress →
@@ -64,7 +65,6 @@ const CustomerDashboard = () => {
     const onVisible = () => {
       if (document.visibilityState === "visible") {
         setNow(Date.now());
-        refetch();
       }
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -74,7 +74,13 @@ const CustomerDashboard = () => {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [refetch]);
+  }, []);
+
+  // Automatic, silent refresh of "My Bookings": re-pulls the list every 30s in
+  // the background (paused on hidden tabs, refreshed at once when the tab or
+  // window regains focus). Existing cards stay on screen throughout — the
+  // first-load spinner is never re-triggered, so the list never blinks.
+  useAutoRefresh(refetch, { intervalMs: 30000 });
 
   // Only completed meals live in the main list — newer bookings first.
   const byNewest = (a, b) =>
@@ -423,6 +429,13 @@ const CustomerDashboard = () => {
           </p>
         </div>
       </div>
+
+      {!loading && refreshing && (
+        <span className="dashboard-syncing-pill" aria-live="polite" aria-label="Auto-refreshing bookings">
+          <span className="dashboard-syncing-dot" />
+          Auto-refreshing...
+        </span>
+      )}
 
       {activeBookings.length > 0 && (
         <section className="my-active-section" aria-label="Active and upcoming bookings">

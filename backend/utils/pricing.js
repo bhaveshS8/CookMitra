@@ -3,8 +3,8 @@
 // flat price. Both booking flows must offer exactly these durations; the
 // server recomputes the fee from duration and never trusts client amounts.
 //
-// Platform commission 25%: the customer pays `payable`, the cook earns
-// 75% (`cookPayout`), Cook Mitra keeps 25% (`commission`).
+// Platform commission 15%: the customer pays `payable`, the cook earns
+// 85% (`cookPayout`), Cook Mitra keeps 15% (`commission`).
 
 const LAUNCH_SLABS = {
   1: 199,
@@ -13,7 +13,7 @@ const LAUNCH_SLABS = {
   4: 649,
 };
 
-const COMMISSION_RATE = 0.25;
+const COMMISSION_RATE = 0.15;
 
 // Whole-hour durations the launch price list covers.
 const isSlabDuration = (hours) =>

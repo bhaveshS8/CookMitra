@@ -15,6 +15,7 @@ const {
   getCookSchedule,
   getAdminBookings,
   getBookingById,
+  getEligibleCooksForBooking,
   acceptBooking,
   rejectBooking,
   completeBooking,
@@ -93,6 +94,7 @@ router.get("/cook", auth, authorize("cook"), getCookBookings);
 router.get("/cook/requests", auth, authorize("cook"), getCookRequests);
 // Payment-gated schedule for the cook's Today/Tomorrow tabs (paid only).
 router.get("/cook/schedule", auth, authorize("cook"), getCookSchedule);
+router.get("/:id/eligible-cooks", auth, authorize("admin", "cook"), getEligibleCooksForBooking);
 router.get("/:id", auth, getBookingById);
 router.get("/", auth, authorize("admin"), getAdminBookings);
 router.patch("/:id/accept", auth, authorize("cook", "admin"), acceptBooking);

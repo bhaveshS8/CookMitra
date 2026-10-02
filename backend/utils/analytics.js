@@ -11,7 +11,7 @@
 //   refundStatus none|pending|processing|processed|failed|manual|rejected,
 //   refundAmount, testMode). Amounts are integer rupees everywhere
 //   (paise only at the Razorpay boundary).
-// - Commission is always 25% / cook 75% of the final post-discount amount
+// - Commission is always 15% / cook 85% of the final post-discount amount
 //   (utils/pricing.js splitPayout), snapshotted per booking at creation.
 // - Refunds never move money automatically; only refundStatus
 //   processed|manual represent money actually returned.

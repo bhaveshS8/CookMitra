@@ -75,12 +75,13 @@ const isSlotInServiceDay = (slot) => {
 };
 
 // Slots starting at or before "now" are hidden when the selected date is
-// today — a customer can never pick a time that already passed.
-const isSlotInPast = (dateStr, startTime) => {
+// today — a customer can never pick a time that already passed, so the first
+// visible slot is always the NEXT one after the current time. `now` is
+// injectable so the step-2 list can re-filter on a live tick.
+const isSlotInPast = (dateStr, startTime, now = new Date()) => {
   if (dateStr !== localTodayStr()) return false;
   const s = toMinutes(startTime);
   if (s == null) return false;
-  const now = new Date();
   return s <= now.getHours() * 60 + now.getMinutes();
 };
 
@@ -105,11 +106,6 @@ const fmtTimeCompact = (t) => {
   if (h === 0) h = 12;
   return `${h}${mm ? ":" + String(mm).padStart(2, "0") : ""} ${ap}`;
 };
-
-// Collapsed view cap: only the first few starts per day-part render until
-// the customer taps "Show all N times" — a wall of 20+ identical chips
-// slows the pick instead of helping it.
-const TOP_SLOTS_COUNT = 6;
 
 // Presentation-only "Recommended" highlight: the start with the most cooks
 // free (earliest wins ties). Nothing is pre-selected for the customer.
@@ -202,8 +198,6 @@ const CookBooking = () => {
   // the customer picked in step 2.
   const [slotOptions, setSlotOptions] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(null);
-  // "Show all N times" expander for the step-2 slot lists (collapse default).
-  const [showAllSlots, setShowAllSlots] = useState(false);
   const [coupon, setCoupon] = useState(null);
   // Coupon code carried across the login wall / dead-request retry —
   // re-validated live by CouponApply on mount, never trusted blindly.
@@ -211,8 +205,35 @@ const CookBooking = () => {
   // Shorter session lengths the server confirmed free when the requested
   // hours fit nowhere — rendered as one-tap retry chips.
   const [slotSuggestions, setSlotSuggestions] = useState([]);
+  // Live "from now" view of the step-2 slots. Every free start is shown (no
+  // collapse), and on a same-day booking the earliest chip is always the next
+  // slot after the current time. A 30s tick — armed only while today is
+  // selected — keeps the list honest if the page is left open, dropping any
+  // start that has slipped into the past.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (form.date !== localTodayStr()) return undefined;
+    setNowTick(Date.now());
+    const id = setInterval(() => setNowTick(Date.now()), 30000);
+    const onWake = () => {
+      if (!document.hidden) setNowTick(Date.now());
+    };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", onWake);
+    };
+  }, [form.date]);
+
+  const visibleSlotOptions = useMemo(() => {
+    const now = new Date(nowTick);
+    return slotOptions.filter((o) => !isSlotInPast(form.date, o.startTime, now));
+  }, [slotOptions, form.date, nowTick]);
+
   // Start with the most cooks free — flagged "Recommended" in step 2.
-  const recommendedSlot = useMemo(() => pickRecommendedSlot(slotOptions), [slotOptions]);
+  const recommendedSlot = useMemo(() => pickRecommendedSlot(visibleSlotOptions), [visibleSlotOptions]);
   // Cooks offering the chosen service (0 = none exist, vs slots just full).
   const [totalCooksFound, setTotalCooksFound] = useState(null);
 
@@ -692,7 +713,6 @@ const CookBooking = () => {
       setSlotSuggestions(suggestions);
       setTotalCooksFound(totalCooks);
       setSelectedSlot(null);
-      setShowAllSlots(false);
       setSearched(true);
       setStep(2);
       if (available.length === 0) {
@@ -1156,7 +1176,7 @@ const CookBooking = () => {
       {step === 2 && (
         <div className="ondemand-form-card">
           <h3>Step 2 — Pick a time slot</h3>
-          {searched && slotOptions.length === 0 && (
+          {searched && visibleSlotOptions.length === 0 && (
             <div className="no-data">
               <p>
                 {totalCooksFound === 0
@@ -1181,82 +1201,61 @@ const CookBooking = () => {
               )}
             </div>
           )}
-          {slotOptions.length > 0 && (
-            <>
-              <div role="radiogroup" aria-label="Available time slots">
-                {["Morning", "Afternoon", "Evening"]
-                  .map((part) => ({
-                    part,
-                    slots: slotOptions.filter((o) => slotPart(o.startTime) === part),
-                  }))
-                  .filter((g) => g.slots.length > 0)
-                  .map((g) => {
-                    // Collapsed groups show only the first few starts; a slot
-                    // picked while expanded stays visible after collapsing.
-                    const isSelected = (o) =>
-                      !!selectedSlot &&
-                      o.startTime === selectedSlot.startTime &&
-                      o.endTime === selectedSlot.endTime;
-                    let visibleSlots = g.slots;
-                    if (!showAllSlots && g.slots.length > TOP_SLOTS_COUNT) {
-                      const head = g.slots.slice(0, TOP_SLOTS_COUNT);
-                      if (selectedSlot && g.slots.some(isSelected) && !head.some(isSelected)) {
-                        visibleSlots = [...head, g.slots.find(isSelected)];
-                      } else {
-                        visibleSlots = head;
-                      }
-                    }
-                    return (
-                      <div key={g.part} className="od-slot-group">
-                        <p className="od-slot-group-title">
-                          <Clock3 size={13} /> {g.part}
-                          <span> · {g.slots.length} slot{g.slots.length > 1 ? "s" : ""}</span>
-                        </p>
-                        <div className="slot-list slot-list-pick">
-                          {visibleSlots.map((o) => {
-                            const active = isSelected(o);
-                            const recommended =
-                              !!recommendedSlot &&
-                              recommendedSlot.startTime === o.startTime &&
-                              recommendedSlot.endTime === o.endTime;
-                            return (
-                              <button
-                                key={`${o.startTime}-${o.endTime}`}
-                                type="button"
-                                role="radio"
-                                aria-checked={active}
-                                aria-label={`${recommended ? "Recommended. " : ""}${fmtTime(o.startTime)} to ${fmtTime(o.endTime)}, ${o.freeCooks} ${o.freeCooks === 1 ? "cook" : "cooks"} free`}
-                                className={`slot-chip slot-chip-pick ${active ? "selected" : ""} ${recommended ? "recommended" : ""}`}
-                                onClick={() => {
-                                  setSelectedSlot({ startTime: o.startTime, endTime: o.endTime });
-                                  setFormError("");
-                                }}
-                              >
-                                {recommended && <span className="slot-chip-rec">★ Recommended</span>}
-                                <span className="slot-chip-main">{fmtTimeCompact(o.startTime)}</span>
-                                <span className="slot-chip-end">to {fmtTimeCompact(o.endTime)}</span>
-                                <span className="slot-chip-cooks">
-                                  {o.freeCooks} {o.freeCooks === 1 ? "cook" : "cooks"} free
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
+          {visibleSlotOptions.length > 0 && (
+            <div role="radiogroup" aria-label="Available time slots">
+              {["Morning", "Afternoon", "Evening"]
+                .map((part) => ({
+                  part,
+                  slots: visibleSlotOptions.filter((o) => slotPart(o.startTime) === part),
+                }))
+                .filter((g) => g.slots.length > 0)
+                .map((g) => {
+                  const isSelected = (o) =>
+                    !!selectedSlot &&
+                    o.startTime === selectedSlot.startTime &&
+                    o.endTime === selectedSlot.endTime;
+                  return (
+                    <div key={g.part} className="od-slot-group">
+                      <p className="od-slot-group-title">
+                        <Clock3 size={13} /> {g.part}
+                        <span> · {g.slots.length} slot{g.slots.length > 1 ? "s" : ""}</span>
+                      </p>
+                      <div className="slot-list slot-list-pick">
+                        {/* Every free start is shown, earliest first — no collapse,
+                            so all slots from the current time onward are visible. */}
+                        {g.slots.map((o) => {
+                          const active = isSelected(o);
+                          const recommended =
+                            !!recommendedSlot &&
+                            recommendedSlot.startTime === o.startTime &&
+                            recommendedSlot.endTime === o.endTime;
+                          return (
+                            <button
+                              key={`${o.startTime}-${o.endTime}`}
+                              type="button"
+                              role="radio"
+                              aria-checked={active}
+                              aria-label={`${recommended ? "Recommended. " : ""}${fmtTime(o.startTime)} to ${fmtTime(o.endTime)}, ${o.freeCooks} ${o.freeCooks === 1 ? "cook" : "cooks"} free`}
+                              className={`slot-chip slot-chip-pick ${active ? "selected" : ""} ${recommended ? "recommended" : ""}`}
+                              onClick={() => {
+                                setSelectedSlot({ startTime: o.startTime, endTime: o.endTime });
+                                setFormError("");
+                              }}
+                            >
+                              {recommended && <span className="slot-chip-rec">★ Recommended</span>}
+                              <span className="slot-chip-main">{fmtTimeCompact(o.startTime)}</span>
+                              <span className="slot-chip-end">to {fmtTimeCompact(o.endTime)}</span>
+                              <span className="slot-chip-cooks">
+                                {o.freeCooks} {o.freeCooks === 1 ? "cook" : "cooks"} free
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-              </div>
-              {slotOptions.length > TOP_SLOTS_COUNT && (
-                <button
-                  type="button"
-                  className="slot-toggle-btn"
-                  aria-expanded={showAllSlots}
-                  onClick={() => setShowAllSlots((v) => !v)}
-                >
-                  {showAllSlots ? "Show fewer times" : `Show all ${slotOptions.length} times`}
-                </button>
-              )}
-            </>
+                    </div>
+                  );
+                })}
+            </div>
           )}
 
           {formError && <div className="error-message">{formError}</div>}

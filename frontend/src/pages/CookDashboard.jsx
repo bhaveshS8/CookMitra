@@ -113,6 +113,70 @@ const CookDashboard = () => {
     refetchTomorrow();
   };
 
+  // Real-time booking flow (SSE → realtime-booking-* DOM events, mounted once
+  // in App): a new request refetches instantly so the popup appears without
+  // waiting for the 15s poll; an assignment/expiry elsewhere closes/disables
+  // THIS cook's open popup immediately and refreshes the cards so stale
+  // Accept buttons never stay actionable. Polling above stays as fallback.
+  const modalIdRef = useRef(null);
+  modalIdRef.current = requestModalBooking?._id || null;
+  useEffect(() => {
+    const myId = String(user?._id || user?.id || "");
+    const onRequest = () => {
+      refetchBookings();
+      refetchBroadcast();
+    };
+    const closeIfOpen = (id, message) => {
+      if (!id) {
+        refetchBookings();
+        refetchBroadcast();
+        return;
+      }
+      if (modalIdRef.current && String(modalIdRef.current) === String(id)) {
+        handledRequestIds.current.add(String(id));
+        setRequestModalBooking(null);
+        if (message) showToast(message, "info");
+      }
+      refetchBookings();
+      refetchBroadcast();
+      refetchToday();
+      refetchTomorrow();
+    };
+    const onAssigned = (e) => {
+      const d = e?.detail || {};
+      const id = d.bookingId ? String(d.bookingId) : null;
+      // My own win already closed the modal with a success toast — stay quiet.
+      const wonByMe = myId && d.assignedCookId && String(d.assignedCookId) === myId;
+      closeIfOpen(
+        id,
+        id && !wonByMe ? "This request was just accepted — it is no longer available." : null
+      );
+    };
+    const onExpired = (e) => {
+      const d = e?.detail || {};
+      const id = d.bookingId ? String(d.bookingId) : null;
+      closeIfOpen(id, id ? "This request expired — the slot was released." : null);
+    };
+    const onIgnored = (e) => {
+      const d = e?.detail || {};
+      // Only my own ignore (e.g. from another tab) affects my queue.
+      if (myId && d.cookId && String(d.cookId) === myId) {
+        refetchBroadcast();
+      }
+    };
+    window.addEventListener("realtime-booking-request", onRequest);
+    window.addEventListener("realtime-booking-assigned", onAssigned);
+    window.addEventListener("realtime-booking-expired", onExpired);
+    window.addEventListener("realtime-booking-ignored", onIgnored);
+    return () => {
+      window.removeEventListener("realtime-booking-request", onRequest);
+      window.removeEventListener("realtime-booking-assigned", onAssigned);
+      window.removeEventListener("realtime-booking-expired", onExpired);
+      window.removeEventListener("realtime-booking-ignored", onIgnored);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?._id, user?.id]);
+
   // Alarm once per booking when hours complete (skip state that already
   // existed on first load to avoid noise).
   useEffect(() => {
@@ -512,7 +576,12 @@ const CookDashboard = () => {
             <div className="cook-stat-label">Upcoming</div>
           </div>
         </button>
-        <button type="button" className="cook-stat-card" onClick={() => setView("previous")}>
+        {/* Earned is a read-only figure, not a shortcut — deliberately not a
+            button, so it cannot navigate anywhere; it just shows money earned. */}
+        <div
+          className="cook-stat-card cook-stat-static"
+          aria-label={`Earned ${formatCurrency(totalEarned)} from ${completedCount} completed ${completedCount === 1 ? "session" : "sessions"}`}
+        >
           <div className="cook-stat-icon emerald">
             <Wallet size={24} />
           </div>
@@ -520,7 +589,7 @@ const CookDashboard = () => {
             <div className="cook-stat-num small-amount">{formatCurrency(totalEarned)}</div>
             <div className="cook-stat-label">Earned · {completedCount} done</div>
           </div>
-        </button>
+        </div>
         <Link className="cook-stat-card cook-stat-mob-hide" to="/dashboard/cook-reviews">
           <div className="cook-stat-icon brand">
             <Star size={24} />

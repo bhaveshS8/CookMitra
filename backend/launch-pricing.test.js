@@ -27,9 +27,9 @@ check("3h costs 499", slabPriceForDuration(3) === 499);
 check("5h has no slab", slabPriceForDuration(5) === null);
 check("halves have no slab", slabPriceForDuration(1.5) === null);
 check("isSlabDuration guards", isSlabDuration(4) === true && isSlabDuration(0) === false);
-check("commission is 25%", COMMISSION_RATE === 0.25);
+check("commission is 15%", COMMISSION_RATE === 0.15);
 const split = splitPayout(449);
-check("449 splits 112/337", split.commission === 112 && split.cookPayout === 337, JSON.stringify(split));
+check("449 splits 67/382", split.commission === 67 && split.cookPayout === 382, JSON.stringify(split));
 
 // ── Flat coupons ────────────────────────────────────────────────────────────
 const flat50 = { discountType: "flat", flatAmount: 50, minOrder: 399 };
@@ -56,7 +56,7 @@ check("code normalized", normalizeCode(" welcome50 ") === "WELCOME50");
 // ── Coupon catalogue invariants ─────────────────────────────────────────────
 // These guard the class of bug where a shipped coupon can never be redeemed
 // (FESTIVE100 shipped with a ₹799 minimum against a ₹649 top slab) and the
-// promise that a discount never eats into the cook's 75% share.
+// promise that a discount never eats into the cook's 85% share.
 const SLABS = Object.values(LAUNCH_SLABS);
 const cache = {};
 
@@ -76,7 +76,7 @@ for (const c of INITIAL_COUPONS) {
     eligible.length ? `slabs ${eligible.join(", ")}` : `min order ₹${c.minOrder} exceeds top slab ₹${Math.max(...SLABS)}`
   );
 
-  // 2. The discount must fit inside the platform's 25% commission on the
+  // 2. The discount must fit inside the platform's 15% commission on the
   //    cheapest eligible slab — otherwise the cook silently funds the promo.
   if (eligible.length > 0) {
     const cheapest = Math.min(...eligible);

@@ -1056,8 +1056,88 @@
 }
 .od-sumbar .btn { flex-shrink: 0; }
 
-/* Venue card (step 3): breathing room before the cook results */
+/* Venue + review cards (step 3): centred single column that widens on
+   tablet/laptop so the review rows (label left, value right) keep room
+   for long addresses, dishes and notes. */
+.od-step-3 .ondemand-form-card { max-width: 880px; margin-inline: auto; }
 .od-venue-card { margin: 1rem 0 1.25rem; animation: bkFadeIn 0.24s ease backwards; }
+.od-summary-card { animation: bkFadeIn 0.24s ease backwards; }
+@media (min-width: 1024px) {
+  .od-step-3 .ondemand-form-card { max-width: 1080px; padding: 1.75rem 2rem; }
+  /* Sticky CTA bar goes full-bleed to match the wider laptop card padding */
+  .od-step-3 .od-stickybar { margin: 0.4rem -2rem -1.75rem; padding-left: 2rem; padding-right: 2rem; }
+}
+
+/* Review-your-booking rows (plus the matching price rows in the venue
+   card above it): label stays left, value hugs the right and wraps
+   cleanly. Long addresses / dishes / notes break anywhere instead
+   of pushing the card sideways. The final-amount figure keeps its own
+   line on very small phones so it never collides with its label. */
+.od-venue-card .price-row,
+.od-summary-card .price-row { align-items: flex-start; }
+.od-venue-card .price-row > span:first-child,
+.od-summary-card .price-row > span:first-child {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--slate-500);
+  font-weight: 700;
+}
+.od-venue-card .price-row > span:last-child,
+.od-summary-card .price-row > span:last-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.od-venue-card .price-row.total,
+.od-summary-card .price-row.total { align-items: center; }
+.od-venue-card .price-row.total strong,
+.od-summary-card .price-row.total strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 560px) {
+  .od-venue-card .price-row,
+  .od-summary-card .price-row { gap: 0.45rem; font-size: 0.82rem; }
+  .od-venue-card .price-row.total,
+  .od-summary-card .price-row.total { flex-wrap: wrap; }
+  .od-venue-card .price-row.total strong,
+  .od-summary-card .price-row.total strong { flex: 1 1 100%; font-size: 1.15rem; }
+}
+/* ---- Step-3 phones: venue + review companions ----
+   The review rows keep label/value side by side (see the block above);
+   these companions only shrink type, wrap the sticky bar + hints, and
+   widen the form grid to one column so nothing forces a side-scroll. */
+@media (max-width: 640px) {
+  /* Form fields inside the venue card: single column like the rest of
+     the app's .form-row behaviour on phones */
+  .od-step-3 .form-row { grid-template-columns: 1fr; }
+  /* Profile-address banner + mobile-number banner: value wraps, Edit/button
+     drop to their own line instead of squeezing text */
+  .od-step-3 .bk-profile-addr { align-items: flex-start; flex-wrap: wrap; }
+  .od-step-3 .bk-profile-addr .bk-recap-edit { margin-left: auto; }
+  /* Field hints + the review-card trust lines: icon stays, text wraps */
+  .od-step-3 .field-hint { display: flex; align-items: flex-start; gap: 0.35rem; line-height: 1.5; overflow-wrap: anywhere; }
+  .od-step-3 .field-hint svg { flex-shrink: 0; margin-top: 0.15rem; }
+  /* Applied-coupon banner: text wraps, Remove keeps a thumb-safe target */
+  .od-step-3 .coupon-applied-text { flex: 1 1 160px; }
+  .od-step-3 .coupon-remove { min-height: 40px; padding: 0.35rem 0.5rem; }
+  /* Sticky CTA bar: summary row wraps above a full-width Find Cook button */
+  .od-step-3 .od-stickybar { gap: 0.6rem; }
+  .od-step-3 .od-summary { row-gap: 0.25rem; }
+  .od-step-3 .od-cta { width: 100%; min-height: 48px; }
+  .od-step-3 .od-sticky-note { text-align: center; }
+}
+@media (max-width: 400px) {
+  .od-venue-card .price-row,
+  .od-summary-card .price-row { font-size: 0.8rem; }
+  .od-venue-card .price-row.total strong,
+  .od-summary-card .price-row.total strong { font-size: 1.08rem; }
+}
 
 /* Empty-slot recovery: one-tap shorter-duration retries */
 .od-suggest-row {
@@ -1331,9 +1411,8 @@
 
 /* ---- Step-2 slot cards: compact start-time-first redesign ----
    Start time is the hero (scan speed); end time + free-cook count are
-   secondary lines. The component collapses each day-part to its first
-   TOP_SLOTS_COUNT starts behind a "Show all N times" expander, and badges
-   the most-available start "★ Recommended". */
+   secondary lines. Every free start is listed (no collapse), and the
+   most-available start is badged "★ Recommended". */
 .ondemand-page .slot-list-pick { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 0.5rem; }
 .ondemand-page .slot-chip-pick {
   flex-direction: column;

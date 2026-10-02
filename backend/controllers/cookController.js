@@ -36,7 +36,7 @@ const COOK_EDITABLE_FIELDS = [
   // engine reads these). updatedAt is set server-side below, never trusted
   // from the body.
   "schedule",
-  // Where the cook's 75% is paid — UPI id / bank details. Only the last 4
+  // Where the cook's 85% is paid — UPI id / bank details. Only the last 4
   // digits of an account are ever stored.
   "payoutDetails",
 ];

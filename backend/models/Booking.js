@@ -102,7 +102,7 @@ const bookingSchema = new mongoose.Schema(
     slabPrice: { type: Number, default: 0 },
     couponCode: { type: String, default: "", trim: true, uppercase: true },
     discount: { type: Number, default: 0 },
-    // Platform 25% of the final amount; the cook earns the rest (75%).
+    // Platform 15% of the final amount; the cook earns the rest (85%).
     commission: { type: Number, default: 0 },
     cookPayout: { type: Number, default: 0 },
     // Idempotency key for booking creation (client-generated UUID per
@@ -143,7 +143,7 @@ const bookingSchema = new mongoose.Schema(
     // Who ended the booking ("customer" | "cook" | "admin" | ""), recorded so
     // cook-side reliability can be tracked instead of only the status flip.
     cancelledBy: { type: String, default: "" },
-    // Payout ledger for the cook's 75%: "pending" until an admin settles it
+    // Payout ledger for the cook's 85%: "pending" until an admin settles it
     // (reference = UPI/bank transfer id). Without this the cook's money had
     // nowhere to live — commission was recorded but never disbursed.
     payout: {

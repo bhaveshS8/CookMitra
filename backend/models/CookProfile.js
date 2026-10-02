@@ -110,7 +110,7 @@ const cookProfileSchema = new mongoose.Schema(
       blockedDates: { type: [String], default: [] },
       updatedAt: { type: Date },
     },
-    // Where the cook's 75% should be paid. Only the last 4 digits of an
+    // Where the cook's 85% should be paid. Only the last 4 digits of an
     // account are stored — the transfer itself happens in the bank/UPI app.
     payoutDetails: {
       method: {

@@ -4,7 +4,7 @@
 // launch slabs without connecting to MongoDB.
 //
 // ─ How the ladder is designed ─────────────────────────────────────────────
-// Launch slabs: 1h ₹199 · 2h ₹349 · 3h ₹499 · 4h ₹649 (25% platform commission).
+// Launch slabs: 1h ₹199 · 2h ₹349 · 3h ₹499 · 4h ₹649 (15% platform commission).
 // Two rules keep promos cheap but attractive:
 //
 //   1. Percent HEADLINE, flat COST: shoppers react to "% OFF", but a low cap
@@ -14,15 +14,18 @@
 //      once-per-customer so one user can never bleed the margin dry. Total
 //      max exposure per user across the whole ladder: 50 + 70 + 75 = ₹195.
 //
-// Every coupon below is sized so the discount fits INSIDE the platform's 25%
+// Every coupon below is sized so the discount fits INSIDE the platform's 15%
 // on its smallest eligible session — so a discounted booking never eats into
-// the cook's 75% share. `launch-pricing.test.js` enforces that invariant.
+// the cook's 85% share. `launch-pricing.test.js` enforces that invariant.
+// At a 15% cut the room per booking is tight (₹52 on a 2h, ₹75 on a 3h, ₹97
+// on a 4h session), which is why FESTIVE20 starts at ₹499 and DIWALI90 caps
+// at ₹90 — the old ₹349 / ₹100 values only fit the previous 25% cut.
 //
 //   code        job                        min order   why
 //   WELCOME50   acquire first booking      ₹349        flat ₹50 ≈ 14% on 2h, once, first-booking only
-//   FESTIVE20   always-on festive hero     ₹349        20% capped at ₹70 (true 20% on 2h, capped above), once/user
+//   FESTIVE20   always-on festive hero     ₹499        20% off, capped at ₹70, once/user
 //   REBOOK75    reward repeat bookings     ₹499        flat ₹75 ≈ 15% on 3h, once/user, 3h+ only
-//   DIWALI100   push baskets to 4h         ₹649        flat ₹100 ≈ 15% on 4h, once/user, staged for Diwali
+//   DIWALI90    push baskets to 4h         ₹649        flat ₹90 ≈ 14% on 4h, once/user, staged for Diwali
 //
 // Retired codes (see RETIRED_COUPON_CODES) were either unredeemable, false
 // promises, or duplicates — run `npm run seed:coupons` to deactivate them.
@@ -42,11 +45,11 @@ const INITIAL_COUPONS = [
   },
   {
     code: "FESTIVE20",
-    description: "20% off festive bookings (min order ₹349).",
+    description: "20% off festive bookings (min order ₹499).",
     discountType: "percent",
     percent: 20,
     maxDiscount: 70,
-    minOrder: 349,
+    minOrder: 499,
     perUserLimit: 1,
     firstBookingOnly: false,
     active: true,
@@ -62,10 +65,10 @@ const INITIAL_COUPONS = [
     active: true,
   },
   {
-    code: "DIWALI100",
-    description: "₹100 off festive faral sessions of 4 hours (min order ₹649).",
+    code: "DIWALI90",
+    description: "₹90 off festive faral sessions of 4 hours (min order ₹649).",
     discountType: "flat",
-    flatAmount: 100,
+    flatAmount: 90,
     minOrder: 649,
     perUserLimit: 1,
     firstBookingOnly: false,
@@ -82,6 +85,7 @@ const INITIAL_COUPONS = [
 //   REBOOK50    superseded by REBOOK75
 //   WEEKDAY50   promised a weekday-only rule that was never implemented
 //   FESTIVE50   superseded by FESTIVE20
+//   DIWALI100   superseded by DIWALI90 (₹100 exceeded the platform's 15% cut)
 const RETIRED_COUPON_CODES = [
   "FESTIVE100",
   "NEWUSER100",
@@ -89,6 +93,7 @@ const RETIRED_COUPON_CODES = [
   "REBOOK50",
   "WEEKDAY50",
   "FESTIVE50",
+  "DIWALI100",
 ];
 
 module.exports = { INITIAL_COUPONS, RETIRED_COUPON_CODES };
