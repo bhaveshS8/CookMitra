@@ -549,9 +549,29 @@ const CookBooking = () => {
   };
 
   const buildAddress = () =>
-    `${form.flatNo.trim()}, ${form.society.trim()}${
-      form.landmark.trim() ? `, Near ${form.landmark.trim()}` : ""
-    }, ${form.city.trim()}`;
+    [
+      form.flatNo.trim(),
+      form.society.trim(),
+      form.landmark.trim() ? `Near ${form.landmark.trim()}` : "",
+      form.city.trim(),
+    ]
+      .filter(Boolean)
+      .join(", ");
+  const hasVenue =
+    form.flatNo.trim() || form.society.trim() || form.city.trim();
+  const reviewDishes = parseDishes();
+  const scrollToVenue = () => {
+    setAddrEditing(true);
+    requestAnimationFrame(() =>
+      document
+        .querySelector(".od-venue-card")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" })
+    );
+  };
+  const focusDishes = () => {
+    scrollToVenue();
+    requestAnimationFrame(() => fieldRefs.current.customDishes?.focus());
+  };
 
   const buildSelectedItems = () => parseDishes();
 
@@ -1505,65 +1525,92 @@ const CookBooking = () => {
               assigns the first cook to accept atomically. */}
           <div className="ondemand-form-card od-summary-card">
             <SecTitle n="06" icon={<CalendarCheck size={15} />}>Review your booking</SecTitle>
-            <div className="price-rows">
-              <div className="price-row">
-                <span>Service</span>
-                <span>{serviceLabel}</span>
+            <p className="od-review-sub">Check the details — one tap finds your cook. No payment now.</p>
+            <dl className="od-review-list">
+              <div className="od-review-row">
+                <dt>
+                  <span className="od-review-ic" aria-hidden="true"><CalendarCheck size={14} /></span>
+                  Schedule
+                </dt>
+                <dd>
+                  <strong>{dateLabel(form.date)}{form.date ? ` · ${form.date}` : ""}</strong>
+                  <span>{fmtTime(selectedSlot.startTime)} – {fmtTime(selectedSlot.endTime)} · {form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"} · {form.guests || "–"} guest{Number(form.guests) === 1 ? "" : "s"}</span>
+                  <span className="od-review-meta">{serviceLabel}</span>
+                </dd>
+                <dd className="od-review-edit">
+                  <button type="button" className="bk-recap-edit" onClick={() => setStep(1)} aria-label="Edit date, duration or guests">
+                    <Pencil size={12} /> Edit
+                  </button>
+                </dd>
               </div>
-              <div className="price-row">
-                <span>Date</span>
-                <span>{dateLabel(form.date)} · {form.date}</span>
+              <div className="od-review-row">
+                <dt>
+                  <span className="od-review-ic" aria-hidden="true"><MapPin size={14} /></span>
+                  Venue
+                </dt>
+                <dd>
+                  {hasVenue ? (
+                    <strong className="od-review-addr">{buildAddress() || "—"}</strong>
+                  ) : (
+                    <strong className="od-review-missing">Add your address above</strong>
+                  )}
+                  {coords && (
+                    <a className="od-review-link" href={mapsLink} target="_blank" rel="noreferrer">
+                      <MapPin size={12} /> Open map pin
+                    </a>
+                  )}
+                </dd>
+                <dd className="od-review-edit">
+                  <button type="button" className="bk-recap-edit" onClick={scrollToVenue} aria-label="Edit venue address">
+                    <Pencil size={12} /> Edit
+                  </button>
+                </dd>
               </div>
-              <div className="price-row">
-                <span>Time</span>
-                <span>{fmtTime(selectedSlot.startTime)} – {fmtTime(selectedSlot.endTime)}</span>
+              <div className="od-review-row">
+                <dt>
+                  <span className="od-review-ic" aria-hidden="true"><UtensilsCrossed size={14} /></span>
+                  Dishes
+                </dt>
+                <dd>
+                  {reviewDishes.length > 0 ? (
+                    <span className="od-dish-chips">
+                      {reviewDishes.map((d) => (
+                        <span key={d} className="od-dish-chip">{d}</span>
+                      ))}
+                    </span>
+                  ) : (
+                    <strong className="od-review-missing">Add dishes above</strong>
+                  )}
+                  {form.notes.trim() && (
+                    <span className="od-review-note">
+                      <StickyNote size={12} /> {form.notes.trim()}
+                    </span>
+                  )}
+                </dd>
+                <dd className="od-review-edit">
+                  <button type="button" className="bk-recap-edit" onClick={focusDishes} aria-label="Edit dishes">
+                    <Pencil size={12} /> Edit
+                  </button>
+                </dd>
               </div>
-              <div className="price-row">
-                <span>Duration</span>
-                <span>{form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
-              </div>
-              <div className="price-row">
-                <span>Guests</span>
-                <span>{form.guests || "–"}</span>
-              </div>
-              <div className="price-row">
-                <span>Address</span>
-                <span>{buildAddress()}</span>
-              </div>
-              {form.notes.trim() && (
-                <div className="price-row">
-                  <span>Notes</span>
-                  <span>{form.notes.trim()}</span>
-                </div>
-              )}
-              {parseDishes().length > 0 && (
-                <div className="price-row">
-                  <span>Dishes</span>
-                  <span>{parseDishes().join(", ")}</span>
-                </div>
-              )}
-              <div className="price-row">
-                <span>Service Price · {form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
-                <span>{slab != null ? formatCurrency(slab) : "—"}</span>
-              </div>
-              {coupon && (
-                <div className="price-row discount">
-                  <span>Coupon {coupon.code}</span>
-                  <span>−{formatCurrency(couponDiscount)}</span>
-                </div>
-              )}
-              <div className="price-row total">
-                <span>Final Amount</span>
+            </dl>
+            <div className="od-review-total" aria-live="polite">
+              <div className="od-review-total-row">
+                <span>To pay after cook accepts</span>
                 <strong>{slab != null ? formatCurrency(finalPayable) : "—"}</strong>
               </div>
+              <div className="od-review-total-sub">
+                <span>{slab != null ? formatCurrency(slab) : "—"} · {form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
+                {coupon && <span className="od-review-coupon">Coupon {coupon.code} −{formatCurrency(couponDiscount)}</span>}
+              </div>
             </div>
-            <p className="field-hint">
+            <p className="od-review-notice">
               <ShieldCheck size={13} /> {cooksForSlot.length > 0
                 ? `${cooksForSlot.length} verified cook${cooksForSlot.length > 1 ? "s" : ""} free at this time — the first to accept gets your booking.`
                 : "We'll contact verified cooks free at this time — the first to accept gets your booking."}
             </p>
             {!user && (
-              <p className="field-hint">
+              <p className="od-review-notice od-review-notice-login">
                 <LogIn size={13} /> Login as a customer to find a cook for this slot
               </p>
             )}

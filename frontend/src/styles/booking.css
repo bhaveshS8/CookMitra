@@ -3808,3 +3808,137 @@
 .bd-refund-card.is-done { border-left-color: var(--accent-emerald, #047857); }
 .bd-refund-card .bd-card-head svg { color: #d97706; }
 .bd-refund-card.is-done .bd-card-head svg { color: var(--accent-emerald, #047857); }
+
+/* ==========================================================================
+   Step-3 review card (CookBooking.jsx — `od-review-*`). Replaces the old
+   price-rows reuse: label/value facts, dish chips, compact total strip.
+   ========================================================================== */
+/* Step 3 keeps the same focused column as steps 1–2 on all viewports */
+.od-step-3 .ondemand-form-card { max-width: 740px; margin-inline: auto; }
+@media (min-width: 1024px) {
+  .od-step-3 .ondemand-form-card { max-width: 960px; padding: 1.75rem 2rem; }
+}
+/* Final card reads as the confirmation surface — emerald-tinted, not grey */
+.od-summary-card {
+  background: linear-gradient(180deg, #ffffff 0%, #f6fef9 100%);
+  border: 1.5px solid #a7f3d0;
+}
+.od-review-sub { margin: 0 0 0.9rem; font-size: 0.84rem; color: var(--slate-500); }
+.od-review-list { display: flex; flex-direction: column; gap: 0.55rem; margin: 0 0 0.8rem; padding: 0; }
+.od-review-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.35rem 0.75rem;
+  align-items: start;
+  background: #fff;
+  border: 1px solid var(--slate-200);
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  margin: 0;
+}
+.od-review-row dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--slate-400);
+  white-space: nowrap;
+  padding-top: 0.15rem;
+}
+.od-review-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--primary-light);
+  color: var(--primary-700);
+  flex-shrink: 0;
+}
+.od-review-row dd { margin: 0; display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.od-review-row dd strong { font-size: 0.9rem; font-weight: 800; color: var(--slate-900); overflow-wrap: anywhere; line-height: 1.4; }
+.od-review-row dd > span { font-size: 0.84rem; font-weight: 600; color: var(--slate-600); overflow-wrap: anywhere; line-height: 1.45; }
+.od-review-meta { font-size: 0.76rem !important; font-weight: 600 !important; color: var(--slate-400) !important; }
+.od-review-addr { line-height: 1.5; }
+.od-review-missing { color: var(--accent-rose) !important; }
+.od-review-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: fit-content;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--primary-700);
+  text-decoration: none;
+}
+.od-review-link:hover { text-decoration: underline; }
+.od-review-edit { align-self: center; }
+.od-dish-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.od-dish-chip {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--slate-700);
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 99px;
+  padding: 0.18rem 0.6rem;
+  overflow-wrap: anywhere;
+}
+.od-review-note {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+  font-style: italic;
+  font-size: 0.82rem !important;
+}
+.od-review-note svg { flex-shrink: 0; margin-top: 0.15em; }
+/* Compact total: single payable figure, detail stays one small line */
+.od-review-total {
+  background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
+  border: 1px solid #6ee7b7;
+  border-radius: 12px;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.7rem;
+}
+.od-review-total-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #065f46;
+}
+.od-review-total-row strong { font-size: 1.3rem; font-weight: 800; color: #047857; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.od-review-total-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.7rem;
+  margin-top: 0.15rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #047857;
+  opacity: 0.85;
+}
+.od-review-coupon { font-weight: 800; }
+.od-review-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0 0 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--slate-600);
+  line-height: 1.45;
+}
+.od-review-notice svg { flex-shrink: 0; margin-top: 0.15em; color: var(--accent-emerald); }
+.od-review-notice-login svg { color: var(--primary-700); }
+@media (max-width: 560px) {
+  .od-review-row { grid-template-columns: 1fr auto; }
+  .od-review-row dt { grid-column: 1 / -1; padding-top: 0; }
+  .od-review-total-row strong { font-size: 1.15rem; }
+}
