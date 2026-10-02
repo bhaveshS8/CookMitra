@@ -41,7 +41,7 @@ export const formatCurrency = (amount) => {
 // server recomputes every amount, this is display + preview only).
 // Whole-hour 1–4 sessions, one flat price for every cook and service.
 export const LAUNCH_SLAB_PRICES = { 1: 199, 2: 349, 3: 499, 4: 649 };
-export const COMMISSION_RATE = 0.25;
+export const COMMISSION_RATE = 0.15;
 
 export const slabPriceForDuration = (hours) => {
   const h = Number(hours);

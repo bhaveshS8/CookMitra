@@ -7,6 +7,7 @@ import Toasts from "./components/Toasts";
 import NotificationPopup from "./components/NotificationPopup";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
+import { useRealtime } from "./hooks/useRealtime";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ScrollToTop from "./components/ScrollToTop";
 import BackToTop from "./components/BackToTop";
@@ -47,6 +48,16 @@ const NonAdminRoute = ({ children }) => {
   return children;
 };
 
+// Opens the single app-wide SSE stream (booking_request / booking_assigned /
+// booking_ignored / booking_expired → realtime-booking-* DOM events). Mounted
+// once here so cook + admin popups, the customer waiting screen and the
+// notification bell all react instantly; every consumer degrades to its
+// existing poll loop when the stream is unreachable.
+const RealtimeBootstrap = () => {
+  useRealtime();
+  return null;
+};
+
 // Kicks off the first-visit location bootstrap once per app mount.
 const LocationBootstrap = () => {
   const dispatch = useDispatch();
@@ -79,6 +90,7 @@ function App() {
         <Router>
         <LocationBootstrap />
         <SessionBootstrap />
+        <RealtimeBootstrap />
         <ScrollToTop />
         <div className="App">
           <FestiveOfferBillboard />

@@ -430,7 +430,7 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
                       {formatCurrency(b.cookPayout)}
                     </div>
                     <div style={{ fontSize: "0.78rem", color: "var(--slate-500)" }}>
-                      of {formatCurrency(b.amount)} (25% fee {formatCurrency(b.commission)})
+                      of {formatCurrency(b.amount)} (15% fee {formatCurrency(b.commission)})
                     </div>
                     {refFor === b._id ? (
                       <div style={{ marginTop: "0.5rem", display: "flex", flexDirection: "column", gap: "0.4rem", alignItems: "flex-end" }}>

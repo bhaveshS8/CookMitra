@@ -2542,3 +2542,44 @@ button.my-qpill:hover { transform: translateY(-1px); }
   .admin-section-head h2 { font-size: 1.12rem; }
   .admin-filter-chip { font-size: 0.78rem; padding: 0.4rem 0.7rem; }
 }
+
+/* ==========================================================================
+   Dashboard auto-refresh pill
+   A quiet indicator that a tab's list is refreshing itself in the background
+   (no manual reload, no re-render of the cards). Used by the admin "Platform
+   Bookings" tab and the customer "My Bookings" page.
+   ========================================================================== */
+.dashboard-syncing-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--slate-500);
+  background: var(--slate-50);
+  border: 1px solid var(--slate-200);
+  border-radius: 99px;
+  padding: 0.22rem 0.65rem;
+  user-select: none;
+  pointer-events: none;
+}
+.dashboard-syncing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-blue, #3b82f6);
+  animation: dashboardSyncPulse 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes dashboardSyncPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.4; transform: scale(0.75); }
+}
+/* Admin bookings header: the pill sits inside the title block, under the
+   count line, so the head keeps its two-column (title | filters) layout. */
+.admin-bookings-title .dashboard-syncing-pill { margin-top: 0.5rem; }
+/* Customer "My Bookings": the pill stands alone between the hero and the list. */
+.my-bookings-page > .dashboard-syncing-pill { display: flex; width: fit-content; margin: 0 0 1rem; }
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-syncing-dot { animation: none; }
+}

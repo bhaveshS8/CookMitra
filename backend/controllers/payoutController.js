@@ -1,6 +1,6 @@
 // Cook payout settlement + refund console — admin-only ledger operations.
 //
-// Every paid booking records the cook's 75% in Booking.payout (status
+// Every paid booking records the cook's 85% in Booking.payout (status
 // "pending"). Nothing paid the cook until an admin makes an actual UPI/bank
 // transfer outside the app and records the reference here. This module gives
 // that flow one console: a pending queue with the cook's payout details,
@@ -41,7 +41,7 @@ const pendingFilter = () => ({
   ...PAYOUT_PENDING_OR_MISSING,
 });
 
-// Cook payout queue: every completed paid booking whose 75% is not yet
+// Cook payout queue: every completed paid booking whose 85% is not yet
 // settled, oldest first (fairness — cooks see their oldest money first).
 // Includes the cook's saved payout details so the admin can copy the UPI id
 // / read the bank last-4 without opening another page.

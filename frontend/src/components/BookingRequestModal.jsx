@@ -33,12 +33,18 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
   // Live 5-minute countdown, ticked while the dialog is open.
   const [nowMs, setNowMs] = useState(Date.now());
   // Admin on-behalf accept of a BROADCAST (unassigned) request must name the
-  // winning cook — the server never picks one. Loaded from the same
-  // availability feed the booking flow uses (cooks free at this exact slot).
+  // winning cook — the server never picks one. Loaded from the backend's
+  // eligible-cooks feed (server-determined availability for this exact slot,
+  // never trusted from the client); falls back to the availability-filtered
+  // cooks list if that feed is unreachable.
   const needsCookPick = Boolean(onBehalf && !booking?.cook);
   const [assignCookId, setAssignCookId] = useState("");
   const [assignCooks, setAssignCooks] = useState([]);
   const [assignLoading, setAssignLoading] = useState(false);
+  // Real-time takeover: another cook / the admin just won this request (or it
+  // expired) while the dialog sat open — disable the buttons and auto-close
+  // instead of leaving a stale actionable popup.
+  const [takenOver, setTakenOver] = useState(null);
 
   useEffect(() => {
     if (!open || !needsCookPick) return undefined;
@@ -48,6 +54,20 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
     setAssignLoading(true);
     (async () => {
       try {
+        // Backend-determined eligible cooks for THIS booking (excludes
+        // ignored/unavailable/out-of-window cooks server-side).
+        if (booking?._id) {
+          try {
+            const elig = await API.get(`/bookings/${booking._id}/eligible-cooks`);
+            const eligList = Array.isArray(elig.data?.cooks) ? elig.data.cooks : null;
+            if (!cancelled && eligList) {
+              setAssignCooks(eligList);
+              return;
+            }
+          } catch {
+            // fall through to the availability-filtered list below
+          }
+        }
         const dayStr = getLocalDateStr(booking?.date);
         const params = dayStr && booking?.startTime && booking?.endTime
           ? { date: dayStr, startTime: booking.startTime, endTime: booking.endTime }
@@ -71,6 +91,7 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
     if (open) {
       setActing(null);
       setError("");
+      setTakenOver(null);
       setNowMs(Date.now());
       const t = setTimeout(() => acceptBtnRef.current?.focus(), 60);
       return () => clearTimeout(t);
@@ -109,6 +130,8 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
   // The window lapsed while the dialog sat open: give the parent a beat to
   // show the expired state, then advance (refetch + next queued request).
   // Callbacks ride refs so parent re-renders can't keep resetting the timer.
+  // The same auto-close runs when real-time reports this request was just
+  // assigned elsewhere or expired (takenOver below).
   const actionRef = useRef(onAction);
   actionRef.current = onAction;
   const closeRef = useRef(onClose);
@@ -122,10 +145,51 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
     return () => clearTimeout(t);
   }, [open, expired]);
 
+  // Real-time takeover for the OPEN dialog: someone else won it (or it
+  // expired) — freeze the buttons with a truthful note, then advance so the
+  // parent refetches and pops the next waiting request. Stale/duplicate taps
+  // after this point are blocked by `busy` below and by the server's atomic
+  // claim (409 BOOKING_ALREADY_ASSIGNED) if they ever slip through.
+  useEffect(() => {
+    if (!open || !booking?._id) return undefined;
+    const myId = String(booking._id);
+    const onAssigned = (e) => {
+      const d = e?.detail || {};
+      if (d.bookingId && String(d.bookingId) !== myId) return;
+      if (!d.bookingId && d.customerId) return;
+      setTakenOver({
+        kind: "assigned",
+        message: "This request was just accepted — closing…",
+      });
+      showToast("This request was just accepted by another cook.", "info");
+      setTimeout(() => {
+        actionRef.current?.();
+        closeRef.current?.();
+      }, 1400);
+    };
+    const onExpired = (e) => {
+      const d = e?.detail || {};
+      if (d.bookingId && String(d.bookingId) !== myId) return;
+      if (!d.bookingId && d.customerId) return;
+      setTakenOver({ kind: "expired", message: "This request expired — closing…" });
+      setTimeout(() => {
+        actionRef.current?.();
+        closeRef.current?.();
+      }, 1400);
+    };
+    window.addEventListener("realtime-booking-assigned", onAssigned);
+    window.addEventListener("realtime-booking-expired", onExpired);
+    return () => {
+      window.removeEventListener("realtime-booking-assigned", onAssigned);
+      window.removeEventListener("realtime-booking-expired", onExpired);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, booking?._id]);
+
   if (!open) return null;
 
   const handleAction = async (action) => {
-    if (acting || !booking?._id) return;
+    if (acting || takenOver || !booking?._id) return;
     // Admin broadcast accept without a chosen cook is meaningless — the
     // server refuses it (400). Block here with a clear inline error.
     if (action === "accept" && needsCookPick && !assignCookId) {
@@ -144,7 +208,7 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
             : "Booking accepted — the customer has 5 minutes to pay."
           : onBehalf
           ? "Request declined on behalf of the cook."
-          : "Booking declined.",
+          : "Request ignored — the customer is still waiting for another cook.",
         action === "reject" ? "info" : "success"
       );
       onAction?.();
@@ -173,7 +237,7 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
       ? `${Math.floor(totalSecs / 60)}:${String(totalSecs % 60).padStart(2, "0")}`
       : null;
 
-  const busy = !!acting || expired;
+  const busy = !!acting || expired || !!takenOver;
 
   // Portaled to document.body: the dialog must escape .main-content's
   // pageIn animation stacking context, otherwise the sticky navbar paints
@@ -255,9 +319,14 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
           {booking?.notes && <p className="brm-note">Note: {booking.notes}</p>}
         </div>
 
-        {error && (
+        {error && !takenOver && (
           <div className="error-alert-banner" style={{ marginBottom: "0.75rem" }}>
             <AlertCircle size={16} /> {error}
+          </div>
+        )}
+        {takenOver && (
+          <div className="error-alert-banner" style={{ marginBottom: "0.75rem" }}>
+            <AlertCircle size={16} /> {takenOver.message}
           </div>
         )}
 
@@ -294,8 +363,8 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
         )}
 
         <div className="brm-actions">
-          {expired ? (
-            <p className="brm-expired-note">This request expired — finding the next one…</p>
+          {expired || takenOver ? (
+            <p className="brm-expired-note">{takenOver ? takenOver.message : "This request expired — finding the next one…"}</p>
           ) : (
             <>
               <button
@@ -305,7 +374,7 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
                 disabled={busy}
                 onClick={() => handleAction("accept")}
               >
-                <Check size={16} /> {acting === "accept" ? "Accepting…" : "Accept"}
+                <Check size={16} /> {acting === "accept" ? "Accepting…" : onBehalf ? "Accept & Assign" : "Accept"}
               </button>
               <button
                 type="button"
@@ -313,7 +382,7 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
                 disabled={busy}
                 onClick={() => handleAction("reject")}
               >
-                <X size={16} /> {acting === "reject" ? "Declining…" : "Decline"}
+                <X size={16} /> {acting === "reject" ? (onBehalf ? "Declining…" : "Ignoring…") : onBehalf ? "Decline" : "Ignore"}
               </button>
             </>
           )}

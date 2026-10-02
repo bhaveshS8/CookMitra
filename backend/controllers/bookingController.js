@@ -4,6 +4,7 @@ const Notification = require("../models/Notification");
 const CookProfile = require("../models/CookProfile");
 const Coupon = require("../models/Coupon");
 const User = require("../models/User");
+const realtime = require("../utils/realtime");
 const { normalizeCode, rejectionReason, computeDiscount } = require("../utils/coupons");
 const { slabPriceForDuration, splitPayout } = require("../utils/pricing");
 const crypto = require("crypto");
@@ -765,6 +766,29 @@ const findEligibleCooks = async ({ date, startTime, endTime, serviceType, exclud
 };
 exports.findEligibleCooks = findEligibleCooks;
 
+exports.getEligibleCooksForBooking = async (req, res, next) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+    const eligible = await findEligibleCooks({
+      date: booking.date,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      serviceType: booking.serviceType,
+      excludeCookIds: booking.ignoredBy || [],
+    });
+    const cookUserIds = eligible.map((e) => e.userId);
+    const profiles = await CookProfile.find({ user: { $in: cookUserIds } })
+      .populate("user", "name email phone status")
+      .lean();
+    return res.json({ success: true, cooks: profiles });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.createBooking = async (req, res, next) => {
   try {
     // Find-Cook flow: the client NEVER chooses the cook. Any `cook` /
@@ -999,7 +1023,7 @@ exports.createBooking = async (req, res, next) => {
       }
       couponCode = redeemed.code;
     }
-    // 25% platform commission; the cook earns 75% of the final amount.
+    // 15% platform commission; the cook earns 85% of the final amount.
     const { finalAmount, commission, cookPayout } = splitPayout(slabPrice - discount);
     const expectedAmount = finalAmount;
     // The coupon was already redeemed above — every path that fails AFTER the
@@ -1252,14 +1276,38 @@ exports.createBooking = async (req, res, next) => {
         booking: booking._id,
         message: `New booking request from ${req.user.name || "a customer"}`,
       }));
-      // Insert one row per cook; duplicates impossible (fresh booking id).
+
+      // Admin notifications: Admins also receive the real-time request popup
+      try {
+        const admins = await User.find({ role: "ADMIN", status: { $ne: "suspended" } }).select("_id").lean();
+        for (const adminUser of admins || []) {
+          notifDocs.push({
+            user: adminUser._id,
+            type: "booking_request",
+            booking: booking._id,
+            message: `New booking request from ${req.user.name || "a customer"}`,
+          });
+        }
+      } catch {
+        // best effort
+      }
+
+      // Insert one row per cook/admin; duplicates impossible (fresh booking id).
       for (const doc of notifDocs) {
         try {
           await Notification.create(doc);
         } catch {
-          // per-cook best effort — one failure must not block the rest
+          // per-user best effort — one failure must not block the rest
         }
       }
+
+      // Real-time broadcast to eligible cooks and admins
+      const targetUserIds = notifDocs.map((d) => String(d.user));
+      realtime.emit(
+        "booking_request",
+        { booking: booking.toObject ? booking.toObject() : booking },
+        { targetUserIds }
+      );
     } catch {
       // non-fatal: booking creation already succeeded
     }
@@ -1460,6 +1508,18 @@ const expireBookingIfNeeded = async (booking) => {
       }
       // WhatsApp push to BOTH sides (fire-and-forget).
       notifyWhatsApp("expired", booking);
+      // Real-time: close/disable every open request popup for this booking
+      // (cooks + admin) the moment it expires — same channel as
+      // booking_request / booking_assigned so no polling lag strands a dead
+      // Accept button.
+      try {
+        realtime.emit("booking_expired", {
+          bookingId: String(booking._id),
+          customerId: String(booking.customer),
+        });
+      } catch {
+        // non-fatal: expiry itself already succeeded
+      }
       return booking;
     }
     if (
@@ -1999,6 +2059,21 @@ exports.acceptBooking = async (req, res, next) => {
         assignedCookId &&
         (isAdmin || assignedCookId === String(req.user.id));
       if (wonByMe) {
+        // Stale admin assignment: the request was already won (by a cook's
+        // direct accept or an earlier admin pick) and this call names a
+        // DIFFERENT cook — the first assignment stands and the loser gets a
+        // truthful 409 (no state change, no reassignment). Plain re-taps stay
+        // idempotent 200 below.
+        if (isAdmin) {
+          const requestedCook = String(req.body?.cookId || req.body?.cook || "");
+          if (requestedCook && requestedCook !== String(assignedCookId)) {
+            return res.status(409).json({
+              success: false,
+              code: "BOOKING_ALREADY_ASSIGNED",
+              message: "This booking has already been accepted by another cook.",
+            });
+          }
+        }
         const obj = stripServiceOtp(booking.toObject ? booking.toObject() : booking);
         return res.json({ success: true, ...obj, alreadyAccepted: true });
       }
@@ -2037,6 +2112,17 @@ exports.acceptBooking = async (req, res, next) => {
         message:
           "Your booking request expired — the cook didn't respond within 5 minutes. Please find another cook.",
       });
+      // Late accept raced past the window: the booking just flipped to
+      // expired above — push it in real time so every other open popup
+      // (cooks + admin) closes instead of staying actionable until poll.
+      try {
+        realtime.emit("booking_expired", {
+          bookingId: String(booking._id),
+          customerId: String(booking.customer),
+        });
+      } catch {
+        // non-fatal
+      }
       return res.status(410).json({
         message:
           "This request expired after 5 minutes. The customer has been notified to choose another cook.",
@@ -2112,7 +2198,10 @@ exports.acceptBooking = async (req, res, next) => {
       }
     }
     // Admin assigning a broadcast request to an explicit cook: verify that
-    // cook the same way (never assign a suspended/unapproved cook).
+    // cook the same way (never assign a suspended/unapproved cook, and never
+    // trust the frontend's eligibility — availability toggle, service-type
+    // membership and the open-window fit are re-verified here just like the
+    // cook self-accept path; slot overlap is checked for both paths below).
     if (isAdmin && !assignedCookId && actingCookId) {
       try {
         const profile = await CookProfile.findOne({ user: actingCookId });
@@ -2136,6 +2225,47 @@ exports.acceptBooking = async (req, res, next) => {
           } catch {
             return res.status(500).json({ message: "Could not verify that cook right now. Please try again." });
           }
+        }
+        try {
+          if (!(await resolveCookAvailability(profile))) {
+            return res.status(409).json({
+              success: false,
+              code: "COOK_NOT_ELIGIBLE",
+              message: "That cook is marked unavailable right now.",
+            });
+          }
+        } catch {
+          return res.status(500).json({ message: "Could not verify that cook right now. Please try again." });
+        }
+        if (
+          Array.isArray(profile.serviceTypes) &&
+          profile.serviceTypes.length > 0 &&
+          booking.serviceType &&
+          !profile.serviceTypes.includes(booking.serviceType)
+        ) {
+          return res.status(409).json({
+            success: false,
+            code: "COOK_NOT_ELIGIBLE",
+            message: "That cook doesn't offer the requested service.",
+          });
+        }
+        try {
+          const dayStrForAdminPick = istDayString(booking.date);
+          let adminWindows = [];
+          try {
+            adminWindows = await getDayWindows(actingCookId, dayStrForAdminPick);
+          } catch {
+            adminWindows = [];
+          }
+          if (!findContainingWindow(adminWindows, booking.startTime, booking.endTime)) {
+            return res.status(409).json({
+              success: false,
+              code: "COOK_NOT_ELIGIBLE",
+              message: "That cook is not available for that time anymore.",
+            });
+          }
+        } catch {
+          return res.status(500).json({ message: "Could not verify that cook right now. Please try again." });
         }
       } catch (e) {
         if (e?.statusCode) throw e;
@@ -2428,6 +2558,16 @@ exports.acceptBooking = async (req, res, next) => {
       customerWhatsappUrl = null;
     }
 
+    try {
+      realtime.emit("booking_assigned", {
+        bookingId: String(booking._id),
+        assignedCookId: String(booking.cook),
+        customerId: String(booking.customer),
+      });
+    } catch {
+      // non-fatal
+    }
+
     const obj = stripServiceOtp(booking);
     res.json({ success: true, ...obj, customerWhatsappUrl, cookPhone: cookPhoneForCustomer });
   } catch (error) {
@@ -2490,6 +2630,15 @@ exports.rejectBooking = async (req, res, next) => {
       } catch {
         // non-fatal: the ignore is best-effort below
       }
+      try {
+        realtime.emit("booking_ignored", {
+          bookingId: String(booking._id),
+          cookId: String(req.user.id),
+        });
+      } catch {
+        // non-fatal
+      }
+
       const out = stripServiceOtp(booking.toObject ? booking.toObject() : booking);
       return res.json({
         success: true,

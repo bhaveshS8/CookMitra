@@ -137,6 +137,10 @@
 }
 .cook-stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .cook-stat-card:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
+/* Read-only stat (e.g. "Earned"): shows a figure only — no pointer cursor and
+   no hover lift, because it is not a navigable shortcut. */
+.cook-stat-card.cook-stat-static { cursor: default; }
+.cook-stat-card.cook-stat-static:hover { transform: none; box-shadow: var(--shadow-sm); }
 .cook-stat-icon {
   width: 48px;
   height: 48px;

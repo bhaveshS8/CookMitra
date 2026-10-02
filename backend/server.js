@@ -390,6 +390,7 @@ app.use("/api/availability", require("./routes/availability"));
 app.use("/api/reviews", require("./routes/reviews"));
 app.use("/api/complaints", require("./routes/complaints"));
 app.use("/api/notifications", require("./routes/notifications"));
+app.get("/api/realtime/stream", require("./utils/realtime").sseHandler);
 app.use("/api/whatsapp", require("./routes/whatsapp"));
 app.use("/api/leads", require("./routes/leads"));
 app.use("/api/coupons", require("./routes/coupons"));

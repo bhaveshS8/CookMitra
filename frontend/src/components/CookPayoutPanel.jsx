@@ -5,7 +5,7 @@ import { useShowToast } from "../store/hooks";
 import { formatCurrency, formatDate } from "../utils/constants";
 import { Wallet, IndianRupee, Save, Clock3, CheckCircle2 } from "lucide-react";
 
-// Cook-facing payouts: where the 75% should be sent (UPI id / bank last-4)
+// Cook-facing payouts: where the 85% should be sent (UPI id / bank last-4)
 // and a live statement of what has been settled vs is still pending. The
 // actual transfer happens offline; this panel keeps both sides honest.
 const CookPayoutPanel = () => {
@@ -78,7 +78,7 @@ const CookPayoutPanel = () => {
           {st && (
             <div className="cook-stats-row" style={{ display: "flex", flexWrap: "wrap", gap: "1rem", marginBottom: "1rem" }}>
               <div className="cook-stat" title={`Gross cook share ${formatCurrency(st.earnings)} minus successful refunds ${formatCurrency(st.refunded || 0)}`}>
-                <span className="cook-stat-label">Total earned (75%, net of refunds)</span>
+                <span className="cook-stat-label">Total earned (85%, net of refunds)</span>
                 <strong>{formatCurrency(st.netEarnings ?? st.earnings)}</strong>
               </div>
               <div className="cook-stat">
@@ -103,7 +103,7 @@ const CookPayoutPanel = () => {
           )}
           <form onSubmit={handleSave}>
             <div className="cook-field">
-              <label>Where should we send your 75% share?</label>
+              <label>Where should we send your 85% share?</label>
               <select className="form-control" value={form.method} onChange={set("method")}>
                 <option value="">Choose…</option>
                 <option value="upi">UPI</option>

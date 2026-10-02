@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
 import API from "../api/axios";
 import { useFetch } from "../hooks/useFetch";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { normalizeRole } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
 import { formatCurrency, formatDate, formatTimeRange12, playAlarmSound } from "../utils/constants";
@@ -417,7 +418,7 @@ const CookManagement = () => {
 };
 
 const BookingManagement = () => {
-  const { data: bookings, loading, refetch } = useFetch("/bookings");
+  const { data: bookings, loading, refreshing, refetch } = useFetch("/bookings");
   const showToast = useShowToast();
   const [bookingFilter, setBookingFilter] = useState("all");
   // F-06: per-booking busy state — double-clicking Accept/Complete/Cancel
@@ -436,19 +437,10 @@ const BookingManagement = () => {
   const seenRequestIds = useRef(new Set());
   const requestsInit = useRef(false);
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (!document.hidden) refetch();
-    }, 15000);
-    const onVisible = () => {
-      if (!document.hidden) refetch();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [refetch]);
+  // Automatic, silent refresh of the booking list: a 15s background poll
+  // (paused on hidden tabs, fired at once when the tab/window regains focus)
+  // keeps the cards current without ever re-showing the first-load spinner.
+  useAutoRefresh(refetch, { intervalMs: 15000 });
 
   const byNewest = (a, b) =>
     new Date(b?.createdAt).getTime() - new Date(a?.createdAt).getTime() ||
@@ -503,6 +495,53 @@ const BookingManagement = () => {
       }, 350);
     }
   };
+
+  // Real-time booking flow (SSE → realtime-booking-* DOM events, mounted once
+  // in App): new requests refetch instantly; a cook winning the race (or the
+  // window expiring) closes/disables the admin's open popup at once and
+  // refreshes the cards. The 15s poll above stays as fallback. Admin
+  // assignment stays OPTIONAL — a cook's direct accept wins the same atomic
+  // server claim and simply closes this popup via the event below.
+  const adminModalIdRef = useRef(null);
+  adminModalIdRef.current = requestModalBooking?._id || null;
+  useEffect(() => {
+    const closeIfOpen = (id, message) => {
+      if (!id) {
+        refetch();
+        return;
+      }
+      if (adminModalIdRef.current && String(adminModalIdRef.current) === String(id)) {
+        seenRequestIds.current.add(String(id));
+        setRequestModalBooking(null);
+        if (message) showToast(message, "info");
+      }
+      refetch();
+    };
+    const onRequest = () => refetch();
+    const onAssigned = (e) => {
+      const d = e?.detail || {};
+      closeIfOpen(
+        d.bookingId ? String(d.bookingId) : null,
+        d.bookingId ? "This request was just accepted — it is no longer available." : null
+      );
+    };
+    const onExpired = (e) => {
+      const d = e?.detail || {};
+      closeIfOpen(
+        d.bookingId ? String(d.bookingId) : null,
+        d.bookingId ? "This request expired — the slot was released." : null
+      );
+    };
+    window.addEventListener("realtime-booking-request", onRequest);
+    window.addEventListener("realtime-booking-assigned", onAssigned);
+    window.addEventListener("realtime-booking-expired", onExpired);
+    return () => {
+      window.removeEventListener("realtime-booking-request", onRequest);
+      window.removeEventListener("realtime-booking-assigned", onAssigned);
+      window.removeEventListener("realtime-booking-expired", onExpired);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const ACTION_COPY = {
     accept: {
@@ -617,6 +656,12 @@ const BookingManagement = () => {
         <div className="admin-bookings-title">
           <h2>All Platform Bookings</h2>
           <p>{(bookings || []).length} total • {newCount} awaiting cook decision</p>
+          {!loading && refreshing && (
+            <span className="dashboard-syncing-pill" aria-live="polite" aria-label="Auto-refreshing bookings">
+              <span className="dashboard-syncing-dot" />
+              Auto-refreshing...
+            </span>
+          )}
         </div>
         <div className="admin-bookings-filters" role="tablist" aria-label="Filter bookings">
           {[
@@ -760,7 +805,18 @@ const BookingManagement = () => {
                 <>
                   <button
                     className="btn btn-success btn-sm abc-btn"
-                    onClick={() => setPendingAction({ bookingId: booking._id, action: "accept" })}
+                    onClick={() => {
+                      // Broadcast (unassigned) requests MUST pick an eligible
+                      // cook — the server refuses a cook-less admin accept
+                      // (400). Open the Accept & Select Cook popup instead of
+                      // firing the PATCH directly; admin assignment stays
+                      // optional (a cook's direct accept simply wins first).
+                      if (!booking.cook) {
+                        setRequestModalBooking(booking);
+                      } else {
+                        setPendingAction({ bookingId: booking._id, action: "accept" });
+                      }
+                    }}
                     disabled={actingId === `${booking._id}:accept`}
                   >
                     <Check size={15} /> {actingId === `${booking._id}:accept` ? "Working…" : "Accept"}

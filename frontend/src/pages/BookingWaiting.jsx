@@ -148,8 +148,30 @@ const BookingWaiting = () => {
     };
   }, [load]);
 
-  // Sorry screen auto-redirects back to finding cooks — carrying the
-  // booking snapshot so the customer lands on step 3 (pick another cook
+  // Real-time: a cook (or the admin) accepting fires booking_assigned on the
+  // app-wide SSE stream — fetch the authoritative state at once instead of
+  // waiting for the next 4s poll. Expiry also pushes booking_expired now.
+  useEffect(() => {
+    const mine = String(bookingId || "");
+    const onAssigned = (e) => {
+      const d = e?.detail || {};
+      if (d.bookingId && String(d.bookingId) !== mine) return;
+      load();
+    };
+    const onExpired = (e) => {
+      const d = e?.detail || {};
+      if (d.bookingId && String(d.bookingId) !== mine) return;
+      load();
+    };
+    window.addEventListener("realtime-booking-assigned", onAssigned);
+    window.addEventListener("realtime-booking-expired", onExpired);
+    return () => {
+      window.removeEventListener("realtime-booking-assigned", onAssigned);
+      window.removeEventListener("realtime-booking-expired", onExpired);
+    };
+  }, [bookingId, load]);
+
+  // Sorry screen auto-redirects back to finding cooks — carrying the  // booking snapshot so the customer lands on step 3 (pick another cook
   // for the same slot) instead of starting over on step 1.
   useEffect(() => {
     if (phase !== "sorry") return undefined;
