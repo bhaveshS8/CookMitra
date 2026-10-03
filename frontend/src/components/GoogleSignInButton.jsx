@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
@@ -29,25 +29,48 @@ const GoogleSignInButton = ({
   const showToast = useShowToast();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  // GSI only accepts fixed pixel widths (200–400) — a 320px button
-  // overflows narrow auth cards, so shrink it on very small phones.
-  const [narrowPhone, setNarrowPhone] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(max-width: 400px)").matches
-  );
+  // GSI only accepts fixed pixel widths (200–400), so a hardcoded width can
+  // never match the form on every screen — instead measure the wrapper and
+  // pass the closest valid width, making the official button exactly fill
+  // the login/signup card from 320px phones up to desktop.
+  const wrapRef = useRef(null);
+  const [btnWidth, setBtnWidth] = useState(320);
+  // Shimmer placeholder until Google's iframe mounts, so the button area
+  // never looks broken/empty on slow networks (no layout shift either —
+  // the skeleton matches the official button's 40px height).
+  const [gsiReady, setGsiReady] = useState(false);
   useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mq = window.matchMedia("(max-width: 400px)");
-    const onChange = (e) => setNarrowPhone(e.matches);
-    if (typeof mq.addEventListener === "function") {
-      mq.addEventListener("change", onChange);
-      return () => mq.removeEventListener("change", onChange);
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const update = () => {
+      const w = Math.round(el.getBoundingClientRect().width);
+      if (w > 0) {
+        const next = Math.min(400, Math.max(200, w));
+        setBtnWidth((prev) => (Math.abs(prev - next) > 2 ? next : prev));
+      }
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    if (el.querySelector("iframe")) {
+      setGsiReady(true);
+      return;
     }
-    // Legacy Safari (< 14): addListener only.
-    mq.addListener(onChange);
-    return () => mq.removeListener(onChange);
+    if (typeof MutationObserver === "undefined") return;
+    const mo = new MutationObserver(() => {
+      if (el.querySelector("iframe")) {
+        setGsiReady(true);
+        mo.disconnect();
+      }
+    });
+    mo.observe(el, { childList: true, subtree: true });
+    return () => mo.disconnect();
   }, []);
 
   if (!isGoogleConfigured) {
@@ -117,8 +140,14 @@ const GoogleSignInButton = ({
   };
 
   return (
-    <div className="google-btn-wrapper">
+    <div className="google-btn-wrapper" ref={wrapRef}>
       {loading && <div className="google-btn-loading">Signing in with Google…</div>}
+      {!gsiReady && !loading && (
+        <div className="google-btn-skeleton" aria-hidden="true">
+          <span className="google-btn-skeleton-g">G</span>
+          <span>{text === "signup_with" ? "Sign up with Google" : "Sign in with Google"}</span>
+        </div>
+      )}
       <GoogleLogin
         onSuccess={handleSuccess}
         onError={handleError}
@@ -126,7 +155,7 @@ const GoogleSignInButton = ({
         shape="rectangular"
         theme="outline"
         size="large"
-        width={narrowPhone ? "240" : "320"}
+        width={String(btnWidth)}
       />
     </div>
   );

@@ -40,7 +40,7 @@
   height: 100% !important;
   max-width: none !important;
   max-height: none !important;
-  object-fit: cover;
+  object-fit: fill;
   object-position: center center;
   display: block;
   pointer-events: none;

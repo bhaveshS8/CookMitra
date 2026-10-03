@@ -224,7 +224,7 @@ const PendingCookRatings = () => {
 // routes/stats.js). Hardcoded marketing numbers are a CCPA 2022
 // misleading-ad exposure for a payment merchant, so the hero only renders a
 // stat once it is meaningful, and falls back to honest "growing" copy.
-const STAT_MINIMUMS = { cooks: 5, bookings: 20, ratings: 5 };
+const STAT_MINIMUMS = { bookings: 20, ratings: 5 };
 
 const HeroStats = () => {
   const [stats, setStats] = useState(null);
@@ -243,28 +243,18 @@ const HeroStats = () => {
     };
   }, []);
 
-  const showCooks = (stats?.cooks ?? 0) >= STAT_MINIMUMS.cooks;
   const showBookings = (stats?.bookings ?? 0) >= STAT_MINIMUMS.bookings;
   const showRating =
     (stats?.ratingCount ?? 0) >= STAT_MINIMUMS.ratings && stats?.ratingAverage != null;
 
   // Pre-launch: nothing is meaningful yet — render nothing instead of
   // placeholder stats.
-  if (!showCooks && !showBookings && !showRating) {
+  if (!showBookings && !showRating) {
     return null;
   }
 
   return (
     <div className="hero-v2-stats">
-      {showCooks && (
-        <>
-          <div className="hero-v2-stat">
-            <div className="hero-v2-stat-num"><CountUp to={stats.cooks} suffix="+" /></div>
-            <div className="hero-v2-stat-label">Verified Cooks</div>
-          </div>
-          <div className="hero-v2-stat-sep" />
-        </>
-      )}
       {showBookings && (
         <>
           <div className="hero-v2-stat">
@@ -356,16 +346,14 @@ const Home = () => {
 
         <div className="hero-v2-inner">
           <div className="hero-v2-left">
-            <p className="hero-devotional hero-enter" style={{ "--d": "0.1s" }}>
-              ॥ गणपती बाप्पा मोरया ॥
-            </p>
             <h1 className="hero-v2-title hero-enter" style={{ "--d": "0.15s" }}>
               Festive Feasts, <span className="hero-v2-accent">Cooked Fresh</span> in Your Kitchen
             </h1>
             <p className="hero-v2-sub hero-enter" style={{ "--d": "0.25s" }}>
-              Welcome Bappa home with ukadiche modak, puran poli, chakli & more —
-              cooked fresh in your kitchen by verified home cooks. OTP-verified
-              starts, secure UPI payments, and real-time alerts.
+              Celebrate Navratri with vrat-friendly feasts — sabudana khichdi,
+              kuttu parathas, samak rice & more — cooked fresh in your kitchen
+              by verified home cooks. OTP-verified starts, secure UPI payments,
+              and real-time alerts.
             </p>
 
             <div className="hero-v2-actions hero-enter" style={{ "--d": "0.35s" }}>

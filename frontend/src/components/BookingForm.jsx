@@ -110,7 +110,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     serviceType: DEFAULT_SERVICE_TYPE,
     date: localTodayStr(),
     startTime: defaultStartTime(),
-    durationHours: "",
+    durationHours: "1",
     flatNo: "",
     society: "",
     landmark: "",

@@ -156,13 +156,13 @@ const CookBooking = () => {
   }, [step]);
   const [form, setForm] = useState({
     serviceType: DEFAULT_SERVICE_TYPE,
-    date: localTomorrowStr(),
+    date: localTodayStr(),
     flatNo: "",
     society: "",
     landmark: "",
     city: "",
     guests: "4",
-    durationHours: "3",
+    durationHours: "1",
     customDishes: "",
     notes: "",
   });

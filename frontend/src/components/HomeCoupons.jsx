@@ -69,7 +69,6 @@ const HomeCoupons = () => {
   return (
     <section className="home-coupons home-band band-abyss" id="offers">
       <div className="section-header">
-        <span className="section-eyebrow">🪔 Ganesh Utsav Specials</span>
         <h2 className="section-title">Festive Offers For You</h2>
         <p className="section-description">
           Apply a coupon while booking — one offer per session, straight off
