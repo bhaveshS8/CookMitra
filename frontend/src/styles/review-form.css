@@ -342,7 +342,7 @@
 .hrc-grid {
   position: relative;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: 1rem;
 }
 
@@ -442,7 +442,7 @@
 
 /* Tablets / small laptops: cap at two comfortable columns and tighten. */
 @media (min-width: 641px) and (max-width: 1024px) {
-  .hrc-grid { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .hrc-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
   .hrc-section { padding: 1.35rem 1.25rem 1.45rem; }
 }
 
@@ -458,4 +458,16 @@
   .rf-star:hover,
   .rf-star:focus-visible { transform: none; }
   .hrc-dismiss, .hrc-x, .rf-tag { transition: none; }
+}
+/* ---- Small phones: review header + star row ------------------------- */
+@media (max-width: 375px) {
+  .hrc-section { margin: 1.1rem 0.6rem 0; padding: 1.05rem 0.9rem 1.15rem; }
+  .hrc-card { padding: 0.9rem 0.85rem 1rem; }
+  .rf-rate { flex-wrap: wrap; }
+}
+@media (max-width: 320px) {
+  .hrc-section { margin: 1rem 0.5rem 0; padding: 1rem 0.8rem 1.1rem; }
+  .hrc-title { font-size: 1.08rem; }
+  .hrc-avatar { width: 38px; height: 38px; font-size: 0.92rem; }
+  .rf-tag { padding: 0.4rem 0.7rem; font-size: 0.78rem; }
 }

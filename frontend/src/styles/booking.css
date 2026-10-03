@@ -745,7 +745,15 @@
 .ondemand-steps { gap: 0.7rem; margin: 1rem 0 1.1rem; }
 .ondemand-step { font-size: 0.8rem; }
 .ondemand-step-dot { width: 24px; height: 24px; font-size: 0.72rem; }
-.ondemand-form-card { padding: 1.3rem 1.2rem; animation: bkFadeIn 0.24s ease backwards; }
+/* Card padding is exposed as custom properties so the sticky action bar —
+   which bleeds out to the card's inner edges — tracks every responsive
+   override instead of hard-coding a second set of paddings that can drift. */
+.ondemand-form-card {
+  --od-pad-x: 1.2rem;
+  --od-pad-b: 1.3rem;
+  padding: 1.3rem var(--od-pad-x) var(--od-pad-b);
+  animation: bkFadeIn 0.24s ease backwards;
+}
 .ondemand-form-card .form-control { min-height: 44px; font-size: 0.9rem; }
 .ondemand-form-sub { font-size: 0.82rem; }
 .ondemand-section-title { font-size: 1.02rem; margin: 1.2rem 0 0.6rem; }
@@ -1000,12 +1008,14 @@
 .od-stickybar {
   position: sticky;
   bottom: 0;
-  z-index: 5;
+  z-index: 6;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  margin: 0.4rem -1.2rem -1.3rem;
-  padding: 0.7rem 1.2rem calc(0.8rem + env(safe-area-inset-bottom));
+  /* Bleeds to the card's inner edges — the negative margins track the card's
+     own responsive padding through the custom properties above. */
+  margin: 0.4rem calc(-1 * var(--od-pad-x, 1.2rem)) calc(-1 * var(--od-pad-b, 1.3rem));
+  padding: 0.7rem var(--od-pad-x, 1.2rem) calc(0.8rem + env(safe-area-inset-bottom));
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -1261,10 +1271,8 @@
     0 18px 38px -14px rgba(194, 65, 12, 0.28),
     0 2px 6px rgba(15, 23, 42, 0.06);
 }
-.ondemand-page .od-livebar {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 10px 24px -12px rgba(15, 23, 42, 0.5);
+.ondemand-page .od-gobar {
+  box-shadow: none;
 }
 .ondemand-page .od-slot-recap,
 .ondemand-page .od-bookbox {
@@ -1327,8 +1335,6 @@
 /* --- Phones: compact but never below readable minimums --- */
 @media (max-width: 640px) {
   .ondemand-page .od-steps-modern { gap: 0.15rem; }
-  .ondemand-page .od-livebar { font-size: 0.72rem; }
-  .ondemand-page .od-livechip { font-size: 0.68rem; }
   .bk-v2 .bk-step-desc { display: none; }
   .bk-v2 .bk-sticky-text { font-size: 0.74rem; }
 }
@@ -1393,6 +1399,77 @@
   box-shadow: 0 0 0 4px var(--primary-glow);
 }
 
+/* Saved-location select (step 3, inside the orange locate box) — solid white
+   field so it reads as a real input on the tinted dashed box. The global
+   `select.form-control` rule swaps the control's gradient background for the
+   chevron image only, leaving the face transparent; without this the long
+   address text sits directly on the orange tint with no field edge.
+
+   Width contract: the select must match every other `.form-control` input in
+   this card EXACTLY — no extra box model. The global `.form-control` sets
+   `width: 100%` + `padding: 0.68rem 0.9rem` (left pad = 0.9rem) and
+   `select.form-control` reserves `padding-right: 2.4rem` for the chevron
+   (`forms.css`). So this rule only adds the face + min-height — padding is
+   inherited, never re-declared, and can never drift out of sync.
+
+   Truncation: native selects size to their longest <option> and ignore
+   `text-overflow`, so the closed label is clipped by an overflow-hidden
+   wrapper instead (`.od-saved-wrap`, in the DOM around the select). The
+   select keeps `max-width: 100%` so it never pushes the card past the
+   viewport; the wrapper's `overflow: hidden` hides the rest of the address.
+
+   Overflow hardening: the select lives in a column flex chain
+   (locate-box > form-group > select) where every flex item defaults to
+   `min-width: auto`. So every level gets `min-width: 0 + max-width: 100%`. */
+.od-saved-group { min-width: 0; max-width: 100%; }
+/* Clipping frame: exactly the input's box (100% of the group, border-box),
+   12px radius to match. Hides whatever address text runs past the field. */
+.od-saved-wrap {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 12px;
+}
+.ondemand-locate-box { min-width: 0; max-width: 100%; }
+.ondemand-form-card,
+.od-venue-card { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.ondemand-locate-box .od-saved-select {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  box-sizing: border-box;
+  background-color: #fff;
+  font-weight: 600;
+  color: var(--slate-800);
+  cursor: pointer;
+}
+.ondemand-locate-box .od-saved-select:hover { border-color: var(--primary); }
+.ondemand-locate-box .od-saved-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-glow);
+  background-color: #fff;
+}
+.ondemand-locate-box .od-saved-select option { font-weight: 500; color: var(--slate-800); background: #fff; }
+.ondemand-locate-box .od-saved-select option[value=""] { color: var(--slate-400); }
+/* 16px kills iOS auto-zoom; scoped 0,3,0 so it beats the fluid clamp type. */
+@media (max-width: 640px) {
+  .ondemand-page .ondemand-locate-box .od-saved-select { font-size: 16px; min-height: 48px; }
+  /* Locate box is inside a padded card — keep its padding fluid so the
+     select it contains never gets squeezed past the viewport edge. */
+  .ondemand-page .od-venue-card { overflow: hidden; }
+  .ondemand-page .ondemand-locate-box { padding: 0.8rem 0.85rem; }
+}
+@media (max-width: 375px) {
+  /* Chevron inset tracks forms.css (right 0.65rem) — padding itself is
+     inherited from .form-control so width never drifts from the inputs. */
+  .ondemand-page .ondemand-locate-box { padding: 0.75rem 0.7rem; }
+}
+
 /* Slot radio cards: lift on hover, count becomes a pill */
 .slot-chip-pick { transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease; }
 .slot-chip-pick:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
@@ -1413,7 +1490,7 @@
    Start time is the hero (scan speed); end time + free-cook count are
    secondary lines. Every free start is listed (no collapse), and the
    most-available start is badged "★ Recommended". */
-.ondemand-page .slot-list-pick { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 0.5rem; }
+.ondemand-page .slot-list-pick { grid-template-columns: repeat(auto-fill, minmax(min(100%, 148px), 1fr)); gap: 0.5rem; }
 .ondemand-page .slot-chip-pick {
   flex-direction: column;
   align-items: flex-start;
@@ -1526,7 +1603,7 @@
 @media (min-width: 768px) {
   .ondemand-page .bookings-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr));
     gap: 0.9rem;
     align-items: start; /* uneven content heights never stretch siblings */
   }
@@ -2341,58 +2418,88 @@
 .od-step-link { flex: 1; height: 2px; border-radius: 2px; background: var(--slate-200); margin: 0 0.5rem; min-width: 8px; }
 .od-step-item.done .od-step-link { background: var(--accent-emerald); }
 
-/* Live recap bar */
-.od-livebar {
+/* Go-back section (steps 2-3) — holds ONLY the "Go Back" button.
+   The wrapper is invisible (no card/chips) so just the button shows.
+   NOTE: `.od-livebar`, `.od-livechip*` are retired legacy selectors — no JSX
+   renders them anymore, so they are deliberately NOT styled here. */
+.od-gobar {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-  background: var(--slate-900);
-  border-radius: 12px;
-  padding: 0.5rem 0.6rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.9rem;
 }
-.od-livechip {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #e2e8f0;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 99px;
-  padding: 0.2rem 0.6rem;
-  white-space: nowrap;
-}
-.od-livechip-strong { color: #fff; background: rgba(255, 255, 255, 0.16); }
-.od-livechip-price { color: #fff; background: var(--primary-gradient); font-variant-numeric: tabular-nums; margin-left: auto; }
-/* Go Back inside the live recap bar — solid light pill that pops against
-   the dark bar on every screen */
-.od-livebar .btn {
-  flex-shrink: 0;
-  border: 1px solid #fff;
+.od-goback {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 44px;
+  padding: 0.45rem 0.95rem 0.45rem 0.75rem;
+  border: 1.5px solid var(--slate-200);
+  border-radius: 14px;
   background: #fff;
-  color: var(--slate-900);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.85rem;
   font-weight: 800;
-  min-height: 34px;
-  font-size: 0.78rem;
-  padding: 0.32rem 0.8rem;
-  border-radius: 99px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  color: var(--slate-900);
+  white-space: nowrap;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
 }
-.od-livebar .btn:hover {
-  background: #ffedd5;
-  border-color: #ffedd5;
-  color: var(--primary-700);
+.od-goback:hover {
+  background: #fff7ed;
+  border-color: var(--primary);
 }
-.od-livebar .btn:active { transform: scale(0.96); }
-.od-livebar .btn svg { flex-shrink: 0; }
-/* Phones: tighter bar so button + chips wrap neatly without stranding */
-@media (max-width: 560px) {
-  .od-livebar { gap: 0.3rem; padding: 0.45rem 0.5rem; border-radius: 10px; }
-  .od-livechip { font-size: 0.66rem; padding: 0.16rem 0.5rem; }
-  .od-livebar .btn { font-size: 0.72rem; min-height: 38px; padding: 0.28rem 0.7rem; }
-  .od-livechip-price { margin-left: 0; }
+.od-goback:active { transform: scale(0.97); }
+.od-goback:focus-visible {
+  outline: 3px solid var(--primary-glow);
+  outline-offset: 2px;
 }
-@media (max-width: 380px) {
-  .od-livechip { font-size: 0.62rem; padding: 0.14rem 0.45rem; }
+.od-goback svg { flex-shrink: 0; color: var(--primary-700); }
+/* ---- Phones: go-back row stays sticky -----------------------------------
+   Since the row holds ONLY the button, it sticks directly under the 62px
+   mobile navbar — "Go Back" is always one thumb-tap away instead of having
+   to be hunted for at the bottom of a long step. */
+@media (max-width: 640px) {
+  .od-gobar {
+    position: sticky;
+    top: calc(62px + 2px);
+    z-index: 4;
+    padding: 0.3rem 0;
+    margin-bottom: 0.85rem;
+    background: linear-gradient(180deg, var(--bg, #fffdf9) 0%, transparent 100%);
+  }
+  .od-goback {
+    min-height: 44px;
+    padding: 0.4rem 0.85rem 0.4rem 0.65rem;
+    box-shadow: 0 2px 8px rgba(234, 88, 12, 0.18);
+  }
+}
+@media (max-width: 375px) {
+  /* Go-back: button-only row, just a touch smaller at 375px. */
+  .od-goback { font-size: 0.8rem; }
+  /* Stepper: titles wrap instead of colliding on 375px. */
+  .od-steps-modern { flex-wrap: wrap; row-gap: 0.5rem; }
+  .od-step-item { flex: 1 1 0; }
+  .od-step-name { font-size: 0.66rem; white-space: normal; line-height: 1.25; }
+  .od-step-link { margin: 0 0.25rem; }
+  /* Sticky CTA bar: price + button share one row without overflow. */
+  .od-summary { gap: 0.3rem; }
+  .od-summary-price { font-size: 1rem; }
+  .od-stickybar { padding-bottom: calc(0.7rem + env(safe-area-inset-bottom)); }
+  /* 16px inputs stop iOS auto-zoom on focus; scoped so desktop type is untouched. */
+  .ondemand-page .form-control { font-size: 16px; }
+}
+@media (max-width: 320px) {
+  /* Go-back: compact pill, still a full 44px thumb target. */
+  .od-goback { padding: 0.35rem 0.7rem 0.35rem 0.55rem; gap: 0.4rem; font-size: 0.78rem; }
+  .od-steps-modern { row-gap: 0.4rem; }
+  .od-step-name { font-size: 0.62rem; }
+  .od-step-desc { display: none; }
+  .od-step-link { margin: 0 0.2rem; min-width: 6px; }
+  /* Slot picker: single column so cards never squeeze at 320px. */
+  .ondemand-page .slot-list-pick { grid-template-columns: 1fr; }
+  .ondemand-page .slot-chip-pick { padding: 0.5rem 0.65rem; }
+  .od-summary-price { font-size: 0.95rem; }
 }
 
 /* Sticky summary upgrades */
@@ -2404,6 +2511,11 @@
   margin-left: auto;
 }
 .od-sticky-note { margin: 0; font-size: 0.72rem; font-weight: 600; color: var(--slate-400); text-align: center; }
+/* Step-1 reassurance line ("Free to check...") is desktop-only — hidden on
+   mobile to keep the sticky CTA compact. Step-3 note is unaffected. */
+@media (max-width: 768px) {
+  .od-step-1 .od-sticky-note { display: none; }
+}
 .od-cta { position: relative; overflow: hidden; }
 
 /* Slot groups */
@@ -2464,6 +2576,15 @@
   .od-stepper .form-control { min-width: 0; flex: 1 1 auto; }
   /* Cook card Book button: full-width, tall thumb target */
   .od-bookbtn { width: 100%; min-height: 48px; }
+  /* Quick-date chips ("Today" / "Tomorrow") are 38px tall by default — under
+     the 44px thumb floor. Grow them wherever the form is touch-driven. */
+  .od-presets .bk-dur-chip { min-height: 44px; padding: 0.45rem 0.95rem; }
+  /* Price cells: keep the 2×2 grid comfortable instead of cramped. */
+  .bk-price-cell { padding: 0.45rem 0.3rem; }
+  .bk-price-cell strong { font-size: 0.92rem; }
+  /* Sticky CTA: thumb-friendly height and a touch more air above the summary. */
+  .od-stickybar { gap: 0.5rem; }
+  .ondemand-page .od-cta { min-height: 48px; }
 }
 
 /* ---- Hero on phones: maximum-compact 3-row layout ----
@@ -4020,4 +4141,42 @@
   .od-review-row { grid-template-columns: 1fr auto; }
   .od-review-row dt { grid-column: 1 / -1; padding-top: 0; }
   .od-review-total-row strong { font-size: 1.15rem; }
+}
+/* ==========================================================================
+   Small phones (375px / 320px) — on-demand booking, booking details
+   ========================================================================== */
+@media (max-width: 375px) {
+  .ondemand-hero { padding: 1.4rem 0.95rem; }
+  .ondemand-form-card { --od-pad-x: 0.95rem; --od-pad-b: 1.15rem; padding: 1.15rem var(--od-pad-x) var(--od-pad-b); }
+  .match-card { padding: 0.95rem 0.85rem; }
+  .bd-hero { padding: 1.4rem 1rem; }
+  .bd-facts { gap: 0.6rem 0.8rem; }
+  .bd-grid-2 { gap: 0.85rem; }
+  .od-bookbox { padding: 0.65rem; }
+  /* Recap + review rows: values keep their own line so long addresses and
+     dish lists never collide with labels at 375px. */
+  .od-slot-recap { font-size: 0.78rem; }
+  .od-slot-recap strong { flex-basis: 100%; margin-left: 0; text-align: left; }
+  .od-venue-card .price-row.total strong,
+  .od-summary-card .price-row.total strong { flex-basis: 100%; text-align: left; }
+  /* Price pills + stepper controls fill the row, not the column. */
+  .od-stepper { gap: 0.4rem; }
+  .od-step-btn { flex-basis: 44px; }
+  .od-date-pick-row { gap: 0.45rem; }
+  .coupon-apply-row { gap: 0.45rem; }
+}
+@media (max-width: 320px) {
+  .ondemand-hero { padding: 1.25rem 0.85rem; }
+  .ondemand-hero .section-title { font-size: 1.25rem; }
+  .ondemand-form-card { --od-pad-x: 0.85rem; --od-pad-b: 1.05rem; padding: 1.05rem var(--od-pad-x) var(--od-pad-b); }
+  .match-card { padding: 0.85rem 0.75rem; gap: 0.55rem; }
+  .match-id h3 { white-space: normal; }
+  .bd-hero { padding: 1.25rem 0.9rem; }
+  .bd-facts { grid-template-columns: 1fr; }
+  .slot-list .slot-chip { flex: 1 1 100%; justify-content: center; text-align: center; }
+  /* Even the 2-up price grid is too tight at 320px — stack it. */
+  .bk-price-cells { grid-template-columns: 1fr; }
+  .bk-price-cell { flex-direction: row; justify-content: space-between; padding: 0.5rem 0.75rem; }
+  .od-bookbox { padding: 0.6rem; }
+  .od-bookslot { font-size: 0.8rem; }
 }

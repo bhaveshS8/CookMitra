@@ -360,3 +360,18 @@
   .mobile-menu .loc-pill-label { max-width: none; flex: 1; text-align: left; }
   .mobile-menu .loc-dropdown { position: static; width: 100%; max-width: none; box-shadow: none; margin-top: 0.5rem; }
 }
+/* ---- Small phones: keep the compact bar from crowding ----------------- */
+@media (max-width: 375px) {
+  .navbar-inner { gap: 0.6rem; }
+  .navbar-mobile-actions { gap: 0.35rem; }
+}
+@media (max-width: 320px) {
+  .navbar-inner { gap: 0.4rem; padding: 0 0.6rem; }
+  .navbar-mobile-actions { gap: 0.25rem; }
+  /* The brand text is the only flexible item left — let it shrink, never
+     push the hamburger/bell/avatar off-screen. */
+  .navbar-brand { min-width: 0; }
+  .navbar-brand span { overflow: hidden; text-overflow: ellipsis; }
+  /* Drawer + location dropdown keep full usable width. */
+  .loc-pill { max-width: 100%; }
+}

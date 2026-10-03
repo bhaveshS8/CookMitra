@@ -65,7 +65,7 @@
 .page-header-banner { padding: 1.8rem 1.2rem; }
   .ondemand-hero { padding: 1.6rem 1.1rem; }
   .ondemand-hero .section-title { font-size: 1.5rem; }
-  .ondemand-form-card { padding: 1.3rem 1.1rem; }
+  .ondemand-form-card { --od-pad-x: 1.1rem; padding: 1.3rem var(--od-pad-x); }
   .ondemand-steps { gap: 0.6rem; margin-bottom: 1.1rem; }
   .ondemand-step { font-size: 0.8rem; }
   .ondemand-section-title { font-size: 1.05rem; margin: 1.4rem 0 0.6rem; }
@@ -389,3 +389,109 @@
 }
 
 /* Auth-page edge cases (short screens, ultra-wide) live in styles/auth.css. */
+/* ==========================================================================
+   Small-phone safety net — 375px and 320px
+   --------------------------------------------------------------------------
+   Two additive tiers that keep every surface usable on the narrowest phones:
+     • 375px — primary small-phone tier (iPhone SE 2/3, iPhone 12 mini, most
+               Android handsets in portrait).
+     • 320px — the hard floor (iPhone SE 1st gen, Galaxy Fold outer screen).
+   Both are `max-width`, so they only ADD to the existing 400/380/360 tiers and
+   can never regress a larger viewport. Component-specific tweaks live in each
+   component's own stylesheet; this section holds the cross-cutting rules
+   (type rhythm, overlay insets, overflow + tap-target floors).
+   ========================================================================== */
+
+@media (max-width: 375px) {
+  /* --- Type + spacing rhythm (scaled off the ≤640 block) ---------------- */
+  body { font-size: 15px; }
+  .section-header { margin-bottom: 1.5rem; }
+  .section-title { font-size: 1.35rem; }
+  .hero-v2-title { font-size: clamp(1.6rem, 8.5vw, 2.1rem); }
+  .dashboard-header-row h1,
+  .cook-setup-head h1 { font-size: 1.3rem; }
+  .ondemand-hero .section-title { font-size: 1.35rem; }
+
+  /* --- Actions always stack full-width on the narrowest phones ---------- */
+  .hero-v2-actions,
+  .booking-actions-row,
+  .cook-actions-primary,
+  .maps-link-group { flex-direction: column; align-items: stretch; }
+  .hero-v2-actions .btn,
+  .booking-actions-row .btn,
+  .cook-actions-primary .btn,
+  .maps-link-group .btn { width: 100%; }
+
+  /* --- Horizontal-scroll rails (chips never wrap into an unreadable pile) */
+  .tabs-navigation-bar,
+  .slot-list,
+  .my-booking-chips { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* --- Long unbreakable tokens (emails, IDs) never force a side-scroll -- */
+  .main-content { overflow-wrap: anywhere; }
+
+  /* --- Overlays track the 62px mobile navbar + edge insets -------------- */
+  .toast-container,
+  .notif-popup-stack {
+    left: 0.75rem;
+    right: 0.75rem;
+    max-width: none;
+    width: auto;
+    transform: none;
+  }
+
+  /* --- Modals: keep content width, allow internal scroll ---------------- */
+  .login-modal-overlay { padding: 0.65rem; }
+  .login-modal { padding: 1.6rem 1.05rem; }
+  .add-cook-modal { padding: 1.35rem 0.95rem; }
+  .cf-overlay { padding: 0.65rem; }
+}
+
+@media (max-width: 320px) {
+  /* --- Hard floor: collapse any grid that cannot fit two columns ---------
+     Inline grid templates (gridTemplateColumns in a style prop) are flattened
+     too, mirroring the scoped cook-flow safety net further above. */
+  .dashboard-container [style*="grid-template-columns"],
+  .cook-setup-page [style*="grid-template-columns"],
+  .cook-profile-page-container [style*="grid-template-columns"],
+  .add-cook-modal [style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
+  .dashboard-stats-grid,
+  .cook-stats-grid,
+  .anx-overview,
+  .abc-meta,
+  .bd-facts,
+  .testimonials-grid,
+  .how-it-works-grid,
+  .services-grid-modern,
+  .cook-doc-grid,
+  .form-row { grid-template-columns: 1fr; }
+
+  /* --- Accessibility floor: never shrink a tap target below ~40px ------- */
+  .btn,
+  .btn-sm,
+  .tab-btn,
+  .mobile-toggle-btn,
+  .nav-icon-btn,
+  .login-modal-close { min-height: 40px; }
+  .btn { padding: 0.5rem 0.75rem; font-size: 0.84rem; }
+  .btn-lg { width: 100%; font-size: 0.92rem; }
+
+  /* 16px inputs — stops iOS zooming the whole page on focus. */
+  input, select, textarea, .form-control { font-size: 16px; }
+
+  /* --- Shell: reclaim the last few pixels of gutter --------------------- */
+  .main-content { font-size: 14.5px; }
+  .navbar-inner { padding: 0 0.65rem; }
+  .brand-logo-img { width: 34px; height: 34px; }
+  .brand-icon-box { width: 30px; height: 30px; }
+  .mobile-avatar .user-avatar-sm { width: 30px; height: 30px; font-size: 0.72rem; }
+
+  /* --- Modals: minimal gutter so content keeps usable width ------------- */
+  .login-modal-overlay,
+  .cf-overlay { padding: 0.45rem; }
+  .login-modal { padding: 1.4rem 0.9rem; }
+  .add-cook-modal { padding: 1.2rem 0.85rem; }
+  .cf-card { padding: 1.2rem 0.9rem 0.9rem; }
+}

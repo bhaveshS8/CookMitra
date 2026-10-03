@@ -17,7 +17,7 @@
   color: var(--slate-700);
 }
 
-.form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; }
+.form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 0.75rem; }
 
 @media (max-width: 500px) {
   .bk-addr-grid { grid-template-columns: 1fr; }
@@ -145,3 +145,13 @@ input[type="number"] {
 .password-strength-bar.strength-3 > span { background: #059669; }
 .password-strength-bar.strength-4 > span { background: #059669; }
 .password-strength-label { display: block; margin-top: 0.3rem; color: var(--slate-500); font-size: 0.78rem; }
+/* ---- Small phones: reclaim horizontal padding inside controls --------- */
+@media (max-width: 375px) {
+  .form-control { padding: 0.62rem 0.8rem; border-radius: 11px; }
+  .input-with-icon .form-control { padding-left: 2.4rem; }
+  select.form-control { padding-right: 2.2rem; background-position: right 0.65rem center; }
+}
+@media (max-width: 320px) {
+  .form-control { padding: 0.58rem 0.72rem; }
+  .input-with-icon .form-control { padding-left: 2.25rem; }
+}

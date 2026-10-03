@@ -513,6 +513,7 @@
   overflow-wrap: break-word;
   display: -webkit-box;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -557,6 +558,7 @@
   .notif-popup-message {
     font-size: 0.84rem;
     -webkit-line-clamp: 4;
+    line-clamp: 4;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -566,4 +568,13 @@
   .notif-page .notif-icon { transition: none; }
   .notif-page .notif-item:hover .notif-icon { transform: none; }
   .notif-page .notif-item:hover .notif-meta-row .badge { transform: none; }
+}
+/* ---- 320px floor: notification page + popup stack ------------------- */
+@media (max-width: 320px) {
+  .notif-popup-stack { left: 0.6rem; right: 0.6rem; }
+  .notif-popup-card { padding: 0.65rem 0.7rem; border-radius: 11px; }
+  .notif-page .notif-item { padding: 0.7rem 0.65rem; }
+  .notif-page .notif-page-title,
+  .notif-page .dashboard-header-row h1 { font-size: 1.12rem; }
+  .notif-page .tab-btn { font-size: 0.72rem; padding: 0.4rem 0.28rem; }
 }

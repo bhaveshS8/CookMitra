@@ -171,13 +171,13 @@
 }
 .slot-chip.selected:hover { color: #fff; background: var(--primary-gradient); border-color: var(--primary); }
 
-.slots-chips-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(115px, 1fr)); gap: 0.55rem; }
+.slots-chips-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 115px), 1fr)); gap: 0.55rem; }
 
 /* Step-2 time-slot picker (Book-a-Cook flow): one card per distinct slot
    with the free-cook count. Wraps to a grid; selected uses .selected above. */
 .slot-list-pick {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
   gap: 0.6rem;
   margin: 0.9rem 0 0.4rem;
 }
@@ -444,4 +444,10 @@
   .ccal-field, .ccal-field-chev, .ccal-day, .ccal-nav, .ccal-today { transition: none; }
   .ccal-day:hover:not(:disabled) { transform: none; }
   .ccal-field:hover { transform: none; }
+}
+/* ---- 320px floor: calendar stays inside the viewport ---------------- */
+@media (max-width: 320px) {
+  .ccal-pop { padding: 0.7rem 0.62rem 0.62rem; }
+  .ccal-day, .ccal-blank { min-height: 32px; font-size: 0.78rem; }
+  .ccal-field { padding: 0.3rem 0.7rem; }
 }

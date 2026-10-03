@@ -489,3 +489,9 @@ svg.festive-count-flame { width: 15px; height: 15px; }
 @media (prefers-reduced-motion: reduce) {
   .festive-card { animation: none !important; }
 }
+/* ---- 320px floor: keep the food circles round + tappable ------------ */
+@media (max-width: 320px) {
+  .festive-foods { gap: 0.55rem 0.4rem; }
+  .festive-food-ring { max-width: 104px; }
+  .festive-title { font-size: 1.35rem; }
+}

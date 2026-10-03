@@ -527,3 +527,12 @@
   .rf-actions { flex-direction: column; }
   .rf-actions .btn { width: 100%; }
 }
+/* ---- Small phones: reschedule/refund dialogs ------------------------ */
+@media (max-width: 375px) {
+  .rf-card { padding: 1.1rem 0.9rem 0.9rem; }
+  .rf-head h3 { font-size: 1.02rem; }
+}
+@media (max-width: 320px) {
+  .rf-icon { width: 40px; height: 40px; border-radius: 12px; }
+  .rf-actions .btn { min-height: 46px; font-size: 0.88rem; }
+}

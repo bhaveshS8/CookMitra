@@ -144,3 +144,10 @@
   .dish-card-tag { font-size: 0.7rem; left: 0.6rem; bottom: 0.6rem; }
   .dish-mute-btn { width: 32px; height: 32px; right: 0.5rem; bottom: 0.5rem; }
 }
+/* ---- 320px floor: shallower frame + arrows ------------------------- */
+@media (max-width: 320px) {
+  .dish-carousel { width: 94%; }
+  .dish-frame { aspect-ratio: 16 / 7; max-height: 168px; }
+  .dish-stage-arrow { width: 28px; height: 28px; }
+  .dish-card-tag { font-size: 0.66rem; }
+}

@@ -952,6 +952,20 @@
   }
 }
 
+/* ---- ≤375px: primary small-phone tier between the 480 and 400 steps ---- */
+@media (max-width: 375px) {
+  .login-form-side,
+  .register-form-side { padding: 1.15rem 0.9rem 1.75rem; }
+  .login-card,
+  .register-card { padding: 1.5rem 1.05rem; border-radius: 20px; }
+  .auth-card-modern { padding: 1.6rem 1.1rem; }
+  .login-card-header h1,
+  .login-card-header h2 { font-size: 1.4rem; }
+  /* Single-column role pickers so tiles keep full-width tap targets. */
+  .register-role-grid { grid-template-columns: 1fr; gap: 0.6rem; }
+  .role-segmented-control { grid-template-columns: 1fr; }
+  .login-perks { gap: 0.6rem; }
+}
 /* ---- Tiny phone (≤400px): compact card, no cramped chrome ---- */
 @media (max-width: 400px) {
   .login-form-side,

@@ -65,6 +65,16 @@
   /* Full-width buttons must wrap long labels instead of clipping them. */
   .btn-block { white-space: normal; text-align: center; }
 }
+/* ---- Small phones: tighter buttons, labels still wrap ----------------- */
+@media (max-width: 375px) {
+  .btn { padding: 0.56rem 0.9rem; font-size: 0.86rem; }
+  .btn-sm { padding: 0.42rem 0.72rem; font-size: 0.8rem; }
+  .btn-lg { padding: 0.8rem 1.25rem; font-size: 0.95rem; }
+}
+@media (max-width: 320px) {
+  .btn { padding: 0.5rem 0.75rem; font-size: 0.84rem; }
+  .btn-sm { padding: 0.4rem 0.65rem; font-size: 0.78rem; }
+}
 
 /* ---- Badges ---- */
 .badge {

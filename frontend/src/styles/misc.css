@@ -670,3 +670,12 @@ td, th { padding: 0.7rem 0.5rem; }
     background: #fff;
   }
 }
+/* ---- 320px floor: popups & dialogs reclaim their last gutter -------- */
+@media (max-width: 320px) {
+  .login-modal-overlay { padding: 0.45rem; }
+  .login-modal { padding: 1.4rem 0.9rem; }
+  .add-cook-modal { padding: 1.2rem 0.85rem; }
+  .brm-card { padding: 1rem 0.8rem 0.8rem; border-radius: 16px; }
+  .brm-head-text h3 { font-size: 0.96rem; }
+  .brm-row { font-size: 0.78rem; }
+}

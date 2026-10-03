@@ -150,3 +150,11 @@
 
 /* Error / expired state copy */
 .bf-sorry-icon { color: var(--accent-rose); }
+/* ---- Small phones: card art fits the viewport ----------------------- */
+@media (max-width: 375px) {
+  .bf-pan { width: min(280px, 100%); height: auto; aspect-ratio: 280 / 168; }
+  .bf-pay-card { margin-top: 1.4rem; }
+}
+@media (max-width: 320px) {
+  .bf-pan { padding: 0.9rem; border-radius: 14px; }
+}

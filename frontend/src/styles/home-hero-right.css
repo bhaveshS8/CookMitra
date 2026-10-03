@@ -151,3 +151,16 @@
   .hero-diyas { bottom: -14px; font-size: 1.2rem; }
   .hero-diyas .hero-diya-big { font-size: 1.6rem; }
 }
+/* ---- Small phones: floats shrink, stay inside the photo card --------- */
+@media (max-width: 375px) {
+  .hero-v2-float { font-size: 0.72rem; padding: 0.36rem 0.62rem; }
+  .hero-v2-float-rating { top: -8px; right: 6px; }
+  .hero-v2-float-live { bottom: 48px; left: 6px; max-width: calc(100% - 12px); }
+  .hero-diyas { bottom: -10px; font-size: 1rem; }
+  .hero-diyas .hero-diya-big { font-size: 1.4rem; }
+}
+@media (max-width: 320px) {
+  .hero-v2-float { font-size: 0.68rem; padding: 0.32rem 0.55rem; }
+  .hero-diyas { font-size: 0.88rem; }
+  .hero-diyas .hero-diya-big { font-size: 1.2rem; }
+}

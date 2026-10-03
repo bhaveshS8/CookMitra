@@ -43,3 +43,12 @@
 @media (prefers-reduced-motion: reduce) {
   .coupon-active-toggle { transition: none; }
 }
+/* ---- Small phones: coupon cards + chips ----------------------------- */
+@media (max-width: 375px) {
+  .coupon-desc { max-width: 100%; font-size: 0.78rem; }
+  .coupon-code-chip { font-size: 0.86rem; }
+}
+@media (max-width: 320px) {
+  .coupon-pct { font-size: 0.92rem; }
+  .coupon-sub { font-size: 0.76rem; }
+}

@@ -322,3 +322,12 @@
 @media (prefers-reduced-motion: reduce) {
   .cf-overlay, .cf-card { animation: none; }
 }
+/* ---- 320px floor: dialogs reclaim their last gutter ----------------- */
+@media (max-width: 320px) {
+  .cf-overlay { padding: 0.45rem; }
+  .cf-card { padding: 1.15rem 0.85rem 0.85rem; border-radius: 16px; }
+  .cf-icon { width: 46px; height: 46px; border-radius: 14px; }
+  .cf-title { font-size: 1.02rem; }
+  .cf-desc { font-size: 0.83rem; }
+  .cf-actions .cf-btn { min-height: 46px; font-size: 0.88rem; }
+}

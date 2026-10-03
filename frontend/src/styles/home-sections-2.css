@@ -5,7 +5,7 @@
 /* How it works */
 .how-it-works-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
   gap: 1.25rem;
   max-width: 1000px;
   margin: 0 auto;
@@ -55,7 +55,7 @@
 .testimonials-section .section-description { color: rgba(255, 255, 255, 0.7); }
 .testimonials-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
   gap: 1.25rem;
   max-width: 1100px;
   margin: 0 auto;
@@ -363,4 +363,17 @@
 
 .home-registration-form .btn-block {
   margin-top: 0.5rem;
+}
+/* ---- Small phones: how-it-works + testimonial cards ------------------ */
+@media (max-width: 375px) {
+  .how-card { padding: 1.25rem 1.15rem; }
+  .how-card h3 { font-size: 1rem; }
+  .how-card p { font-size: 0.86rem; }
+  .testimonial-card { padding: 1.25rem 1.15rem; }
+}
+@media (max-width: 320px) {
+  .how-card { padding: 1.1rem 1rem; border-radius: 16px; }
+  .how-icon-box { width: 44px; height: 44px; border-radius: 13px; }
+  .how-step-badge { width: 24px; height: 24px; font-size: 0.72rem; }
+  .testimonial-card { padding: 1.1rem 1rem; }
 }

@@ -163,6 +163,7 @@
   white-space: normal;
   display: -webkit-box;
   -webkit-line-clamp: 3;
+  line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin: 0.9rem 0 0;
@@ -334,4 +335,16 @@
   .cook-service-tile { transition: none; }
   .cook-card-modern:hover,
   .cook-service-tile:hover { transform: none; }
+}
+/* ---- Small phones: cook listing + public profile chrome ------------- */
+@media (max-width: 375px) {
+  .cooks-grid-modern { gap: 0.8rem; }
+  .cook-card-modern { padding: 1.05rem 1rem; }
+  .cook-profile-hero { padding: 1.35rem 0.9rem; }
+  .cook-profile-hero-content h1 { font-size: 1.28rem; }
+}
+@media (max-width: 320px) {
+  .cook-card-modern { padding: 1rem 0.9rem; border-radius: 18px; }
+  .cook-profile-avatar-large { width: 72px; height: 72px; min-width: 72px; min-height: 72px; font-size: 1.6rem; }
+  .cooks-filter-bar { padding: 0.8rem 0.85rem; }
 }

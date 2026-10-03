@@ -128,9 +128,8 @@ const dateLabel = (dateStr) => {
 };
 
 // Numbered section heading — the form reads as 4 short steps.
-const SecTitle = ({ n, icon, children }) => (
+const SecTitle = ({ icon, children }) => (
   <h3 className="ondemand-section-title">
-    <span className="od-sec-num" aria-hidden="true">{n}</span>
     {icon}
     <span>{children}</span>
   </h3>
@@ -1042,36 +1041,26 @@ const CookBooking = () => {
         })}
       </ol>
 
-      {/* Live recap once planning starts */}
-      {(step > 1 || selectedSlot) && (
-        <div className="od-livebar" aria-live="polite">
-          {step > 1 && (
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              onClick={() => setStep(step - 1)}
-            >
-              <ArrowLeft size={15} /> Go Back
-            </button>
-          )}
-          <span className="od-livechip">{serviceLabel}</span>
-          <span className="od-livechip">{dateLabel(form.date)}</span>
-          <span className="od-livechip">{form.durationHours || "–"} hr · {form.guests || "–"} guests</span>
-          {selectedSlot && (
-            <span className="od-livechip od-livechip-strong">
-              {fmtTime(selectedSlot.startTime)} – {fmtTime(selectedSlot.endTime)}
-            </span>
-          )}
-          {slab != null && <span className="od-livechip od-livechip-price">{formatCurrency(slab)}</span>}
+      {/* Back navigation (steps 2-3) — button only, no chips or recap here */}
+      {step > 1 && (
+        <div className="od-gobar">
+          <button
+            type="button"
+            className="od-goback"
+            aria-label={`Go back to step ${step - 1} of ${steps.length}: ${steps[step - 2].label}`}
+            onClick={() => { setFormError(""); setStep(step - 1); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+          >
+            <ArrowLeft size={16} aria-hidden="true" /> Go Back
+          </button>
         </div>
       )}
 
       {step === 1 && (
         <form onSubmit={handleSeeSlots} className="ondemand-form-card">
-          <h3>Step 1 — Plan your session</h3>
+          <h3>Plan your session</h3>
           <p className="ondemand-form-sub">Same launch price for every cook — pick a date and duration.</p>
 
-          <SecTitle n="01" icon={<CalendarCheck size={15} />}>When and for how many?</SecTitle>
+          <SecTitle icon={<CalendarCheck size={15} />}>When and for how many?</SecTitle>
 
           <div className="form-row">
             <div className="form-group">
@@ -1141,7 +1130,7 @@ const CookBooking = () => {
             </div>
           </div>
 
-          <SecTitle n="02" icon={<Clock3 size={15} />}>How long do you need the cook?</SecTitle>
+          <SecTitle icon={<Clock3 size={15} />}>How long do you need the cook?</SecTitle>
 
           <div className="form-row">
             <div className="form-group">
@@ -1195,7 +1184,7 @@ const CookBooking = () => {
 
       {step === 2 && (
         <div className="ondemand-form-card">
-          <h3>Step 2 — Pick a time slot</h3>
+          <h3>Pick a time slot</h3>
           {searched && visibleSlotOptions.length === 0 && (
             <div className="no-data">
               <p>
@@ -1305,27 +1294,42 @@ const CookBooking = () => {
 
       {step === 3 && selectedSlot && (
         <div>
-          <h3>Step 3 — Venue &amp; Confirm</h3>
+          <h3>Venue &amp; Confirm</h3>
           <div className="ondemand-form-card od-venue-card">
-            <SecTitle n="03" icon={<MapPin size={15} />}>Where should the cook come?</SecTitle>
+            <SecTitle icon={<MapPin size={15} />}>Where should the cook come?</SecTitle>
             <div className="ondemand-locate-box">
               {savedLocations.length > 0 && (
-                <div className="form-group">
-                  <label>
+                <div className="form-group od-saved-group">
+                  <label htmlFor="od-saved-select">
                     <History size={15} /> Use previous location
                   </label>
+                  {/* Clipping frame: same box as every other input (100% of the
+                      group, border-box). The closed select can never push past
+                      it — extra address text is hidden inside this frame. */}
+                  <div className="od-saved-wrap">
                   <select
-                    className="form-control"
+                    id="od-saved-select"
+                    className="form-control od-saved-select"
                     value={savedIdx}
                     onChange={(e) => applySavedLocation(e.target.value)}
+                    aria-label="Use a location from your past bookings"
+                    title={savedIdx !== "" && savedLocations[Number(savedIdx)] ? savedLocations[Number(savedIdx)].address : undefined}
                   >
                     <option value="">Select from your past bookings...</option>
-                    {savedLocations.map((s, i) => (
-                      <option key={i} value={i}>
-                        {s.address}{s.timesUsed > 1 ? ` (used ${s.timesUsed}x)` : ""}
-                      </option>
-                    ))}
+                    {savedLocations.map((s, i) => {
+                      const suffix = s.timesUsed > 1 ? ` (used ${s.timesUsed}x)` : "";
+                      // Cap the visible label so a very long address can never
+                      // stretch the closed select past the input width; the
+                      // full address stays available via title + applied fields.
+                      const label = s.address.length > 48 ? `${s.address.slice(0, 48)}…${suffix}` : `${s.address}${suffix}`;
+                      return (
+                        <option key={i} value={i} title={`${s.address}${suffix}`}>
+                          {label}
+                        </option>
+                      );
+                    })}
                   </select>
+                  </div>
                 </div>
               )}
               {locMsg && (
@@ -1453,7 +1457,7 @@ const CookBooking = () => {
             </>
             )}
 
-            <SecTitle n="04" icon={<UtensilsCrossed size={15} />}>What dishes do you need? *</SecTitle>
+            <SecTitle icon={<UtensilsCrossed size={15} />}>What dishes do you need? *</SecTitle>
             <div className="form-group">
               <label>Dishes <small>(comma separated)</small></label>
                 <input
@@ -1484,7 +1488,7 @@ const CookBooking = () => {
               />
             </div>
 
-            <SecTitle n="05" icon={<BadgePercent size={15} />}>Price &amp; coupon</SecTitle>
+            <SecTitle icon={<BadgePercent size={15} />}>Price &amp; coupon</SecTitle>
             <div className="price-rows">
               <div className="price-row">
                 <span>Service Price · {form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
@@ -1523,7 +1527,7 @@ const CookBooking = () => {
               Find Cook broadcasts ONE request. No cook list: the server
               assigns the first cook to accept atomically. */}
           <div className="ondemand-form-card od-summary-card">
-            <SecTitle n="06" icon={<CalendarCheck size={15} />}>Review your booking</SecTitle>
+            <SecTitle icon={<CalendarCheck size={15} />}>Review your booking</SecTitle>
             <p className="od-review-sub">Check the details — one tap finds your cook. No payment now.</p>
             <dl className="od-review-list">
               <div className="od-review-row">
