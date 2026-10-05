@@ -1,5 +1,3 @@
-// CouponModal — admin create/edit form for promo coupons.
-// Reuses the modal + form styling used by AddCookModal.
 import React, { useEffect, useState } from "react";
 import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
@@ -38,7 +36,6 @@ const formFromCoupon = (coupon) => ({
   maxDiscount: coupon.maxDiscount != null ? String(coupon.maxDiscount) : "",
   minOrder: coupon.minOrder != null ? String(coupon.minOrder) : "0",
   usageLimit: coupon.usageLimit != null ? String(coupon.usageLimit) : "",
-  // null = unlimited: keep blank so editing never tightens it to 1/user.
   perUserLimit: coupon.perUserLimit != null ? String(coupon.perUserLimit) : "",
   firstBookingOnly: coupon.firstBookingOnly === true,
   applicableServices: (coupon.applicableServices || []).join(", "),

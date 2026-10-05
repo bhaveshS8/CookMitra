@@ -18,9 +18,6 @@ const {
   toggleAvailability,
 } = require("../controllers/cookController");
 
-// Multer's own "File too large" message doesn't say what the limit is —
-// translate it (and keep any other message verbatim) so the cook profile
-// form can show "max 2MB" instead of a cryptic error.
 const uploadErrorMessage = (err) => {
   if (err?.code === "LIMIT_FILE_SIZE") {
     return "File too large — each file must be 2MB or less (JPG/PNG/WEBP/PDF)";
@@ -30,8 +27,6 @@ const uploadErrorMessage = (err) => {
 
 router.get("/", optionalAuth, getCooks);
 router.get("/me", auth, authorize("cook"), getMyProfile);
-// Cook ID verification file uploads (Aadhaar / PAN / photo).
-// Must be declared before "/:id" routes so "upload-docs" isn't treated as an id.
 router.post(
   "/upload-docs",
   auth,
@@ -52,8 +47,6 @@ router.post(
   uploadCookDocs
 );
 router.get("/admin-overview/:id", auth, authorize("admin"), getCookAdminOverview);
-// Admin uploads verification docs on behalf of a cook (e.g. files received
-// over email/WhatsApp). Declared above "/:id" like the self-upload route.
 router.post(
   "/:id/upload-docs",
   auth,
@@ -105,7 +98,6 @@ router.patch(
   updateApprovalStatus
 );
 
-// Cook on/off switch — toggle between available / unavailable.
 router.patch(
   "/me/availability",
   auth,

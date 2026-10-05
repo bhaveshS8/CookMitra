@@ -1,15 +1,3 @@
-// Standalone regression test for RESCHEDULE + COOK REASSIGNMENT (v2).
-// Run:  node backend/reschedule-cook.test.js  — exits non-zero on any failure.
-//
-// Extends the v1 move (same duration, same money, instant, capped at 2 for
-// customers) with: when the current cook cannot cover the new slot the picker
-// offers verified replacement cooks, and the move + cook swap commits as ONE
-// atomic update (status + rescheduleCount claim) with server-side revalidation.
-//
-// Drives the REAL controller with in-memory fakes (no DB) except for the
-// explicitly marked fake-connected block (mongoose readyState forced + claim
-// stubbed) which proves the atomic $set carries the cook and exactly one
-// racer wins. Live-DB concurrency is covered by concurrency-adversarial.e2e.js.
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 
@@ -37,7 +25,6 @@ const STRANGER = { id: "cust9", role: "CUSTOMER" };
 const COOK = { id: "cook1", role: "COOK" };
 const ADMIN = { id: "admin1", role: "ADMIN" };
 
-// ── In-memory fakes ─────────────────────────────────────────────────────────
 let bookingDoc = null;
 let profiles = {};
 let users = {};
@@ -129,8 +116,6 @@ const chainable = (doc) => ({
 
 Booking.findById = async (id) => (String(id) === "booking1" && bookingDoc ? bookingDoc : null);
 Booking.find = (filter = {}) => ({
-  // Mirrors the production chain Booking.find(...).select(...).lean()
-  // (utils/slots.js getDayBookings) — select/lean resolve to rivals.
   select: () => ({
     lean: async () => {
       const c = filter?.cook;
@@ -192,7 +177,6 @@ const callOptions = (user, query) =>
 (async () => {
   const DAY = istDayOffset(4);
 
-  // ── 1. Existing cook available → plain move succeeds, cook kept ───────────
   {
     reset();
     const r = await callMove(CUSTOMER, { date: DAY, startTime: "14:00" });
@@ -200,7 +184,6 @@ const callOptions = (user, query) =>
     check("1. cook unchanged", String(r.payload?.cook || bookingDoc.cook) === COOK1, String(r.payload?.cook || bookingDoc.cook));
   }
 
-  // ── 2. Options slot+cook: current cook free ───────────────────────────────
   {
     reset();
     const r = await callOptions(CUSTOMER, { date: DAY, startTime: "14:00" });
@@ -209,7 +192,6 @@ const callOptions = (user, query) =>
     check("2. slot echo + duration preserved", r.payload?.slot?.startTime === "14:00" && r.payload?.slot?.endTime === "16:00", JSON.stringify(r.payload?.slot));
   }
 
-  // ── 3. Options: current cook busy → replacements listed ───────────────────
   {
     reset({}, {}, { [COOK1]: [{ _id: "r1", startTime: "14:00", endTime: "16:00", status: "confirmed" }] });
     const r = await callOptions(CUSTOMER, { date: DAY, startTime: "14:00" });
@@ -224,7 +206,6 @@ const callOptions = (user, query) =>
     );
   }
 
-  // ── 4. Replacement selected → swap succeeds ───────────────────────────────
   {
     reset({}, {}, { [COOK1]: [{ _id: "r1", startTime: "14:00", endTime: "16:00", status: "confirmed" }] });
     const r = await callMove(CUSTOMER, { date: DAY, startTime: "14:00", cookId: COOK2, reason: "Change of plans" });
@@ -242,7 +223,6 @@ const callOptions = (user, query) =>
     check("4. new cook assigned message", notificationLog.some((n) => String(n.user) === COOK2 && /assigned/i.test(n.message)), notificationLog.filter((n) => String(n.user) === COOK2).map((n) => n.message).join("|"));
   }
 
-  // ── 5. Unverified replacement refused ─────────────────────────────────────
   {
     reset({}, { [COOK2]: profileFor(COOK2, { approvalStatus: "pending" }) });
     const r = await callMove(CUSTOMER, { date: DAY, startTime: "14:00", cookId: COOK2 });
@@ -250,7 +230,6 @@ const callOptions = (user, query) =>
     check("5. booking untouched", String(bookingDoc.cook) === COOK1 && bookingDoc.rescheduleCount === 0 && bookingDoc.saveCalls === 0, `${bookingDoc.cook}/${bookingDoc.rescheduleCount}/${bookingDoc.saveCalls}`);
   }
 
-  // ── 6. Overlap on replacement → 409, state intact ─────────────────────────
   {
     reset({}, {}, { [COOK2]: [{ _id: "r2", startTime: "15:00", endTime: "17:00", status: "accepted" }] });
     const r = await callMove(CUSTOMER, { date: DAY, startTime: "14:00", cookId: COOK2 });
@@ -259,7 +238,6 @@ const callOptions = (user, query) =>
     check("6. booking untouched", String(bookingDoc.cook) === COOK1 && bookingDoc.rescheduleCount === 0, `${bookingDoc.cook}/${bookingDoc.rescheduleCount}`);
   }
 
-  // ── 7. Replacement outside working hours → 400 ────────────────────────────
   {
     const narrowWeek = [0, 1, 2, 3, 4, 5, 6].map((day) => ({ day, startTime: "08:00", endTime: "10:00", enabled: true }));
     reset({}, { [COOK2]: profileFor(COOK2, { schedule: { weekly: narrowWeek, blockedDates: [] } }) });
@@ -268,14 +246,12 @@ const callOptions = (user, query) =>
     check("7. booking untouched", String(bookingDoc.cook) === COOK1 && bookingDoc.saveCalls === 0, "");
   }
 
-  // ── 8. Wrong-service replacement refused ──────────────────────────────────
   {
     reset({}, { [COOK2]: profileFor(COOK2, { serviceTypes: ["teach_me"] }) });
     const r = await callMove(CUSTOMER, { date: DAY, startTime: "14:00", cookId: COOK2 });
     check("8. wrong-service cook -> 400", r.status === 400 && /service/i.test(String(r.payload?.message)), `s=${r.status} ${r.payload?.message}`);
   }
 
-  // ── 9. Paid booking: money untouched across a swap ────────────────────────
   {
     reset({
       status: "confirmed",
@@ -291,7 +267,6 @@ const callOptions = (user, query) =>
     check("9. single write, both sides notified once", bookingDoc.saveCalls === 1 && notificationLog.length === 3, `saves=${bookingDoc.saveCalls} n=${notificationLog.length}`);
   }
 
-  // ── 10. Admin swap notifies customer too ──────────────────────────────────
   {
     reset({}, {}, { [COOK1]: [{ _id: "r1", startTime: "14:00", endTime: "16:00", status: "confirmed" }] });
     const r = await callMove(ADMIN, { date: DAY, startTime: "14:00", cookId: COOK2 });
@@ -301,7 +276,6 @@ const callOptions = (user, query) =>
     check("10. customer message names the new cook", notificationLog.some((n) => String(n.user) === "cust1" && /new cook/i.test(n.message)), notificationLog.filter((n) => String(n.user) === "cust1").map((n) => n.message).join("|"));
   }
 
-  // ── 11. Guards still hold with a cookId ───────────────────────────────────
   {
     reset({ rescheduleCount: 2 });
     const capped = await callMove(CUSTOMER, { date: DAY, startTime: "14:00", cookId: COOK2 });
@@ -320,7 +294,6 @@ const callOptions = (user, query) =>
     check("11. overlong reason -> 400", longReason.status === 400, `s=${longReason.status}`);
   }
 
-  // ── 12. Client cannot smuggle price/payment/count ─────────────────────────
   {
     reset();
     const r = await callMove(CUSTOMER, { date: DAY, startTime: "14:00", cookId: COOK2, amount: 1, rescheduleCount: 99, payment: { status: "paid" } });
@@ -329,7 +302,6 @@ const callOptions = (user, query) =>
     check("12. amount/payment not taken from the request", bookingDoc.amount === 1110 && bookingDoc.payment.status === "pending", `${bookingDoc.amount}/${bookingDoc.payment.status}`);
   }
 
-  // ── 13. Same-slot + same-cook retry stays idempotent ──────────────────────
   {
     reset();
     const first = await callMove(CUSTOMER, { date: DAY, startTime: "14:00", cookId: COOK2, reason: "Change of plans" });
@@ -341,7 +313,6 @@ const callOptions = (user, query) =>
     check("13. no duplicate write/notify", bookingDoc.saveCalls === savesAfterFirst && notificationLog.length === notesAfterFirst, `saves=${bookingDoc.saveCalls} n=${notificationLog.length}`);
   }
 
-  // ── 14. Fake-connected: atomic $set carries the cook; one racer wins ─────
   {
     reset({}, {}, { [COOK1]: [{ _id: "r1", startTime: "14:00", endTime: "16:00", status: "confirmed" }] });
     mongoose.connection.readyState = 1;
@@ -356,7 +327,6 @@ const callOptions = (user, query) =>
     check("14. claim pushes history + audit", Boolean(push.statusHistory) && String(push.reschedules?.toCook) === COOK2 && push.reschedules?.reason === "Change of plans", JSON.stringify({ t: push.reschedules?.toCook, r: push.reschedules?.reason }));
     check("14. OTP stripped from the response", r.payload && !("serviceOtp" in r.payload), Object.keys(r.payload || {}).join(","));
 
-    // Two moves, same tick, different targets → exactly one wins.
     reset();
     mongoose.connection.readyState = 1;
     let calls = 0;
@@ -366,7 +336,6 @@ const callOptions = (user, query) =>
       return null;
     };
     const r1 = await callMove(CUSTOMER, { date: DAY, startTime: "14:00" });
-    // Second racer sees the world after the first win: count already 1.
     bookingDoc.rescheduleCount = 1;
     bookingDoc.startTime = "14:00";
     bookingDoc.endTime = "16:00";
@@ -376,7 +345,6 @@ const callOptions = (user, query) =>
     mongoose.connection.readyState = 0;
   }
 
-  // ── 15. Fake-connected: suspended replacement refused ─────────────────────
   {
     reset();
     users[COOK3] = { _id: COOK3, name: "Verma", status: "suspended" };
@@ -389,15 +357,12 @@ const callOptions = (user, query) =>
     mongoose.connection.readyState = 0;
   }
 
-  // ── 16. Route surface: new validators present ─────────────────────────────
   {
     const fs = require("fs");
     const path = require("path");
     const routeSrc = fs.readFileSync(path.join(__dirname, "routes", "bookings.js"), "utf8");
     check("16. PATCH validates reason + cookId", /body\("reason"\)/.test(routeSrc) && /body\("cookId"\)/.test(routeSrc), "");
     check("16. GET options validates date + optional startTime", /query\("date"\)/.test(routeSrc) && /query\("startTime"\)/.test(routeSrc), "");
-    // The PATCH /:id/reschedule block (exact path, not -options) must never
-    // accept price / payment / count from the client.
     const patchIdx = routeSrc.indexOf('"/:id/reschedule"');
     const patchBlock = patchIdx === -1 ? "" : routeSrc.slice(patchIdx, routeSrc.indexOf("rescheduleBooking", patchIdx));
     check("16. price/payment/count still absent from validators", !/body\("amount"\)/.test(patchBlock) && !/body\("payment"\)/.test(patchBlock) && !/body\("rescheduleCount"\)/.test(patchBlock), "");

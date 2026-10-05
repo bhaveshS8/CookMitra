@@ -1,9 +1,3 @@
-// Standalone regression test for the user login flow (no deps, no DB).
-// Run:  node backend/login.test.js  — exits non-zero on any failure.
-//
-// Stubs the User model and drives the REAL authController.login/getMe, then
-// verifies the issued JWT actually carries `role` (which is what the middleware
-// `authorize()` and the frontend ProtectedRoute depend on).
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 
 const jwt = require("jsonwebtoken");
@@ -24,7 +18,6 @@ const makeRes = () => {
 };
 const next = (err) => { if (err) throw err; };
 
-// Fake user records. comparePassword mirrors the schema method.
 const makeUser = (role, status = "active") => ({
   _id: new Types.ObjectId(),
   name: "Test User",
@@ -35,24 +28,18 @@ const makeUser = (role, status = "active") => ({
   comparePassword: async (p) => p === "pass123",
 });
 
-// Mongoose `findOne({}).select("...")` returns a Query that is awaitable AND
-// chainable. The controller does `await User.findOne({}).select("+password")`,
-// so the stub must synchronously expose a chainable `select()` and be thenable.
-// (Returning a Promise breaks `.select` — that was the bug found earlier.)
 const fakeQuery = (doc) => ({
   select: () => Promise.resolve(doc),
   then: (resolve, reject) => Promise.resolve(doc).then(resolve, reject),
 });
 const stubFindOne = (doc) => () => fakeQuery(doc);
 const stubFindOneNull = () => () => fakeQuery(null);
-// getMe does `await User.findById(id)` (no .select chain) — resolves to the doc.
 const stubFindById = (doc) => () => Promise.resolve(doc);
 
 (async () => {
   try {
     console.log("\n═══ LOGIN ═══");
 
-        // 1.1 Customer logs in with valid credentials.
     {
       const user = makeUser("customer");
       const oF = User.findOne;
@@ -71,7 +58,6 @@ const stubFindById = (doc) => () => Promise.resolve(doc);
       }
     }
 
-    // 1.2 Admin logs in → token carries role=admin (powers /admin guard).
     {
       const user = makeUser("admin");
       const oF = User.findOne;
@@ -89,7 +75,6 @@ const stubFindById = (doc) => () => Promise.resolve(doc);
       }
     }
 
-    // 1.3 Unknown user → 401.
     {
       const oF = User.findOne;
       User.findOne = stubFindOneNull();
@@ -104,7 +89,6 @@ const stubFindById = (doc) => () => Promise.resolve(doc);
       }
     }
 
-    // 1.4 Wrong password → 401.
     {
       const user = makeUser("cook");
       const oF = User.findOne;
@@ -120,7 +104,6 @@ const stubFindById = (doc) => () => Promise.resolve(doc);
       }
     }
 
-    // 1.5 Suspended account → 403, no token issued.
     {
       const user = makeUser("customer", "suspended");
       const oF = User.findOne;
@@ -137,7 +120,6 @@ const stubFindById = (doc) => () => Promise.resolve(doc);
       }
     }
 
-    // 1.6 getMe returns profile without leaking the password hash.
     {
       const user = makeUser("cook");
       const doc = { ...user, password: "super-secret-hash" };
@@ -156,7 +138,6 @@ const stubFindById = (doc) => () => Promise.resolve(doc);
       }
     }
 
-    // 1.7 Admin sessions are capped at 12h (financial powers); customers keep 30d.
     {
       const admin = makeUser("ADMIN");
       const oF = User.findOne;
@@ -174,7 +155,6 @@ const stubFindById = (doc) => () => Promise.resolve(doc);
       }
     }
 
-    // 1.8 Customer sessions keep the 30d contract.
     {
       const user = makeUser("CUSTOMER");
       const oF = User.findOne;

@@ -1,13 +1,4 @@
-// finance-audit.test.js — financial integrity regression suite (no DB).
-// Run:  node backend/finance-audit.test.js  — exits non-zero on failure.
-//
-// Covers the money-movement hardening: centralized payout eligibility,
-// refund/payout double-spend gates, atomic refund claims, payout reference
-// uniqueness + format, recipient snapshots, payout-details validation,
-// order reuse, webhook event dedup, ledger idempotency. Follows the repo's
-// stubbed-controller convention (cf. payment-adversarial.test.js).
 
-// Gateway env BEFORE requires (config snapshots at load).
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 process.env.RAZORPAY_KEY_ID = "rk_test_abcdef123456";
 process.env.RAZORPAY_KEY_SECRET = "s3cr3tK3yV4lu3AbCdEfGh";
@@ -48,7 +39,6 @@ const makeRes = () => {
 };
 const next = (err) => { if (err) throw err || new Error("next()"); };
 
-// ── shared fakes ────────────────────────────────────────────────────────────
 let notifLog = [];
 Notification.create = async (d) => { notifLog.push(d); return d; };
 User.findById = () => ({ select: async () => ({ name: "T", phone: "9000000001" }) });
@@ -110,13 +100,11 @@ const eligibleBooking = (over = {}) => ({
     });
     const ok = refundApprovalCheck(q());
     check("queued refund approvable at capped amount", ok.ok === true && ok.amount === 349, JSON.stringify(ok));
-    // Settled payout without clawback → blocked (same money twice).
     const settled = q({ payout: { status: "settled" } });
     const blocked = refundApprovalCheck(settled);
     check("settled payout blocks refund w/o clawback", blocked.ok === false, blocked.reasons[0] || "");
     const forced = refundApprovalCheck(settled, { clawback: true });
     check("explicit clawback re-opens with note path", forced.ok === true, JSON.stringify(forced));
-    // Cap: requested above captured → blocked.
     const over = q({ payment: { status: "paid", paidAmount: 349, refundStatus: "pending", refundAmount: 999 } });
     check("refund above captured capped/blocked", refundApprovalCheck(over).ok === false, "");
     check("refundedTotal counts processed only",
@@ -153,26 +141,22 @@ const eligibleBooking = (over = {}) => ({
     const ledgerRows = [];
     LedgerEntry.create = async (e) => { ledgerRows.push(e); return e; };
     try {
-      // Duplicate reference → 409, no state change.
       const doc = eligibleBooking();
       Booking.findById = async () => doc;
       Booking.findOne = () => ({ select: async () => ({ _id: "other" }) });
       let r = makeRes();
       await payoutCtrl.settlePayout({ params: { id: "b1" }, user: { id: "admin1" }, body: { reference: "DUPREF123456" } }, r, next);
       check("duplicate reference → 409", r.statusCode === 409 && doc.payout.status === "pending", `s=${r.statusCode}`);
-      // Live refund → 400 with reasons.
       const doc2 = eligibleBooking({ payment: { status: "paid", refundStatus: "pending" } });
       Booking.findById = async () => doc2;
       Booking.findOne = () => ({ select: async () => null });
       r = makeRes();
       await payoutCtrl.settlePayout({ params: { id: "b1" }, user: { id: "admin1" }, body: { reference: "UNIQUE987654" } }, r, next);
       check("refund-pending blocks settlement", r.statusCode === 400 && /refund/i.test(r.body?.message || ""), `s=${r.statusCode}`);
-      // Bad reference format → 400.
       Booking.findById = async () => eligibleBooking();
       r = makeRes();
       await payoutCtrl.settlePayout({ params: { id: "b1" }, user: { id: "admin1" }, body: { reference: "x" } }, r, next);
       check("malformed reference → 400", r.statusCode === 400, `s=${r.statusCode}`);
-      // Happy path: atomic claim + snapshot + settler + ledger.
       const doc3 = eligibleBooking();
       const CookProfile = require("./models/CookProfile");
       const savedProfile = CookProfile.findOne;
@@ -226,9 +210,6 @@ const eligibleBooking = (over = {}) => ({
     try {
       const doc = qdoc();
       Booking.findById = async () => doc;
-      // Synchronous CAS + generic applier: exactly one concurrent approver
-      // wins the pending->processing claim; the winner's final commit
-      // (processing->terminal) applies all $set dotted paths + history.
       Booking.findOneAndUpdate = async (filter, update) => {
         const want = filter["payment.refundStatus"];
         const cur = doc.payment.refundStatus;
@@ -261,7 +242,6 @@ const eligibleBooking = (over = {}) => ({
       check("approve ledger row recorded", ledgerRows.some((l) => l.type === "refund.approved"), `${ledgerRows.length} rows`);
       const cookNotices = notifLog.filter((n) => String(n.user) === "cook1" && n.type === "refund_processed");
       check("assigned cook hears the approval too", cookNotices.length === 1 && /cook payout for this booking will not proceed/i.test(cookNotices[0].message), cookNotices.map((n) => n.message).join("|"));
-      // Settled payout without clawback → blocked and lock handed back.
       const doc2 = qdoc();
       doc2.payout = { status: "settled" };
       Booking.findById = async () => doc2;
@@ -288,8 +268,6 @@ const eligibleBooking = (over = {}) => ({
         payment: { status: "paid", paidAmount: 349, refundStatus: "manual", refundAmount: 349 },
       });
       Booking.findById = async () => doc;
-      // Atomic close: applies the controller's $set/$push when the status
-      // guard still holds, like the database would.
       Booking.findOneAndUpdate = async (filter, update) => {
         const cur = doc.payment.refundStatus;
         const want = filter["payment.refundStatus"];
@@ -328,7 +306,6 @@ const eligibleBooking = (over = {}) => ({
     const savedFindById = Booking.findById;
     const savedUpdate = Booking.updateOne;
     const savedUser = User.findById;
-    // Gateway configured in-process (env preset above); mock fetch/create.
     rzCfg.razorpay.orders.fetch = async (id) => {
       if (id === "order_live_1") return { id, amount: 34900, currency: "INR" };
       if (id === "order_stale_1") return { id, amount: 19900, currency: "INR" };
@@ -347,19 +324,10 @@ const eligibleBooking = (over = {}) => ({
       requestExpiresAt: new Date(Date.now() + 300e3),
       save: async function () { return this; },
     });
-    // Availability + profile lookups inside createOrder go through real utils;
-    // stubbed at the model layer: Booking.find yields no rivals, and the
-    // plain CookProfile stub throws inside getDayWindows, which falls back
-    // to the full service day.
     Booking.find = () => ({ select: () => ({ lean: async () => [] }) });
     let updateCalls = 0;
     Booking.updateOne = async () => { updateCalls += 1; return {}; };
     const body = { cook: "cook1", date: "2099-02-02", startTime: "10:00", endTime: "12:00", durationHours: 2, bookingId: "b1" };
-    // NOTE: createOrder derives windows from CookProfile.schedule via
-    // getDayWindows (real util → stubbed CookProfile.findOne without .select
-    // chain support here is plain-async → TypeError → caught → full-day).
-    // Availability toggle: resolveCookAvailability is NOT called in
-    // createOrder (only windows + overlap), so the plain stub suffices.
     const orderBooking = mkOrderBooking();
     Booking.findById = () => ({ select: async () => orderBooking });
     let r = makeRes();
@@ -403,7 +371,6 @@ const eligibleBooking = (over = {}) => ({
         };
       }
       Booking.findOne = async () => doc;
-      // Atomic confirm claim: apply dotted $set + history push like Mongo.
       Booking.findOneAndUpdate = async (filter, update) => {
         if (String(filter._id) !== String(doc._id)) return null;
         if (filter.status && doc.status !== filter.status) return null;
@@ -486,8 +453,6 @@ const eligibleBooking = (over = {}) => ({
 
   console.log("\n═══ ADVERSARIAL: payout state machine ═══");
   {
-    // In-memory booking store with Mongo-ish filter semantics for the exact
-    // operators the payout controller uses ($or/$and/$in/$ne/$gt/$exists).
     const tick = () => new Promise((r) => setImmediate(r));
     const getPath = (o, p) => String(p).split(".").reduce((a, k) => a?.[k], o);
     const setPath = (o, p, v) => {
@@ -584,7 +549,6 @@ const eligibleBooking = (over = {}) => ({
     try {
       installStore();
 
-      // pending -> settled, then terminal idempotency both directions.
       mkDoc("s1");
       let r = await settle("s1", "UTRSTATE001");
       check("pending -> settled 200", r.statusCode === 200 && store.get("s1").payout.status === "settled", `s=${r.statusCode}`);
@@ -593,7 +557,6 @@ const eligibleBooking = (over = {}) => ({
       r = makeRes();
       await payoutCtrl.rejectPayout({ params: { id: "s1" }, user: admin, body: {} }, r, next);
       check("settled -> reject is no-op success", r.statusCode === 200 && store.get("s1").payout.status === "settled", `s=${r.statusCode}`);
-      // pending -> not_applicable, then terminal.
       mkDoc("s2");
       r = makeRes();
       await payoutCtrl.rejectPayout({ params: { id: "s2" }, user: admin, body: { reason: "bad service" } }, r, next);
@@ -604,7 +567,6 @@ const eligibleBooking = (over = {}) => ({
       r = await settle("s2", "UTRSTATE002");
       check("not_applicable -> settle refused 400", r.statusCode === 400 && store.get("s2").payout.status === "not_applicable", `s=${r.statusCode}`);
 
-      // Legacy row without any payout subdoc settles/rejects through the gate.
       const legacy = eligibleBooking({ _id: "s3" });
       delete legacy.payout;
       store.set("s3", legacy);
@@ -617,8 +579,6 @@ const eligibleBooking = (over = {}) => ({
       await payoutCtrl.rejectPayout({ params: { id: "s4" }, user: admin, body: {} }, r, next);
       check("missing payout subdoc rejects (treated pending)", r.statusCode === 200 && store.get("s4").payout?.status === "not_applicable", `s=${r.statusCode}`);
 
-      // 10 concurrent settles, same booking: exactly one settlement, one
-      // ledger row, one reference; losers get idempotent 200, no new rows.
       mkDoc("s5");
       const before = ledgerRows.length;
       const results = await Promise.all(Array.from({ length: 10 }, (_, i) => settle("s5", `UTRRACE${String(i).padStart(3, "0")}`)));
@@ -628,7 +588,6 @@ const eligibleBooking = (over = {}) => ({
       check("10 concurrent settles: one ledger row", ledgerRows.filter((l) => l.idempotencyKey === "payout:s5").length === 1, `rows=${ledgerRows.length - before}`);
       check("10 concurrent settles: one settledAt", store.get("s5").payout.status === "settled");
 
-      // Settle + reject race: exactly one terminal state; ledger matches winner.
       mkDoc("s6");
       const [rs, rj] = await Promise.all([
         settle("s6", "UTRRACEB01"),
@@ -640,15 +599,12 @@ const eligibleBooking = (over = {}) => ({
       check("settle+reject race: one terminal state", terminal === "settled" || terminal === "not_applicable", `${rs.statusCode}/${rj.statusCode} -> ${terminal}`);
       check("settle+reject race: ledger matches winner", (terminal === "settled" && settledLedgers === 1 && rejectLedgers === 0) || (terminal === "not_applicable" && rejectLedgers === 1 && settledLedgers === 0), `settle=${settledLedgers} reject=${rejectLedgers}`);
 
-      // Refund queued between eligibility read and settle claim -> 409, untouched.
       mkDoc("s7");
       beforeClaimHook = async () => { store.get("s7").payment.refundStatus = "pending"; };
       r = await settle("s7", "UTRRACEC01");
       beforeClaimHook = null;
       check("refund queued mid-settle -> 409, stays pending", r.statusCode === 409 && store.get("s7").payout.status === "pending", `s=${r.statusCode}`);
 
-      // Settle commits between refund pre-check and approve claim -> approve
-      // fails closed (no gateway move without a recorded clawback).
       const { razorpay: rzClient } = require("./config/razorpay");
       let gatewayCalls = 0;
       const savedRefund = rzClient?.payments?.refund;
@@ -661,20 +617,17 @@ const eligibleBooking = (over = {}) => ({
       if (rzClient?.payments && savedRefund) rzClient.payments.refund = savedRefund;
       check("settle-during-approve -> 400, gateway untouched", r.statusCode === 400 && gatewayCalls === 0, `s=${r.statusCode} gw=${gatewayCalls}`);
 
-      // Clawback wording: flag on UNsettled payout must not fabricate history.
       mkDoc("s9", { status: "cancelled", hoursCompleted: false, serviceStartedAt: null, cookArrived: false, payment: { status: "paid", paidAmount: 349, testMode: false, refundStatus: "pending", refundAmount: 349 } });
       r = makeRes();
       await payoutCtrl.approveRefund({ params: { id: "s9" }, user: admin, body: { clawback: true } }, r, next);
       const note9 = (store.get("s9").statusHistory || []).map((h) => h.note).join(" ");
       check("clawback flag on unsettled: no fabricated settled-claim", r.statusCode === 200 && !/already settled/i.test(note9), `s=${r.statusCode}`);
-      // Clawback on truly settled payout: allowed + recorded.
       mkDoc("s10", { status: "cancelled", hoursCompleted: false, serviceStartedAt: null, cookArrived: false, payment: { status: "paid", paidAmount: 349, testMode: false, refundStatus: "pending", refundAmount: 349 }, payout: { status: "settled" } });
       r = makeRes();
       await payoutCtrl.approveRefund({ params: { id: "s10" }, user: admin, body: { clawback: true } }, r, next);
       const note10 = (store.get("s10").statusHistory || []).map((h) => h.note).join(" ");
       check("clawback on settled: allowed + recorded", /already settled/i.test(note10), `s=${r.statusCode}`);
 
-      // Reference matrix.
       mkDoc("s11");
       r = await settle("s11", "AbC123x4");
       check("settle stores exact reference", r.statusCode === 200 && store.get("s11").payout.reference === "AbC123x4", `s=${r.statusCode}`);
@@ -685,7 +638,6 @@ const eligibleBooking = (over = {}) => ({
       mkDoc("s13");
       r = await settle("s13", "ABC  123X4");
       check("whitespace-variant reference rejected 409", r.statusCode === 409, `s=${r.statusCode}`);
-      // Concurrent same-reference settles on two bookings: one wins.
       mkDoc("s14"); mkDoc("s15");
       const [ra, rb] = await Promise.all([settle("s14", "UTRSHARED01"), settle("s15", "UTRSHARED01")]);
       const won = [ra, rb].filter((x) => x.statusCode === 200).length;
@@ -704,7 +656,6 @@ const eligibleBooking = (over = {}) => ({
       }
       check("normalizePayoutReference folds case/space", normalizePayoutReference("  AbC  123X ") === "abc123x", normalizePayoutReference("  AbC  123X "));
 
-      // Amount + actor tampering: server truth wins unconditionally.
       mkDoc("s16");
       r = makeRes();
       await payoutCtrl.settlePayout({ params: { id: "s16" }, user: admin, body: { reference: "UTRTAMPER01", amount: 1, cookPayout: 999999999, settledBy: "evil", actor: "admin:evil" } }, r, next);
@@ -718,18 +669,15 @@ const eligibleBooking = (over = {}) => ({
       }
       check("hostile amounts never corrupt payout", store.get("s17").payout.amount === 262 && store.get("s17").payout.status === "settled");
 
-      // Test-mode can never settle.
       mkDoc("s18", { payment: { status: "paid", paidAmount: 349, testMode: true, refundStatus: "none" } });
       r = await settle("s18", "UTRTESTMODE1");
       check("testMode settle refused", r.statusCode === 400 && store.get("s18").payout.status === "pending", `s=${r.statusCode}`);
 
-      // Full refund-state matrix against the eligibility gate.
       for (const [rs, want] of [["none", true], ["rejected", true], ["pending", false], ["processing", false], ["processed", false], ["failed", false], ["manual", false]]) {
         const e = payoutEligibility(eligibleBooking({ payment: { status: "paid", paidAmount: 349, testMode: false, refundStatus: rs } }));
         check(`refund ${rs} ${want ? "permits" : "blocks"} payout`, e.eligible === want);
       }
 
-      // Ledger failure AFTER settlement: durable state + recoverable audit gap.
       mkDoc("s19");
       const savedCreate = LedgerEntry.create;
       LedgerEntry.create = async () => { throw new Error("ledger db down"); };
@@ -737,7 +685,6 @@ const eligibleBooking = (over = {}) => ({
       LedgerEntry.create = savedCreate;
       check("ledger outage: settlement still commits 200", r.statusCode === 200 && store.get("s19").payout.status === "settled", `s=${r.statusCode}`);
       check("ledger outage: gap is detectable", !ledgerRows.some((l) => l.idempotencyKey === "payout:s19"));
-      // Recovery via the reconcile endpoint (idempotent backfill).
       LedgerEntry.findOne = (q) => ({ select: () => ({ lean: async () => (ledgerKeys.has(q.idempotencyKey) ? { _id: "x" } : null) }) });
       Booking.find = () => ({ select: () => ({ limit: () => ({ lean: async () => [...store.values()].filter((d) => d.payout?.status === "settled").map((d) => ({ _id: d._id, payout: d.payout, payment: d.payment })) }) }) });
       r = makeRes();
@@ -760,9 +707,6 @@ const eligibleBooking = (over = {}) => ({
 
   console.log("\n═══ ADVERSARIAL: cross-endpoint reconciliation ═══");
   {
-    // Independent books (plain data) + independent math (plain loops — never
-    // controller helpers). Queue, history, statements and ledger summary must
-    // agree on the same underlying truth.
     const C1 = "aaaaaaaaaaaaaaaaaaaaaaaa";
     const C2 = "bbbbbbbbbbbbbbbbbbbbbbbb";
     const books = [
@@ -777,7 +721,6 @@ const eligibleBooking = (over = {}) => ({
       { idempotencyKey: "payout:r5", booking: "r5", type: "payout.settled", amount: 487 },
       { idempotencyKey: "refund-approve:r3", booking: "r3", type: "refund.approved", amount: 199 },
     ];
-    // INDEPENDENT expectations (no controller helpers).
     const real = (b) => b.payment?.status === "paid" && b.payment?.testMode !== true;
     const settledBooks = books.filter((b) => b.payout?.status === "settled" && real(b));
     const EXP_SETTLED = settledBooks.reduce((a, b) => a + (b.payout.amount || 0), 0); // 749
@@ -798,7 +741,6 @@ const eligibleBooking = (over = {}) => ({
     const EXP_C1 = stmtOf(C1); // earnings 785, refunded 199, net 586, settled 262, pending 374
     const EXP_C2 = stmtOf(C2); // settled 487
 
-    // Fakes: chainable find, countDocuments, mini aggregation engine.
     const getP = (o, p) => String(p).split(".").reduce((a, k) => a?.[k], o);
     const mCond = (val, cond) => {
       if (cond && typeof cond === "object" && !Array.isArray(cond)) {
@@ -877,16 +819,13 @@ const eligibleBooking = (over = {}) => ({
     CookProfile.findOne = () => ({ select: () => ({ lean: async () => null }) });
     const get = (fn, req) => { const r = makeRes(); return fn(req, r, next).then(() => r); };
     try {
-      // Queue: exactly r2, flagged eligible.
       let r = await get(payoutCtrl.getPayoutQueue, { query: {} });
       check("queue holds exactly the eligible row", r.statusCode === 200 && r.body?.length === 1 && r.body[0]._id === "r2", `s=${r.statusCode} n=${r.body?.length}`);
       check("queue row flagged eligible with no blockers", r.body[0].payoutEligible === true && (r.body[0].payoutBlockers || []).length === 0);
       check("queue pending == independent", r.body.reduce((a, b) => a + b.cookPayout, 0) === EXP_QUEUE_AMT, `${EXP_QUEUE_AMT}`);
-      // History: r1 + r5, amounts reconcile.
       r = await get(payoutCtrl.getPayoutHistory, { query: {} });
       const histSum = (r.body || []).reduce((a, b) => a + (b.payout?.amount || 0), 0);
       check("history settled total == independent", histSum === EXP_SETTLED, `${histSum}==${EXP_SETTLED}`);
-      // Statements per cook.
       r = await get(payoutCtrl.getPayoutStatement, { params: { cookId: "me" }, user: { id: C1, role: "cook" } });
       check("cook cannot spoof me-path (uses own id)", r.body?.statement && typeof r.body.statement.settled === "number", `s=${r.statusCode}`);
       const st1 = r.body.statement;
@@ -894,10 +833,8 @@ const eligibleBooking = (over = {}) => ({
       check("statement c1 settled/pending", st1.settled === EXP_C1.settled && st1.pending === EXP_C1.pending, `set=${st1.settled} pend=${st1.pending}`);
       r = await get(payoutCtrl.getPayoutStatement, { params: { cookId: C2 }, user: { id: "admin1", role: "admin" } });
       check("admin statement c2 settled == independent", r.body?.statement?.settled === EXP_C2.settled, `${r.body?.statement?.settled}`);
-      // IDOR: cook A reading cook B.
       r = await get(payoutCtrl.getPayoutStatement, { params: { cookId: C2 }, user: { id: C1, role: "cook" } });
       check("cook-to-cook statement IDOR blocked 403", r.statusCode === 403, `s=${r.statusCode}`);
-      // Ledger summary agrees with everything.
       r = await get(payoutCtrl.getLedgerSummary, {});
       const b = r.body?.bookings || {};
       check("summary captured == independent", b.captured === EXP_CAPTURED, `${b.captured}==${EXP_CAPTURED}`);
@@ -939,7 +876,6 @@ const eligibleBooking = (over = {}) => ({
     let calls = 0;
     const flaky = { createIndex: async (s, o) => { calls++; if (calls === 1) throw new Error("transient"); return o.name; } };
     r = await ensurePayoutIndexesOnce({ connection: conn, collection: flaky, retryMs: 5, onLog: () => {} });
-    // once-mode does not loop; loop-mode tested via retry below
     check("once-mode surfaces first failure", r.ok === false);
     const { ensurePayoutIndexes } = require("./utils/payoutIndexes");
     let calls2 = 0;

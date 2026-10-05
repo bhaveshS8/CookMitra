@@ -1,13 +1,7 @@
 const mongoose = require("mongoose");
 
-// A complaint about the other side of a booking. Cooks complain about
-// customers; customers complain about cooks (always tied to one of their own
-// bookings so the counterparty is derived, never user-typed). Admins triage
-// these: open → in_review → resolved (or rejected when invalid).
 const complaintSchema = new mongoose.Schema(
   {
-    // Who wrote it — decides who gets status updates and whose "my
-    // complaints" list it appears in.
     filedBy: {
       type: String,
       enum: ["cook", "customer"],
@@ -23,8 +17,6 @@ const complaintSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    // The booking this complaint arose from (optional — a cook may also
-    // report an issue without a specific booking).
     booking: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Booking",
@@ -41,7 +33,6 @@ const complaintSchema = new mongoose.Schema(
         "quality",
         "hygiene",
         "other",
-        // Customer service-complaint reasons (§19, additive — old values kept).
         "cook_did_not_arrive",
         "major_service_deviation",
         "service_quality_issue",
@@ -49,9 +40,6 @@ const complaintSchema = new mongoose.Schema(
       ],
       default: "other",
     },
-    // True when a post-completion complaint arrives more than 24h after the
-    // service ended (§19: preferably reported within 24h). Late reports are
-    // still accepted but flagged for the reviewer — never auto-refunded.
     reportedLate: { type: Boolean, default: false },
     message: {
       type: String,
@@ -65,7 +53,6 @@ const complaintSchema = new mongoose.Schema(
       enum: ["open", "in_review", "resolved", "rejected"],
       default: "open",
     },
-    // Internal resolution note left by the handling admin.
     adminNote: {
       type: String,
       default: "",

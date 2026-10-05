@@ -17,33 +17,16 @@ import {
   CalendarCheck,
 } from "lucide-react";
 
-// Cook's/admin's "Respond to Request" dialog for a `requested` booking. Shows
-// the job summary and lets the cook (or an admin acting on the cook's behalf)
-// accept or decline in place (PATCH /bookings/:id/accept|reject). On success
-// it notifies the parent via onAction (list refetch) and closes itself.
-// Props: open, onClose, booking, onAction, onBehalf (admin copy variant).
 const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => {
   const showToast = useShowToast();
   const [acting, setActing] = useState(null); // "accept" | "reject" | null
   const [error, setError] = useState("");
-  // Focus handling (Phase 17): move keyboard focus into the dialog on open so
-  // screen-reader and keyboard users land on the primary action; Escape still
-  // closes (wired below) and focus returns naturally on unmount.
   const acceptBtnRef = useRef(null);
-  // Live 5-minute countdown, ticked while the dialog is open.
   const [nowMs, setNowMs] = useState(Date.now());
-  // Admin on-behalf accept of a BROADCAST (unassigned) request must name the
-  // winning cook — the server never picks one. Loaded from the backend's
-  // eligible-cooks feed (server-determined availability for this exact slot,
-  // never trusted from the client); falls back to the availability-filtered
-  // cooks list if that feed is unreachable.
   const needsCookPick = Boolean(onBehalf && !booking?.cook);
   const [assignCookId, setAssignCookId] = useState("");
   const [assignCooks, setAssignCooks] = useState([]);
   const [assignLoading, setAssignLoading] = useState(false);
-  // Real-time takeover: another cook / the admin just won this request (or it
-  // expired) while the dialog sat open — disable the buttons and auto-close
-  // instead of leaving a stale actionable popup.
   const [takenOver, setTakenOver] = useState(null);
 
   useEffect(() => {
@@ -54,8 +37,6 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
     setAssignLoading(true);
     (async () => {
       try {
-        // Backend-determined eligible cooks for THIS booking (excludes
-        // ignored/unavailable/out-of-window cooks server-side).
         if (booking?._id) {
           try {
             const elig = await API.get(`/bookings/${booking._id}/eligible-cooks`);
@@ -65,7 +46,6 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
               return;
             }
           } catch {
-            // fall through to the availability-filtered list below
           }
         }
         const dayStr = getLocalDateStr(booking?.date);
@@ -127,11 +107,6 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
   const expired = remainingMs != null && remainingMs <= 0;
   const urgent = remainingMs != null && remainingMs > 0 && remainingMs < 60000;
 
-  // The window lapsed while the dialog sat open: give the parent a beat to
-  // show the expired state, then advance (refetch + next queued request).
-  // Callbacks ride refs so parent re-renders can't keep resetting the timer.
-  // The same auto-close runs when real-time reports this request was just
-  // assigned elsewhere or expired (takenOver below).
   const actionRef = useRef(onAction);
   actionRef.current = onAction;
   const closeRef = useRef(onClose);
@@ -145,11 +120,6 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
     return () => clearTimeout(t);
   }, [open, expired]);
 
-  // Real-time takeover for the OPEN dialog: someone else won it (or it
-  // expired) — freeze the buttons with a truthful note, then advance so the
-  // parent refetches and pops the next waiting request. Stale/duplicate taps
-  // after this point are blocked by `busy` below and by the server's atomic
-  // claim (409 BOOKING_ALREADY_ASSIGNED) if they ever slip through.
   useEffect(() => {
     if (!open || !booking?._id) return undefined;
     const myId = String(booking._id);
@@ -190,8 +160,6 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
 
   const handleAction = async (action) => {
     if (acting || takenOver || !booking?._id) return;
-    // Admin broadcast accept without a chosen cook is meaningless — the
-    // server refuses it (400). Block here with a clear inline error.
     if (action === "accept" && needsCookPick && !assignCookId) {
       setError("Choose the cook to assign this request to, then accept.");
       return;
@@ -217,9 +185,6 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
       const msg = err.response?.data?.message || `Failed to ${action} booking`;
       setError(msg);
       showToast(msg, "error");
-      // The request died meanwhile (expired / slot taken) — close up and let
-      // the parent refetch + advance to the next waiting request instead of
-      // stranding a dead dialog.
       if (err.response?.status === 410 || err.response?.status === 409) {
         onAction?.();
         onClose();
@@ -239,9 +204,6 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
 
   const busy = !!acting || expired || !!takenOver;
 
-  // Portaled to document.body: the dialog must escape .main-content's
-  // pageIn animation stacking context, otherwise the sticky navbar paints
-  // over it (backdrop and card visibly starting below the navbar).
   return createPortal(
     <div className="login-modal-overlay" onClick={() => !busy && onClose()}>
       <div

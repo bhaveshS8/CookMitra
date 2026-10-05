@@ -3,9 +3,6 @@ import { createSlice } from "@reduxjs/toolkit";
 const makeId = () =>
   `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
-// Plain thunk action creator (not createAsyncThunk): keeps the old positional
-// call signature showToast(message, type, duration) so call sites only need
-// `dispatch(...)` wrapped around them.
 export const showToast =
   (message, type = "info", duration = 4000) =>
   (dispatch) => {
@@ -17,9 +14,6 @@ export const showToast =
     return id;
   };
 
-// Cap the stack: cook/user flows can fire bursts (new-request alarm +
-// queue notices + poll toasts) that would otherwise cover the navbar and
-// primary actions on phones. Consecutive duplicates collapse into one.
 const MAX_TOASTS = 4;
 const toastSlice = createSlice({
   name: "toast",

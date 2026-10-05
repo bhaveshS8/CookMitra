@@ -28,7 +28,6 @@ exports.createLead = async (req, res, next) => {
       });
     }
 
-    // Missing fields must not coerce to the literal "undefined" string.
     if (typeof name !== "string" || !name.trim()) {
       return res.status(400).json({ message: "Name is required" });
     }

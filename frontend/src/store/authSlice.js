@@ -4,10 +4,6 @@ import API from "../api/axios";
 const TOKEN_KEY = "token";
 const USER_KEY = "user";
 
-// Backend stores spec-UPPERCASE roles (CUSTOMER/COOK/ADMIN, §17) while the
-// whole frontend compares lowercase ("customer"/"cook"/"admin"). Normalize
-// once at the auth boundary so every screen, guard and redirect keeps working
-// regardless of what case the API (or an old localStorage entry) returns.
 export const normalizeRole = (role) => {
   if (typeof role !== "string") return role;
   const lower = role.toLowerCase();
@@ -25,8 +21,6 @@ const normalizeUser = (user) => {
 
 const loadStored = () => {
   try {
-    // Persistent session first, then session-only ("Keep me signed in"
-    // unchecked stores the token in sessionStorage instead).
     const token = localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
     const rawUser =
       localStorage.getItem(USER_KEY) || sessionStorage.getItem(USER_KEY);
@@ -40,8 +34,6 @@ const loadStored = () => {
 };
 
 const persist = (token, user, persistent = true) => {
-  // Write to the chosen store AND clear the other one, so a stale token in
-  // the opposite store can never resurrect an old session.
   const store = persistent ? localStorage : sessionStorage;
   const other = persistent ? sessionStorage : localStorage;
   try {
@@ -50,7 +42,6 @@ const persist = (token, user, persistent = true) => {
     if (token) store.setItem(TOKEN_KEY, token);
     if (user) store.setItem(USER_KEY, JSON.stringify(user));
   } catch {
-    // storage unavailable — session still works for this visit
   }
 };
 
@@ -61,17 +52,11 @@ const clearStored = () => {
     sessionStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(USER_KEY);
   } catch {
-    // ignore
   }
 };
 
 const stored = loadStored();
 
-// NOTE: RTK serializes plain thunk throws (dropping axios `err.response`)
-// and `.unwrap()` rethrows that husk — so call sites reading
-// `err.response?.data` (Register page, Home quick form, Login) would only
-// ever see generic failures. Thunks below preserve the server's structured
-// error via rejectWithValue instead, so `.unwrap()` throws it verbatim.
 const preserveAuthError = (err) => ({
   response: {
     status: err?.response?.status,
@@ -107,8 +92,6 @@ export const loginUser = createAsyncThunk(
 );
 
 export const registerUser = createAsyncThunk("auth/register", async (data, { rejectWithValue }) => {
-  // Normalize at the boundary: backend lowercases email but the lookup +
-  // validators expect clean input; role must be UPPERCASE per spec §17.
   const payload = {
     ...data,
     email: String(data?.email || "").trim().toLowerCase(),
@@ -142,21 +125,15 @@ export const googleLoginUser = createAsyncThunk(
   }
 );
 
-// Sign out on both sides: clear the httpOnly session cookie server-side
-// (best-effort — offline logout still clears local state) and wipe stored
-// credentials locally.
 export const logoutUser = createAsyncThunk("auth/logout", async (_, { dispatch }) => {
   try {
     await API.post("/auth/logout");
   } catch {
-    // offline or already expired — local wipe below still signs the user out
   }
   dispatch(logout());
   return true;
 });
 
-// Revalidate the stored session against the server (suspended/deleted
-// accounts are logged out immediately instead of lingering in storage).
 export const fetchCurrentUser = createAsyncThunk("auth/me", async (_, { rejectWithValue }) => {
   try {
     const response = await API.get("/auth/me");
@@ -165,7 +142,6 @@ export const fetchCurrentUser = createAsyncThunk("auth/me", async (_, { rejectWi
       const store = localStorage.getItem(TOKEN_KEY) ? localStorage : sessionStorage;
       store.setItem(USER_KEY, JSON.stringify(normalized));
     } catch {
-      // ignore
     }
     return { user: normalized };
   } catch (err) {
@@ -181,8 +157,6 @@ const authSlice = createSlice({
   initialState: {
     user: stored.user,
     token: stored.token,
-    // Synchronously initialised from localStorage (the old context did the
-    // same read in an effect). No async boot step, so no stuck loaders.
     loading: false,
     error: null,
   },
@@ -197,11 +171,9 @@ const authSlice = createSlice({
       if (!state.user) return;
       state.user = normalizeUser({ ...state.user, ...action.payload });
       try {
-        // Write back to whichever store holds this session.
         const store = localStorage.getItem(TOKEN_KEY) ? localStorage : sessionStorage;
         store.setItem(USER_KEY, JSON.stringify(state.user));
       } catch {
-        // ignore
       }
     },
     clearAuthError(state) {
@@ -221,8 +193,6 @@ const authSlice = createSlice({
     };
     const onRejected = (state, action) => {
       state.loading = false;
-      // rejectWithValue payloads carry the server message; plain AxiosError
-      // serializations fall back to action.error as before.
       state.error =
         action.payload?.response?.data?.message ||
         action.payload?.message ||
@@ -246,8 +216,6 @@ const authSlice = createSlice({
       })
       .addCase(fetchCurrentUser.rejected, (state, action) => {
         state.loading = false;
-        // Only wipe the session when the server rejected it — a network
-        // blip must not log the user out.
         if (action.payload === "Session expired" || /blocked by an administrator|no longer exists|not valid/i.test(String(action.payload))) {
           state.user = null;
           state.token = null;

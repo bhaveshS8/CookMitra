@@ -1,19 +1,4 @@
-// Inbound WhatsApp webhook: lets the COOK accept or decline a booking by
-// tapping the Accept/Decline buttons (or replying ACCEPT/REJECT) instead of
-// opening the dashboard.
-//
 // Security contract:
-//  - Meta subscription handshake (GET) requires WHATSAPP_WEBHOOK_VERIFY_TOKEN.
-//  - Every POST must carry a valid X-Hub-Signature-256 over the RAW body,
-//    keyed by WHATSAPP_APP_SECRET — unverifiable calls are refused, never
-//    acted on (fail closed).
-//  - A tap is authorized by the SENDER's WhatsApp number: it must match the
-//    assigned cook's phone/mobile, the booking must still be `requested` and
-//    inside its 5-minute window, and the state flip is an atomic conditional
-//    update — exactly like the in-app accept/reject endpoints.
-//  - Always answers 200 quickly for verified calls (Meta retries anything
-//    slower/non-2xx); per-message failures are replied to the cook on
-//    WhatsApp, never thrown into a 500.
 
 const crypto = require("crypto");
 const Booking = require("../models/Booking");
@@ -41,7 +26,6 @@ const {
 const VERIFY_TOKEN = () => String(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || "").trim();
 const APP_SECRET = () => String(process.env.WHATSAPP_APP_SECRET || "").trim();
 
-// GET /api/whatsapp/webhook — Meta subscription handshake.
 exports.verifyWebhook = (req, res) => {
   try {
     const mode = String(req.query?.["hub.mode"] || "");
@@ -67,7 +51,6 @@ const signaturesEqual = (a, b) => {
   }
 };
 
-// Verify X-Hub-Signature-256 ("sha256=<hex>") over the raw body.
 const verifySignature = (raw, header) => {
   const secret = APP_SECRET();
   if (!secret || !raw || !Buffer.isBuffer(raw)) return false;
@@ -82,8 +65,6 @@ const verifySignature = (raw, header) => {
   return signaturesEqual(expected, sig);
 };
 
-// wa_id arrives as full international digits ("919876543210") — resolve the
-// cook by matching stored phone/mobile in any common written form.
 const findCookByWaId = async (waId) => {
   const digits = String(waId || "").replace(/\D/g, "");
   const core = normalizeIndianMobile(digits);
@@ -111,16 +92,9 @@ const reply = async (to, text) => {
   try {
     await sendWhatsAppText(to, text);
   } catch {
-    // best-effort: the booking transition (or its refusal) already happened
   }
 };
 
-// Meta retries any non-200 delivery with decreasing frequency for up to 7
-// days, so the same tap can arrive many times. De-duplicate on the Meta
-// message id (wamid) via the shared WebhookEvent collection: the loser is
-// acknowledged without re-processing. A dedup-store outage fails OPEN here
-// (unlike the Razorpay path) because the accept/reject claims below are
-// atomic — the worst case is a repeated reply text, never a double booking.
 const seenMessageBefore = async (wamid) => {
   if (!wamid) return false;
   try {
@@ -132,7 +106,6 @@ const seenMessageBefore = async (wamid) => {
   }
 };
 
-// Parse an inbound message into { action: "accept"|"reject"|null, bookingId }.
 const parseInboundAction = (msg) => {
   const interactive = msg?.interactive?.button_reply;
   if (interactive?.id) {
@@ -162,8 +135,6 @@ const loadPendingForCook = async (cookId) => {
         .select("_id serviceType date startTime endTime status")
         .sort({ requestExpiresAt: 1 })
         .limit(5),
-      // Find-Cook broadcast: unassigned live requests this cook hasn't
-      // ignored. Eligibility (window/overlap) is re-checked at accept time.
       Booking.find({
         cook: null,
         status: "requested",
@@ -189,9 +160,6 @@ const loadPendingForCook = async (cookId) => {
 };
 
 const acceptViaWhatsApp = async (cook, booking, senderE164) => {
-  // Ownership: assigned bookings tap only for their own cook; broadcast
-  // (Find-Cook) requests are open to any verified cook — the atomic claim
-  // below decides the single winner.
   const isBroadcast = !booking.cook;
   if (!isBroadcast && String(booking.cook) !== String(cook._id)) {
     await reply(senderE164, "This booking isn't assigned to you — please check your Cook Dashboard.");
@@ -217,14 +185,10 @@ const acceptViaWhatsApp = async (cook, booking, senderE164) => {
         message: "Your booking request expired — the cook didn't respond within 5 minutes. Please find another cook.",
       });
     } catch {
-      // non-fatal
     }
     await reply(senderE164, "This request already expired (5-minute window). The slot is open again.");
     return { ok: false, reason: "expired" };
   }
-  // Overlap pre-check (same rule as the dashboard endpoint) — always
-  // against the ACCEPTING cook's own calendar (broadcast requests have no
-  // cook yet, so booking.cook would check nobody's calendar).
   try {
     const { start: dayStart, end: dayEnd } = dayBounds(booking.date);
     const rivals = await Booking.find({
@@ -248,9 +212,6 @@ const acceptViaWhatsApp = async (cook, booking, senderE164) => {
     await reply(senderE164, "Could not verify slot availability right now — please try again or use your Cook Dashboard.");
     return { ok: false, reason: "verify-unavailable" };
   }
-  // Atomic accept claim — exactly one of (dashboard tap, WhatsApp tap) wins.
-  // Broadcast claims additionally pin cook:null + a live window and set the
-  // winner; assigned claims keep their cook scope.
   let claimed = false;
   try {
     const claimFilter = { _id: booking._id, status: "requested", requestExpiresAt: { $gt: new Date() } };
@@ -288,7 +249,6 @@ const acceptViaWhatsApp = async (cook, booking, senderE164) => {
     const fresh = await Booking.findById(booking._id);
     if (fresh) booking = fresh;
   } catch {
-    // non-fatal
   }
   try {
     await Notification.create({
@@ -298,7 +258,6 @@ const acceptViaWhatsApp = async (cook, booking, senderE164) => {
       message: "Your booking request has been accepted! Complete payment within 5 minutes to confirm your slot.",
     });
   } catch {
-    // non-fatal
   }
   notifyWhatsApp("accepted", booking);
   await reply(
@@ -319,8 +278,6 @@ const rejectViaWhatsApp = async (cook, booking, senderE164) => {
     await reply(senderE164, `This request is already ${booking.status} — no action needed.`);
     return { ok: false, reason: `already-${booking.status}` };
   }
-  // Broadcast Ignore: record this cook's pass, keep the request REQUESTED
-  // for everyone else. No customer rejection, no coupon release.
   if (isBroadcast) {
     try {
       await Booking.updateOne(
@@ -328,7 +285,6 @@ const rejectViaWhatsApp = async (cook, booking, senderE164) => {
         { $addToSet: { ignoredBy: cook._id } }
       );
     } catch {
-      // non-fatal: the reply below still confirms the pass
     }
     await reply(senderE164, `Ignored. ${bookingLine(booking)}\nOther cooks can still accept it.`);
     return { ok: true, ignored: true };
@@ -354,7 +310,6 @@ const rejectViaWhatsApp = async (cook, booking, senderE164) => {
     const fresh = await Booking.findById(booking._id);
     if (fresh) booking = fresh;
   } catch {
-    // non-fatal
   }
   let refundNote = "";
   try {
@@ -374,17 +329,14 @@ const rejectViaWhatsApp = async (cook, booking, senderE164) => {
           }
         );
       } catch {
-        // non-fatal
       }
       refundNote = ` A refund of ₹${queued} has been requested — our team will review it shortly.`;
     }
   } catch {
-    // non-fatal
   }
   try {
     await releaseCouponUsage(booking);
   } catch {
-    // non-fatal
   }
   try {
     await Notification.create({
@@ -394,7 +346,6 @@ const rejectViaWhatsApp = async (cook, booking, senderE164) => {
       message: `Your booking request has been rejected.${refundNote}`,
     });
   } catch {
-    // non-fatal
   }
   notifyWhatsApp("rejected", booking, { refundNote: refundNote || undefined });
   await reply(senderE164, `Declined. ${bookingLine(booking)}\nYour slot stays open.`);
@@ -407,7 +358,6 @@ const handleOneMessage = async (msg) => {
     const senderE164 = from.replace(/\D/g, "") || null;
     const { action, bookingId } = parseInboundAction(msg);
     if (!action) {
-      // Unknown text — only help cooks; everyone else gets silence (no spam).
       const cook = senderE164 ? await findCookByWaId(senderE164) : null;
       if (cook && senderE164) {
         await reply(
@@ -419,7 +369,6 @@ const handleOneMessage = async (msg) => {
     }
     const cook = senderE164 ? await findCookByWaId(senderE164) : null;
     if (!cook) {
-      // Unknown or non-cook sender — stay silent (no user enumeration).
       return { ok: false, reason: "unknown-sender" };
     }
     let booking = null;
@@ -467,9 +416,6 @@ const handleOneMessage = async (msg) => {
   }
 };
 
-// POST /api/whatsapp/webhook — Meta delivery (messages + status updates).
-// Requires the RAW body (mounted via express.raw in server.js) for signature
-// verification. Always 200 for verified calls so Meta stops retrying.
 exports.handleInbound = async (req, res) => {
   try {
     if (!isWhatsAppEnabled() && !APP_SECRET()) {
@@ -489,7 +435,6 @@ exports.handleInbound = async (req, res) => {
     for (const entry of event?.entry || []) {
       for (const change of entry?.changes || []) {
         const value = change?.value || {};
-        // Ignore our own echoes / status callbacks — only inbound messages act.
         for (const msg of value?.messages || []) {
           if (msg?.from) messages.push(msg);
         }
@@ -511,5 +456,4 @@ exports.handleInbound = async (req, res) => {
   }
 };
 
-// Exported for unit tests.
 exports.__test = { verifySignature, parseInboundAction, findCookByWaId, handleOneMessage };

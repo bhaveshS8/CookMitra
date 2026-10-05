@@ -8,15 +8,11 @@ const ProtectedRoute = ({ children, roles }) => {
   const location = useLocation();
 
   if (loading) return <div className="loading">Loading...</div>;
-  // Require BOTH a user and a token — a forged localStorage user object
-  // alone must never open a protected page.
   if (!user || !token) {
     const next = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?next=${next}`} replace />;
   }
   if (roles && !roles.includes(user.role)) {
-    // Send each role straight to its own landing page so cooks/admins
-    // never fall through to the marketing home page.
     if (user.role === "admin") return <Navigate to="/admin" replace />;
     if (user.role === "cook") return <Navigate to="/dashboard/cook-bookings" replace />;
     return <Navigate to="/" replace />;

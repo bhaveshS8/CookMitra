@@ -1,6 +1,3 @@
-/* ==========================================================================
-   Admin — Coupon management (Coupons tab) + coupon modal helpers
-   ========================================================================== */
 .coupon-code-chip {
   display: inline-block;
   font-family: var(--font-mono, monospace);
@@ -32,7 +29,6 @@
   margin-bottom: 0.25rem;
 }
 
-/* Coupon table inherits .admin-table (shared admin responsive pattern) */
 .coupon-table .coupon-code-chip { white-space: nowrap; }
 
 @media (max-width: 768px) {
@@ -43,7 +39,6 @@
 @media (prefers-reduced-motion: reduce) {
   .coupon-active-toggle { transition: none; }
 }
-/* ---- Small phones: coupon cards + chips ----------------------------- */
 @media (max-width: 375px) {
   .coupon-desc { max-width: 100%; font-size: 0.78rem; }
   .coupon-code-chip { font-size: 0.86rem; }

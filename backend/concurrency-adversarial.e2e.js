@@ -1,56 +1,3 @@
-// concurrency-adversarial.e2e.js — ADVERSARIAL concurrency audit for Cook Mitra.
-//
-// Goal: prove (or disprove) that SIMULTANEOUS API requests cannot create
-// invalid booking states. Sequential testing is NOT sufficient here: every
-// burst below is dispatched with Promise.allSettled over synchronously-created
-// fetch promises, so all requests in a burst are in flight at the same time.
-//
-// What it does (16 scenarios):
-//   T01  30 (or FLOOD_N) customers, same cook + slot, same tick
-//   T02  20 customers, overlapping ranges, same tick
-//   T03  two accepts of the SAME booking, same tick
-//   T04  accept vs reschedule (instant move), same tick
-//   T05  accept vs cancel, same tick
-//   T06  create (overlapping) vs accept, same tick
-//   T07  pay-confirm vs cancel, same tick            (needs test payments)
-//   T08a double accept at the expiry boundary        (fast)
-//   T08b double late-accept after expiry             (slow, RUN_SLOW=1)
-//   T09  same idempotency key twice, same tick
-//   T10  different idempotency keys, same slot, same tick
-//   T11  retry AFTER a successful create (sequential idempotency)
-//   T12a single-use coupon raced by two customers, same tick
-//   T12b double pay-confirm of one booking, same tick  (needs test payments)
-//   T13  invalid-id + wrong-owner ops vs a valid op, same tick
-//   T14  same customer + same key from "two devices", same tick
-//   T15  identical amounts, distinct payments, same tick (needs test payments)
-//   T16  two reschedules of one booking, same tick
-//
-// For EVERY test it records: initial DB state, every response status,
-// final DB state, then checks: overlapping active bookings, invalid status
-// transitions, duplicate payments, coupon accounting, payout leakage, and
-// audit-history anomalies. Findings go to console AND to
-// concurrency-report-<timestamp>.json. Exit code is non-zero on any FAIL.
-//
-// Run (scratch database ONLY — this script creates ~40 users + bookings):
-//   MONGODB_URI=mongodb://localhost:27017/festivecook_adv node seeds/seed.js
-//   MONGODB_URI=mongodb://localhost:27017/festivecook_adv node server.js
-//   ALLOW_LIVE_TESTS=1 BASE_URL=http://localhost:5000/api \
-//     MONGODB_URI=mongodb://localhost:27017/festivecook_adv \
-//     node backend/concurrency-adversarial.e2e.js
-// NOTE: simulated test payments were removed — payment-gated tests (T07,
-// T12b, T15) SKIP unless the server has live Razorpay keys. Set SKIP_PAY=1
-// to skip them explicitly.
-//
-// Env knobs:
-//   FLOOD_N        customers in T01 (default 30; use 100 with raised auth limits)
-//   RATE_LIMIT_AUTH must cover ~FLOOD_N+10 on the test server for T01 at N=100
-//   RUN_SLOW=1     include T08b (~6 min: waits out the 5-minute request window)
-//   SKIP_PAY=1     skip payment-gated tests (T07, T12b, T15)
-//   MONGODB_URI    when set, ALSO verifies ground truth directly in MongoDB
-//                  (strongest check); otherwise verifies via the admin API.
-//
-// Safety: refuses to run without ALLOW_LIVE_TESTS=1, and refuses against a
-// database that already holds non-test users (unless ADV_FORCE=1).
 if (!process.env.ALLOW_LIVE_TESTS) {
   console.error(
     "Refusing to run: this suite writes users/bookings/coupons. " +
@@ -71,8 +18,6 @@ const path = require("path");
 
 let failures = 0, passes = 0, skips = 0, envLimited = 0;
 const results = [];
-// True only while the suite's reads can be trusted: set by the SETUP
-// db-match check. When false, failed READs prove nothing about the product.
 let DB_OK = true;
 const record = (id, name, verdict, detail, extra = {}) => {
   console.log(`${verdict}  ${id} ${name}${detail ? "  -> " + detail : ""}`);
@@ -82,9 +27,6 @@ const record = (id, name, verdict, detail, extra = {}) => {
   else envLimited++;
   results.push({ id, name, verdict, detail: detail || "", ...extra });
 };
-// Verdict router for tests with BOTH HTTP and read-back evidence: HTTP
-// failures always FAIL (server truth); failed reads FAIL only when reads
-// are trustworthy, otherwise ENV-LIMITED with the HTTP evidence preserved.
 const finalize = (id, name, httpOk, readOk, detail, extra = {}) => {
   if (!httpOk) return record(id, name, "FAIL", detail, extra);
   if (!readOk && !DB_OK) {
@@ -93,7 +35,6 @@ const finalize = (id, name, httpOk, readOk, detail, extra = {}) => {
   return record(id, name, readOk ? "PASS" : "FAIL", detail, extra);
 };
 
-// ── HTTP ────────────────────────────────────────────────────────────────────
 const api = async (method, p, { token, body, timeoutMs = 30000 } = {}) => {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -116,10 +57,6 @@ const api = async (method, p, { token, body, timeoutMs = 30000 } = {}) => {
     clearTimeout(t);
   }
 };
-// Fire N async operations with TRUE concurrency: every promise is created
-// synchronously in the same tick before any is awaited. Returns the plain
-// API responses in order (NOT allSettled wrappers) — a rejected thunk
-// becomes a NETWORK pseudo-response so tallies stay meaningful.
 const burst = async (thunks) => {
   const settled = await Promise.allSettled(thunks.map((t) => t()));
   return settled.map((s) =>
@@ -137,7 +74,6 @@ const tally = (responses) => {
   return m;
 };
 
-// ── time helpers (IST-agnostic: test slots are days out, on-grid) ───────────
 const p2 = (n) => String(n).padStart(2, "0");
 const dayStr = (offsetDays) => {
   const d = new Date();
@@ -153,7 +89,6 @@ const fmtMin = (m) => `${p2(Math.floor(m / 60))}:${p2(m % 60)}`;
 const addMinutes = (t, d) => fmtMin(toMin(t) + d);
 const normId = (v) => String((v && v._id) || v || "");
 
-// ── state snapshots ─────────────────────────────────────────────────────────
 let useDirectDb = false;
 let DirectBooking = null, DirectCoupon = null;
 async function initDirectDb() {
@@ -233,18 +168,12 @@ function historyAnomalies(booking) {
       out.push(`live '${s}' after terminal '${sawTerminal}'`);
     }
   }
-  // requested-after-accepted is only legal as the accept-rollback path
   for (let i = 1; i < hist.length; i++) {
     if (hist[i - 1].status === "accepted" && hist[i].status === "requested" &&
         !/rolled back/i.test(String(hist[i].note || ""))) {
       out.push("accepted->requested without rollback note");
     }
   }
-  // Duplicate consecutive entries are the fingerprint of non-atomic
-  // transitions (double accept, double late-expiry, double complete).
-  // Same-status ANNOTATIONS are legitimate and excluded: refund-queue notes
-  // (cancel pushes 'cancelled' then appends a second 'cancelled' refund note)
-  // and arrival notes on an already-live booking.
   const ANNOTATION_RE = /refund|arrived/i;
   for (let i = 1; i < hist.length; i++) {
     if (hist[i].status === hist[i - 1].status &&
@@ -256,7 +185,6 @@ function historyAnomalies(booking) {
   return { out, acceptedEntries };
 }
 
-// ── accounts ────────────────────────────────────────────────────────────────
 const ADMIN = { email: process.env.SEED_ADMIN_EMAIL || "admin@festivecook.com", password: process.env.SEED_ADMIN_PASS || "admin123" };
 const COOK = { email: process.env.SEED_COOK_EMAIL || "priya@example.com", password: process.env.SEED_COOK_PASS || "password123" };
 async function login(email, password) {
@@ -294,13 +222,11 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
   ...extra,
 });
 
-// ── main ────────────────────────────────────────────────────────────────────
 (async () => {
   const startedAt = new Date().toISOString();
   useDirectDb = await initDirectDb();
   console.log(`INFO  verify mode: ${useDirectDb ? "direct MongoDB (ground truth)" : "admin API"}`);
 
-  // Guard: never run against a database with real users.
   let admin, cook;
   try {
     admin = await login(ADMIN.email, ADMIN.password);
@@ -323,7 +249,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     }
   }
 
-  // Pick a free 10:00-12:00 slot 7 days out (shift days on clash).
   const DATE = dayStr(7);
   const SLOT = { s: "10:00", e: "12:00" };
   const free = await api("GET", `/availability/${cookId}?date=${DATE}&durationHours=2`, { token: admin.token });
@@ -332,8 +257,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
   record("SETUP", "target slot free", hasSlot ? "PASS" : "FAIL", `${DATE} ${SLOT.s}-${SLOT.e} (${(freeList || []).length} options)`);
   if (!hasSlot) { finish(startedAt); return; }
 
-  // Customer pool (sequential setup; the CONCURRENCY is in the tests).
-  // Size covers both the flood (FLOOD_N) and the fixed-index tests (≥20).
   const POOL_N = Math.max(FLOOD_N, 20);
   const customers = [];
   for (let i = 0; i < POOL_N; i++) {
@@ -351,8 +274,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     finish(startedAt);
     return;
   }
-  // The server and the suite must point at the SAME database, or every
-  // read-back below finds nothing while HTTP writes succeed elsewhere.
   if (useDirectDb) {
     try {
       const mongoose = require("mongoose");
@@ -370,9 +291,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
       record("SETUP", "server/suite database match", "ENV-LIMITED", String((e && e.message) || e));
     }
   }
-  // Probe simulated payments (removed feature): the probe booking's pay call
-  // now returns 400, so testPayLive stays false and payment-gated tests SKIP
-  // unless the server has live Razorpay keys.
   let testPayLive = false;
   if (!SKIP_PAY) {
     const probe = await api("POST", "/bookings", {
@@ -396,7 +314,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
 
   const snapCount = async () => (await snapshotBookings(admin.token)).length;
 
-  // ══ T01: flood, same cook + slot ══════════════════════════════════════════
   {
     const before = await snapCount();
     const indexed = customers.map((c, i) => ({ c, i }));
@@ -408,19 +325,13 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     );
     const responses = settled.map((v) => (v && v.r) || { status: -1, data: null });
     const okIdx = settled.filter((v) => v && v.r && [200, 201].includes(v.r.status));
-    // Snapshot BEFORE cleanup: deleting surviving holds first would erase
-    // the very double-booking evidence this test hunts.
     const after = await snapshotBookings(admin.token);
     const overs = findOverlaps(after).filter(([a, b]) =>
       [a, b].every((x) => normId(x.cook) === cookId));
     const createdIds = okIdx.map(({ r }) => String(r.data?._id || ""));
-    // HTTP evidence (server truth): at most one winner. Read evidence:
-    // no overlapping pair in the snapshot.
     finalize("T01", `${customers.length}x same-slot create`, okIdx.length <= 1, overs.length === 0,
       `created=${okIdx.length} tally=${JSON.stringify(tally(responses))} overlaps=${overs.length}`,
       { initial: before, tally: tally(responses), createdIds });
-    // Best-effort cleanup: withdraw the surviving hold(s) so later runs
-    // start from a clean slot (DELETE is allowed for requested holds).
     for (const { r, i } of okIdx) {
       if (r.data?._id) {
         try { await api("DELETE", `/bookings/${r.data._id}`, { token: customers[i].token }); } catch { /* ignore */ }
@@ -428,7 +339,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     }
   }
 
-  // ══ T02: overlapping ranges ══════════════════════════════════════════════
   {
     const starts = ["08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30"];
     const endFor = (s) => { const m = toMin(s) + 120; return `${p2(Math.floor(m / 60))}:${p2(m % 60)}`; };
@@ -443,7 +353,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
       })
     );
     const responses = settled02.map((v) => (v && v.r) || { status: -1, data: null });
-    // Best-effort cleanup of surviving holds (requested only).
     for (const v of settled02) {
       if (v && v.r && [200, 201].includes(v.r.status) && v.r.data?._id) {
         try { await api("DELETE", `/bookings/${v.r.data._id}`, { token: takers[v.i].token }); } catch { /* ignore */ }
@@ -459,9 +368,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
       { tally: tally(responses), overlaps: overs.map(([a, b]) => `${a.startTime}-${a.endTime}/${a.status} x ${b.startTime}-${b.endTime}/${b.status}`) });
   }
 
-  // Helper: fresh request id. A previous run's unexpired 5-minute hold can
-  // still occupy the slot when re-running quickly — nudge forward on 409
-  // (overlap is preserved for T06-style tests: +30m steps stay overlapping).
   const freshRequest = async (cust, date = dayStr(10), s = "10:00", e = "12:00", extra = {}) => {
     const dur = toMin(e) - toMin(s);
     let start = s;
@@ -482,7 +388,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     return r.status === 200 ? r.data : null;
   };
 
-  // ══ T03: double accept, same booking ══════════════════════════════════════
   {
     const id = await freshRequest(customers[0], dayStr(11));
     const before = await fetchBooking(id);
@@ -493,9 +398,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     const after = await fetchBooking(id);
     const { acceptedEntries } = historyAnomalies(after || { statusHistory: [] });
     const ok = after?.status === "accepted" && acceptedEntries === 1;
-    // Serialized accept: exactly one winner (200), the loser is refused
-    // (400/409) — never two concurrent winners. The old suite demanded
-    // double-200, which was the race itself.
     const oneWinner = [r1.status, r2.status].filter((s) => s === 200).length === 1 &&
       [r1.status, r2.status].every((s) => [200, 400, 409].includes(s));
     finalize("T03", "2x accept same booking", oneWinner, ok,
@@ -504,12 +406,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: {} });
   }
 
-  // ══ T04: accept vs reschedule, same tick ══════════════════════════════════
-  // Both orders are legal: the instant move may land before the accept
-  // (booking ends accepted at the NEW slot) or after it (accepted at the OLD
-  // slot and the move is refused by the status/rescheduleCount claim guard).
-  // The result must be exactly one of those two worlds — never a mixed slot,
-  // never a lost update, never a dirty history.
   {
     const id = await freshRequest(customers[1], dayStr(12));
     const before = await fetchBooking(id);
@@ -522,8 +418,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     const atNew = after?.startTime === "14:00" && after?.endTime === "16:00";
     const atOld = after?.startTime === before?.startTime && after?.endTime === before?.endTime;
     const count = Number(after?.rescheduleCount || 0);
-    // Accept must win its claim (the move never changes the status), and the
-    // move's HTTP answer must match the world the booking actually landed in.
     const httpOk =
       ra.status === 200 &&
       [200, 400, 409].includes(rr.status) &&
@@ -547,10 +441,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     await api("PATCH", `/bookings/${id}/cancel`, { token: customers[1].token, body: {} });
   }
 
-  // ══ T16: two reschedules of one booking, same tick ════════════════════════
-  // The optimistic claim (status + rescheduleCount) must admit exactly ONE
-  // move: one 200, one refusal, rescheduleCount 1, the booking parked on
-  // exactly one of the two targets, and a single "Rescheduled" history note.
   {
     const mover = customers[6] || customers[0];
     const id = await freshRequest(mover, dayStr(26));
@@ -586,7 +476,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     await api("PATCH", `/bookings/${id}/cancel`, { token: mover.token, body: {} });
   }
 
-  // ══ T05: accept vs cancel ═════════════════════════════════════════════════
   {
     const id = await freshRequest(customers[2], dayStr(13));
     const [ra, rc] = await burst([
@@ -596,8 +485,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     const after = await fetchBooking(id);
     const valid = ["accepted", "cancelled"].includes(after?.status);
     const an = historyAnomalies(after || { statusHistory: [] });
-    // Serialized: exactly one winner; the loser gets a terminal code
-    // (400/409/410), never a silent double-effect. History must be clean.
     const oneWinner = [ra.status, rc.status].filter((s) => s === 200).length === 1;
     finalize("T05", "accept vs cancel",
       oneWinner && [200, 400, 409].includes(ra.status) && [200, 400, 409, 410].includes(rc.status) && valid && an.out.length === 0, valid && an.out.length === 0,
@@ -606,7 +493,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     if (after?.status === "accepted") await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: {} });
   }
 
-  // ══ T06: create-overlap vs accept ═════════════════════════════════════════
   {
     const idA = await freshRequest(customers[3], dayStr(14));
     const [rCreate, rAccept] = await burst([
@@ -621,9 +507,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
       Math.abs(new Date(b.date).getTime() - new Date(dayStr(14)).getTime()) < 12 * 3600 * 1000);
     const overs = findOverlaps(day).filter(([a, b]) =>
       ACTIVE.includes(a.status) && ACTIVE.includes(b.status));
-    // Informational: a live requested hold overlapping an accepted booking is
-    // a known design gap (accept checks ignore requested rivals) — recorded,
-    // not failed, so the run documents it either way.
     const holdOvers = findOverlaps(day).filter(([a, b]) =>
       [a.status, b.status].includes("requested") &&
       [a, b].some((x) => ACTIVE.includes(x.status)));
@@ -634,14 +517,11 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     const a = await fetchBooking(idA);
     if (a?.status === "accepted") await api("PATCH", `/bookings/${idA}/cancel`, { token: cook.token, body: {} });
     else await api("DELETE", `/bookings/${idA}`, { token: customers[3].token });
-    // B may survive as a requested hold overlapping accepted A (known gap) —
-    // withdraw it so later runs start clean.
     if ([200, 201].includes(rCreate.status) && rCreate.data?._id) {
       try { await api("DELETE", `/bookings/${rCreate.data._id}`, { token: customers[4].token }); } catch { /* ignore */ }
     }
   }
 
-  // ══ T07: pay vs cancel ═══════════════════════════════════════════════════
   if (!testPayLive) {
     record("T07", "pay vs cancel", "SKIP", "test payments unavailable on target server");
   } else {
@@ -663,7 +543,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     if (after?.status === "confirmed") await api("PATCH", `/bookings/${id}/cancel`, { token: admin.token, body: {} });
   }
 
-  // ══ T08a: double accept at expiry boundary ═══════════════════════════════
   {
     const id = await freshRequest(customers[6], dayStr(16));
     const [r1, r2] = await burst([
@@ -672,7 +551,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     ]);
     const after = await fetchBooking(id);
     const { acceptedEntries } = historyAnomalies(after || { statusHistory: [] });
-    // Serialized accept across roles: exactly one winner (200), loser refused.
     const oneWinner = [r1.status, r2.status].filter((s) => s === 200).length === 1 &&
       [r1.status, r2.status].every((s) => [200, 400, 409].includes(s));
     finalize("T08a", "2x accept (cook+admin) same tick",
@@ -682,7 +560,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: {} });
   }
 
-  // ══ T08b: double late-accept after expiry (SLOW) ══════════════════════════
   if (!RUN_SLOW) {
     record("T08b", "2x late-accept after expiry", "SKIP", "set RUN_SLOW=1 (~6 min)");
   } else {
@@ -704,7 +581,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
       { responses: [r1.status, r2.status] });
   }
 
-  // ══ T09: same idempotency key twice ═══════════════════════════════════════
   {
     const key = `${TAG}-t09`;
     const [r1, r2] = await burst([
@@ -720,7 +596,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     if (ids[0]) await api("DELETE", `/bookings/${ids[0]}`, { token: customers[8].token });
   }
 
-  // ══ T10: different keys, same slot ═══════════════════════════════════════
   {
     const [r1, r2] = await burst([
       () => api("POST", "/bookings", { token: customers[9].token, body: bookPayload(cookId, dayStr(19), "10:00", "12:00", { clientKey: `${TAG}-t10a` }) }),
@@ -740,7 +615,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     }
   }
 
-  // ══ T11: retry after success (sequential) ═════════════════════════════════
   {
     const key = `${TAG}-t11`;
     const r1 = await api("POST", "/bookings", { token: customers[11].token, body: bookPayload(cookId, dayStr(20), "10:00", "12:00", { clientKey: key }) });
@@ -755,7 +629,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     if (r1.data?._id) await api("DELETE", `/bookings/${r1.data._id}`, { token: customers[11].token });
   }
 
-  // ══ T12a: single-use coupon raced ═════════════════════════════════════════
   {
     const code = `${TAG}01`.toUpperCase();
     const mk = await api("POST", "/coupons", {
@@ -791,7 +664,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     }
   }
 
-  // ══ T12b: double pay-confirm, one booking ═════════════════════════════════
   if (!testPayLive) {
     record("T12b", "double pay-confirm", "SKIP", "test payments unavailable on target server");
   } else {
@@ -811,7 +683,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     await api("PATCH", `/bookings/${id}/cancel`, { token: admin.token, body: {} });
   }
 
-  // ══ T13: invalid + wrong-owner vs valid ═══════════════════════════════════
   {
     const id = await freshRequest(customers[15], dayStr(23));
     const [badId, wrongOwner, good] = await burst([
@@ -829,7 +700,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: {} });
   }
 
-  // ══ T14: two devices, one key ═════════════════════════════════════════════
   {
     const key = `${TAG}-t14`;
     const [r1, r2] = await burst([
@@ -844,7 +714,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     if (ids[0]) await api("DELETE", `/bookings/${ids[0]}`, { token: customers[17].token });
   }
 
-  // ══ T15: identical amounts, distinct payments ═════════════════════════════
   if (!testPayLive) {
     record("T15", "identical amounts distinct pays", "SKIP", "test payments unavailable on target server");
   } else {
@@ -871,9 +740,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     await api("PATCH", `/bookings/${B.id}/cancel`, { token: admin.token, body: {} });
   }
 
-  // ══ Final global invariants (scoped to THIS run via clientKey TAG so
-  // seeded/sample rows can never false-fail the suite). Meaningless when
-  // the db-match check already failed — downgraded, not passed.
   {
     if (!DB_OK) {
       record("INV", "global invariants", "ENV-LIMITED", "not evaluated (db mismatch)");
@@ -896,8 +762,6 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
 
   finish(startedAt);
 })().catch((e) => {
-  // A setup crash (e.g. occupied slot) must still leave a report behind —
-  // never die silently with no artifact.
   console.error("FATAL suite crash:", (e && e.stack) || e);
   try { record("FATAL", "unhandled suite crash", "FAIL", String((e && e.message) || e)); } catch { /* ignore */ }
   try { finish(new Date().toISOString()); } catch { process.exit(1); }

@@ -13,7 +13,6 @@ const Footer = () => {
     <footer className="footer-modern">
       <div className="footer-inner">
         <div className="footer-top-grid">
-          {/* Brand Col */}
           <div className="footer-brand-col">
             <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
               <img
@@ -38,7 +37,6 @@ const Footer = () => {
             </div>
           </div>
 
-          {/* Quick Links */}
           <div className="footer-links-col">
             <h4>Explore</h4>
             <ul className="footer-links-list">
@@ -60,7 +58,6 @@ const Footer = () => {
             </ul>
           </div>
 
-          {/* Contact & Support */}
           <div className="footer-links-col">
             <h4>Reach Us</h4>
             <ul className="footer-links-list">
@@ -83,7 +80,6 @@ const Footer = () => {
           </div>
         </div>
 
-        {/* Bottom Bar */}
         <div className="footer-bottom-bar">
           <div>
             &copy; {new Date().getFullYear()} Cook Mitra. Crafted with <Heart size={14} style={{ display: "inline", verticalAlign: "middle", color: "#f43f5e" }} /> for festive homes.

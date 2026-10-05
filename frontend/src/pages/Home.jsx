@@ -23,7 +23,6 @@ import {
   X,
 } from "lucide-react";
 
-// Animated number that counts up when scrolled into view.
 const CountUp = ({ to, decimals = 0, suffix = "", duration = 1400 }) => {
   const [val, setVal] = useState(0);
   const ref = useRef(null);
@@ -81,8 +80,6 @@ const TICKER_DISHES = [
 
 const DISMISSED_RATINGS_KEY = "home-rate-dismissed";
 
-// One rateable booking card: cook info + star rating (comment optional) +
-// per-card cross button to dismiss. Disappears once the rating is submitted.
 const PendingRatingCard = ({ booking, onRated, onDismiss }) => {
   return (
     <article className="hrc-card">
@@ -122,9 +119,6 @@ const PendingRatingCard = ({ booking, onRated, onDismiss }) => {
   );
 };
 
-// Home section: after service hours end, prompt the customer to rate each
-// unrated cook. Hidden for guests/cooks/admins, after rating (review exists),
-// or after the user taps the cross button (dismiss persisted in localStorage).
 const PendingCookRatings = () => {
   const user = useSelector((s) => s.auth.user);
   const [bookings, setBookings] = useState([]);
@@ -145,7 +139,6 @@ const PendingCookRatings = () => {
         if (!cancelled) setBookings(Array.isArray(res.data) ? res.data : []);
       })
       .catch(() => {
-        // silent: rating prompt is optional, must never break Home
       });
     return () => {
       cancelled = true;
@@ -155,13 +148,11 @@ const PendingCookRatings = () => {
   if (!user || user.role !== "customer") return null;
 
   const persistDismissed = (ids) => {
-    // Cap the list so it can't grow unbounded in localStorage.
     const capped = [...new Set(ids)].slice(-100);
     setDismissed(capped);
     try {
       localStorage.setItem(DISMISSED_RATINGS_KEY, JSON.stringify(capped));
     } catch {
-      // storage optional
     }
   };
 
@@ -179,7 +170,6 @@ const PendingCookRatings = () => {
   };
 
   const handleRated = (id) => {
-    // Drop the card immediately; the saved review also excludes it on refetch.
     setBookings((prev) => prev.filter((b) => b._id !== id));
   };
 
@@ -220,10 +210,6 @@ const PendingCookRatings = () => {
   );
 };
 
-// Homepage trust stats — live from GET /api/stats/public (see backend
-// routes/stats.js). Hardcoded marketing numbers are a CCPA 2022
-// misleading-ad exposure for a payment merchant, so the hero only renders a
-// stat once it is meaningful, and falls back to honest "growing" copy.
 const STAT_MINIMUMS = { bookings: 20, ratings: 5 };
 
 const HeroStats = () => {
@@ -236,7 +222,6 @@ const HeroStats = () => {
         if (!cancelled) setStats(res.data || null);
       })
       .catch(() => {
-        // Stats are decorative — the hero must render without them.
       });
     return () => {
       cancelled = true;
@@ -247,8 +232,6 @@ const HeroStats = () => {
   const showRating =
     (stats?.ratingCount ?? 0) >= STAT_MINIMUMS.ratings && stats?.ratingAverage != null;
 
-  // Pre-launch: nothing is meaningful yet — render nothing instead of
-  // placeholder stats.
   if (!showBookings && !showRating) {
     return null;
   }
@@ -277,7 +260,6 @@ const HeroStats = () => {
 const Home = () => {
   const user = useSelector((s) => s.auth.user);
 
-  // Scroll-reveal for page sections (adds .visible as they enter view).
   useEffect(() => {
     if (!("IntersectionObserver" in window)) return;
     const io = new IntersectionObserver(
@@ -325,17 +307,13 @@ const Home = () => {
 
   return (
     <div className="home-container">
-      {/* Sweets & festive dishes carousel, right below the navbar */}
       <DishCarousel />
-      {/* Pending cook ratings: after service hours end, unrated customers rate here */}
       <PendingCookRatings />
-      {/* Hero Section */}
       <section className="hero-v2">
         <div className="hero-v2-glow hero-v2-glow-1" aria-hidden="true" />
         <div className="hero-v2-glow hero-v2-glow-2" aria-hidden="true" />
         <div className="hero-v2-glow hero-v2-glow-3" aria-hidden="true" />
 
-        {/* Festive toran garland */}
         <div className="hero-toran" aria-hidden="true">
           {["🌼", "🏵️", "🌿", "🌼", "🏵️", "🌿", "🌼", "🏵️", "🌿", "🌼", "🏵️", "🌿", "🌼", "🏵️", "🌿", "🌼"].map((f, i) => (
             <span key={i} className="hero-toran-flower" style={{ animationDelay: `${(i % 8) * 0.25}s` }}>
@@ -374,7 +352,6 @@ const Home = () => {
               )}
             </div>
 
-            {/* Single social-proof row: avatars + rating + happy families */}
             <div className="hero-v2-proof hero-enter" style={{ "--d": "0.45s" }}>
               <div className="hero-v2-avatars">
                 <span>AD</span><span>VK</span><span>RS</span>
@@ -440,7 +417,6 @@ const Home = () => {
         <HeroStats />
       </section>
 
-      {/* Scrolling dishes ticker */}
       <div className="dish-marquee" aria-hidden="true">
         <div className="dish-marquee-track">
           {[0, 1].map((half) => (
@@ -455,11 +431,8 @@ const Home = () => {
         </div>
       </div>
 
-      {/* Live festive offers — admin-managed coupons from /api/coupons/active */}
       <HomeCoupons />
 
-      {/* User Registration — guests only; logged-in customers,
-           cooks and admins already have accounts */}
       {!user && (
         <section className="lead-section">
           <div className="lead-grid">
@@ -485,7 +458,6 @@ const Home = () => {
         </section>
       )}
 
-      {/* How It Works Section */}
       <section className="home-band band-slate">
         <div className="section-header">
           <span className="section-eyebrow">Simple & Transparent</span>
@@ -542,7 +514,6 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Customer Testimonials */}
       <section className="testimonials-section home-band band-abyss">
         <div className="section-header">
           <span className="section-eyebrow">Customer Stories</span>
@@ -575,10 +546,6 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Call to Action Banner — invite home chefs to earn. Shown to guests
-          and customers; hidden for cooks/admins who already have those roles.
-          Deep-links to /register?role=cook so the Register page preselects
-          the "Join as Cook" tab instead of defaulting to customer. */}
       {user?.role !== "cook" && user?.role !== "admin" && (
         <div className="cta-cook-wrap">
         <section className="cta-banner cta-cook">
@@ -632,5 +599,4 @@ const Home = () => {
 
 export default Home;
 
-
-
+

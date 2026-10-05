@@ -60,7 +60,6 @@ const Register = () => {
   const dispatch = useDispatch();
   const showToast = useShowToast();
   const navigate = useNavigate();
-  // ?next=… resumes an interrupted booking for new customers.
   const next = safeNextPath(searchParams.get("next"));
   const loginTo = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
 
@@ -70,15 +69,12 @@ const Register = () => {
   const handleChange = (e) => {
     const { name } = e.target;
     let { value } = e.target;
-    // Mobile must be exactly 10 digits — strip non-digits as the user types.
     if (name === "phone") value = String(value).replace(/\D/g, "").slice(0, 10);
     setFormData((prev) => ({ ...prev, [name]: value }));
     setFieldErrors((prev) => (prev[name] ? { ...prev, [name]: "" } : prev));
     if (error) setError("");
   };
 
-  // Numbers-only mobile field: block non-digit keystrokes (letters, symbols,
-  // spaces) while keeping navigation + clipboard shortcuts working.
   const handlePhoneKeyDown = (e) => {
     const navKeys = [
       "Backspace",
@@ -99,7 +95,6 @@ const Register = () => {
     if (!/^[0-9]$/.test(e.key)) e.preventDefault();
   };
 
-  // Paste only the digits from clipboard content into the mobile field.
   const handlePhonePaste = (e) => {
     e.preventDefault();
     const pasted = (e.clipboardData?.getData("text") || "").replace(/\D/g, "");
@@ -175,10 +170,6 @@ const Register = () => {
     } catch (err) {
       const serverMsg = err?.response?.data?.message || "";
       const serverData = err?.response?.data || {};
-      // Duplicate email: backend returns 400 with "Email already exists..."
-      // (legacy builds returned "Email already registered"). Show it both as
-      // a banner and inline under the email field so the user knows to use
-      // another email.
       const isEmailExists =
         serverData.code === "EMAIL_EXISTS" ||
         serverData.field === "email" ||
@@ -188,7 +179,6 @@ const Register = () => {
         serverFields.email = "Email already exists, please enter another email";
       }
       if (Object.keys(serverFields).length) {
-        // Backend uses `phone`/`mobile` interchangeably — show under `phone`.
         if (serverFields.mobile && !serverFields.phone) serverFields.phone = serverFields.mobile;
         setFieldErrors((prev) => ({ ...prev, ...serverFields }));
       }
@@ -208,7 +198,6 @@ const Register = () => {
 
   return (
     <div className="login-split register-split">
-      {/* ---- Professional showcase panel ---- */}
       <aside className="login-showcase register-showcase">
         <div className="login-showcase-glow login-showcase-glow-1" />
         <div className="login-showcase-glow login-showcase-glow-2" />
@@ -280,7 +269,6 @@ const Register = () => {
         </div>
       </aside>
 
-      {/* ---- Form panel ---- */}
       <div className="login-form-side register-form-side">
         <div className="login-card register-card">
           <div className="login-card-header register-card-header">
@@ -309,7 +297,6 @@ const Register = () => {
             </div>
           )}
 
-          {/* Role selector */}
           <div
             className="role-segmented-control register-role-grid"
             role="radiogroup"

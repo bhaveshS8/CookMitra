@@ -15,17 +15,6 @@ import { useFetch } from "../hooks/useFetch";
 import { formatCurrency } from "../utils/constants";
 import { resolveFileUrl } from "./CookDocUploads";
 
-// Admin booking analytics — renders server-calculated KPIs from
-// GET /api/analytics/bookings. The frontend never computes money or booking
-// lifecycle totals; it only formats, filters (via query params) and
-// visualizes authoritative backend values.
-//
-// Money labels match backend/utils/analytics.js definitions:
-// - Gross Collected = captured real payments (excl. test mode).
-// - Refunds = successful refunds only (processed/manual).
-// - Net Collected = Gross − Refunds.
-// - Platform Earnings / Cook Earnings = net split (sum == Net).
-// - Cook Paid / Pending = settled vs pending payout entitlement.
 
 const monthLabel = (ym) => {
   const [y, m] = String(ym || "").split("-");
@@ -38,8 +27,6 @@ const monthLabel = (ym) => {
   });
 };
 
-// Never render NaN/Infinity/undefined money. Backend sends integer rupees;
-// anything non-finite displays as ₹0 (explicit zero, never blank).
 const safeInt = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(n) : 0;
@@ -175,7 +162,6 @@ const AnalyticsPanel = () => {
     setApplied({ from: from.trim(), to: to.trim(), dateField });
   };
 
-  // Structured totals with legacy-flat fallback (backend sends both).
   const t = data?.totals || {};
   const op = t.operational || {};
   const fin = t.financial || {};

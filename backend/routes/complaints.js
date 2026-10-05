@@ -10,9 +10,6 @@ const {
   updateComplaintStatus,
 } = require("../controllers/complaintController");
 
-// Either side files a complaint about the other (booking required for
-// customers — the cook is derived from their own booking; cooks may also
-// file standalone against a customer they have served).
 router.post(
   "/",
   auth,
@@ -31,13 +28,10 @@ router.post(
   createComplaint
 );
 
-// Logged-in user's own complaints (cook or customer).
 router.get("/my", auth, authorize("cook", "customer"), getMyComplaints);
 
-// Full triage queue (admin only).
 router.get("/", auth, authorize("admin"), getAllComplaints);
 
-// Admin updates status / leaves a note.
 router.patch(
   "/:id/status",
   auth,

@@ -1,8 +1,4 @@
-/* ==========================================================================
-   Auth — login split + register card
-   ========================================================================== */
 
-/* ---- Login ---- */
 .login-split {
   display: grid;
   grid-template-columns: 0.9fr 1.1fr;
@@ -13,11 +9,8 @@
   overflow-x: clip;
   background: linear-gradient(160deg, #fefcfa 0%, #fdf6f0 40%, #f8f0e8 100%);
 }
-/* Grid children must be allowed to shrink or long content (emails, error
-   text) forces horizontal overflow on narrow viewports. */
 .login-split > * { min-width: 0; }
 
-/* ---- Showcase (left panel) ---- */
 .login-showcase {
   position: relative;
   overflow: hidden;
@@ -33,7 +26,6 @@
   border-right: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-/* Ambient glow orbs */
 .login-showcase-glow {
   position: absolute;
   border-radius: 50%;
@@ -71,7 +63,6 @@
   align-items: flex-start;
 }
 
-/* Brand link in showcase */
 .login-brand {
   display: inline-flex;
   align-items: center;
@@ -100,7 +91,6 @@
   line-height: 1.55;
 }
 
-/* Perks list */
 .login-perks {
   list-style: none;
   padding: 0;
@@ -136,8 +126,6 @@
   border-color: rgba(255, 255, 255, 0.2);
 }
 
-/* Social proof bar — wraps just above the 900px hide-breakpoint where the
-   inner column gets tight (~901–1000px viewports). */
 .login-showcase-proof {
   display: flex;
   align-items: center;
@@ -172,11 +160,9 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 .login-avatars > span:first-child { margin-left: 0; }
-/* Distinct cook colors so stacked avatars are distinguishable */
 .login-avatars > span:nth-child(1) { background: linear-gradient(135deg, #f97316, #c2410c); }
 .login-avatars > span:nth-child(2) { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
 .login-avatars > span:nth-child(3) { background: linear-gradient(135deg, #059669, #047857); }
-/* Count pill — needs higher specificity than `.login-avatars > span` to apply */
 .login-avatars > span.login-avatars-more {
   width: auto;
   height: 36px;
@@ -198,7 +184,6 @@
 .login-proof-stars { color: #fbbf24; font-weight: 800; font-size: 0.88rem; letter-spacing: 0.06em; }
 .login-proof-text { font-size: 0.82rem; color: rgba(255, 255, 255, 0.65); }
 
-/* ---- Form side (right panel) — top-aligned like register ---- */
 .login-form-side {
   display: grid;
   grid-template-columns: 1fr;
@@ -213,10 +198,8 @@
     linear-gradient(180deg, rgba(255, 252, 249, 0.9), rgba(250, 244, 236, 0.6));
 }
 .login-form { min-width: 0; }
-/* 48px inputs meet WCAG 2.5.8 target size on touch screens. */
 .login-input { min-height: 48px; }
 
-/* ---- Login card — same chrome rhythm as .register-card ---- */
 .login-card {
   width: min(100%, 460px);
   max-width: 460px;
@@ -246,7 +229,6 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* Card header */
 .login-card-header {
   text-align: center;
   margin-bottom: 1.2rem;
@@ -266,7 +248,6 @@
   line-height: 1.5;
 }
 
-/* Mobile brand (shown < 900px) */
 .login-mobile-brand {
   display: none;
   justify-content: center;
@@ -279,7 +260,6 @@
 }
 .login-mobile-brand .brand-accent { color: var(--primary); }
 
-/* Submit button */
 .login-submit {
   width: 100%;
   margin-top: 0.5rem;
@@ -306,7 +286,6 @@
 
 .login-error { margin-bottom: 0.75rem; }
 
-/* Google role note */
 .auth-google-role-note {
   margin-top: 0.6rem;
   font-size: 0.8rem;
@@ -315,8 +294,6 @@
   line-height: 1.5;
 }
 
-/* Secure note — full-width flex row so `margin: auto` centering actually
-   applies (auto margins compute to 0 on inline-level boxes). */
 .login-secure-note {
   display: flex;
   align-items: center;
@@ -332,7 +309,6 @@
   background: rgba(0, 0, 0, 0.02);
 }
 
-/* Footer prompt */
 .auth-footer-prompt {
   text-align: center;
   font-size: 0.92rem;
@@ -348,7 +324,6 @@
   color: var(--primary-700);
 }
 
-/* Legal line under the login submit (mirrors .register-terms) */
 .login-terms {
   text-align: center;
   font-size: 0.79rem;
@@ -358,7 +333,6 @@
 }
 .login-terms a { font-weight: 700; }
 
-/* Row holding remember-me — space-between like register option rows */
 .login-options-row {
   display: flex;
   align-items: center;
@@ -369,7 +343,6 @@
 
 .role-hint { font-size: 0.82rem; color: var(--slate-500); }
 
-/* ---- Google sign-in divider ---- */
 .auth-divider {
   display: flex;
   align-items: center;
@@ -396,11 +369,6 @@
   width: 100%;
   min-width: 0;
 }
-/* The official Google button takes a fixed pixel width (see
- * GoogleSignInButton.jsx — GSI rejects percentage widths and logs
- * "Provided button width is invalid"). The component measures this wrapper
- * and passes the closest valid width (200–400px), so the rendered button
- * always fills the form — never force its iframe wider via CSS. */
 .google-btn-wrapper > div {
   display: flex;
   justify-content: center;
@@ -417,8 +385,6 @@
   font-weight: 600;
   color: var(--slate-500);
 }
-/* Shimmer placeholder shown until Google's iframe mounts — same 40px
-   height as the official button so there is no layout shift on load. */
 .google-btn-skeleton {
   display: flex;
   align-items: center;
@@ -477,7 +443,6 @@
   box-shadow: var(--shadow-sm);
 }
 
-/* ---- Register ---- */
 .auth-wrapper {
   display: flex;
   justify-content: center;
@@ -510,7 +475,6 @@
   margin: 0 auto 0.9rem;
 }
 
-/* Notice shown when login/signup resumes an interrupted booking (?next=) */
 .auth-resume-note {
   background: var(--primary-light);
   border: 1px solid var(--primary-100);
@@ -525,7 +489,6 @@
   overflow-wrap: anywhere;
 }
 
-/* ---- Register (professional split, mirrors login) ---- */
 .register-split {
   grid-template-columns: 0.95fr 1.05fr;
 }
@@ -547,7 +510,6 @@
   backdrop-filter: blur(6px);
 }
 
-/* Mini stepper in the showcase */
 .register-steps {
   list-style: none;
   display: flex;
@@ -591,7 +553,6 @@
   border-radius: 2px;
 }
 
-/* Form side + wider card */
 .register-form-side {
   align-items: start;
   padding-top: 2.2rem;
@@ -624,7 +585,6 @@
 .register-required,
 .login-required { color: var(--primary); font-weight: 800; }
 
-/* Role tiles — professional selectable cards */
 .register-role-grid {
   background: transparent;
   padding: 0;
@@ -715,7 +675,6 @@
   color: #fff;
 }
 
-/* Two-column field grid */
 .register-form { display: flex; flex-direction: column; min-width: 0; }
 .register-grid-2 {
   display: grid;
@@ -723,13 +682,8 @@
   gap: 0 0.8rem;
   min-width: 0;
 }
-/* Grid/button children must shrink or long errors, emails and hints force
-   horizontal overflow on narrow viewports. */
 .register-grid-2 > *,
 .register-role-grid > * { min-width: 0; }
-/* font-size intentionally inherits .form-control — a class-level override here
-   would beat forms.css's ≤640px 16px rule (same specificity, later import)
-   and re-trigger iOS focus-zoom on phones. */
 .register-input {
   min-height: 48px;
   border-radius: 13px;
@@ -737,7 +691,6 @@
 }
 .register-error { margin: 0 0 1rem; }
 
-/* Segmented password strength */
 .register-strength { margin: 0.1rem 0 0.9rem; }
 .register-strength-bars {
   display: flex;
@@ -772,19 +725,9 @@
 }
 .register-terms a { font-weight: 700; }
 
-/* Keep legacy centered card styles for any residual usage */
 .auth-wrapper.register-legacy { display: none; }
 
-/* ==========================================================================
-   Auth responsive — login + register across all viewports
-   Breakpoints: 1600 (ultra-wide cap), 1200 (wide tablet/laptop), 1150
-   (mobile navbar), 1100/1024 (tablet), 900 (showcase drops), 768 (small
-   tablet), 640 (phone), 480 (small phone), 400 / 360 (tiny), max-height
-   560 (short screens). Single owner of login/register responsive rules.
-   ========================================================================== */
 
-/* ---- Wide tablet / small laptop: tighten the showcase so neither panel
-      crowds the other before the 900px single-column collapse. ---- */
 @media (min-width: 901px) and (max-width: 1200px) {
   .login-showcase { padding: 2.5rem 1.5rem; }
   .register-showcase { padding: 2.5rem 1.5rem; }
@@ -803,7 +746,6 @@
   .register-form-side { padding: clamp(1.5rem, 3vw, 2.2rem) 1.25rem; }
 }
 
-/* ---- Tablet: rebalance split + keep form comfortable ---- */
 @media (max-width: 1100px) {
   .register-split { grid-template-columns: 0.9fr 1.1fr; }
 }
@@ -813,8 +755,6 @@
   .register-split { grid-template-columns: 0.85fr 1.15fr; }
 }
 
-/* ---- ≤900px: showcase hides, mobile brand appears, card goes full-bleed
-      center. Form panel padding scales with the viewport. ---- */
 @media (max-width: 900px) {
   .login-split,
   .register-split { grid-template-columns: 1fr; }
@@ -851,7 +791,6 @@
   }
 }
 
-/* ---- ≤1150px: mobile navbar (62px) takes over — auth pages track it ---- */
 @media (max-width: 1150px) {
   .login-split,
   .register-split {
@@ -860,7 +799,6 @@
   }
 }
 
-/* ---- Small tablet: soften card chrome + two-col fields still fit ---- */
 @media (max-width: 768px) {
   .login-card,
   .register-card { padding: 1.85rem 1.5rem 1.55rem; }
@@ -871,9 +809,7 @@
   .register-form-side { padding: clamp(1.25rem, 3vw, 1.85rem) 1.5rem; }
 }
 
-/* ---- Phone ---- */
 @media (max-width: 640px) {
-  /* Notch / home-indicator safe areas — keep the card off rounded edges. */
   .login-form-side,
   .register-form-side {
     padding:
@@ -900,14 +836,11 @@
     padding: 0.28rem 0.55rem;
   }
 
-  /* Stack email/phone and password/confirm pairs. */
   .register-grid-2 {
     grid-template-columns: 1fr;
     row-gap: 0;
   }
 
-  /* 16px inputs — required so iOS Safari does not auto-zoom on focus.
-     .register-input no longer sets font-size, so forms.css's rule applies. */
   .login-input,
   .register-input,
   .login-card .form-control,
@@ -916,7 +849,6 @@
     min-height: 48px;
   }
 
-  /* Role tiles: comfortable thumb targets, hint text stays readable. */
   .register-role-tile {
     padding: 0.75rem 0.8rem;
     min-height: 56px;
@@ -939,7 +871,6 @@
   .field-hint { font-size: 0.78rem; }
 }
 
-/* ---- Small phone: single-column role picker, tighter rhythm ---- */
 @media (max-width: 480px) {
   .register-role-grid { grid-template-columns: 1fr; gap: 0.6rem; }
   .register-role-tile { gap: 0.6rem; }
@@ -952,7 +883,6 @@
   }
 }
 
-/* ---- ≤375px: primary small-phone tier between the 480 and 400 steps ---- */
 @media (max-width: 375px) {
   .login-form-side,
   .register-form-side { padding: 1.15rem 0.9rem 1.75rem; }
@@ -961,12 +891,10 @@
   .auth-card-modern { padding: 1.6rem 1.1rem; }
   .login-card-header h1,
   .login-card-header h2 { font-size: 1.4rem; }
-  /* Single-column role pickers so tiles keep full-width tap targets. */
   .register-role-grid { grid-template-columns: 1fr; gap: 0.6rem; }
   .role-segmented-control { grid-template-columns: 1fr; }
   .login-perks { gap: 0.6rem; }
 }
-/* ---- Tiny phone (≤400px): compact card, no cramped chrome ---- */
 @media (max-width: 400px) {
   .login-form-side,
   .register-form-side { padding: 1rem 0.75rem 1.75rem; }
@@ -993,11 +921,9 @@
   .register-role-icon { width: 38px; height: 38px; }
   .register-role-check { width: 20px; height: 20px; }
   .login-submit { min-height: 48px; border-radius: 12px; }
-  /* Generic segmented control also collapses here (see responsive.css). */
   .role-segmented-control { grid-template-columns: 1fr; }
 }
 
-/* ---- ≤360px: keep every tap target ≥40px, shrink logo/brand ---- */
 @media (max-width: 360px) {
   .login-form-side,
   .register-form-side { padding: 0.9rem 0.6rem 1.5rem; }
@@ -1014,8 +940,6 @@
   .login-card-header h2 { font-size: 1.25rem; }
 }
 
-/* ---- Short viewports (landscape phones, short desktop windows): compact
-      vertical rhythm so the whole card fits without excessive scrolling. ---- */
 @media (max-height: 560px) {
   .login-form-side,
   .register-form-side { padding-top: 1.25rem; padding-bottom: 1.25rem; }
@@ -1028,8 +952,6 @@
   .login-secure-note { margin-top: 0.9rem; }
 }
 
-/* ---- Ultra-wide monitors: cap line lengths instead of stretching edge
-      to edge. ---- */
 @media (min-width: 1600px) {
   .login-split,
   .register-split { grid-template-columns: 1fr 1fr; }
@@ -1041,7 +963,6 @@
   .register-card { width: min(100%, 560px); max-width: 560px; }
 }
 
-/* ---- Reduced motion: no card entry / tile transitions ---- */
 @media (prefers-reduced-motion: reduce) {
   .login-card { animation: none; }
   .login-submit, .login-perk-icon { transition: none; }

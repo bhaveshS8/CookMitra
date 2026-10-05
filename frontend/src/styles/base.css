@@ -1,12 +1,7 @@
-/* ==========================================================================
-   Cook Mitra Design System — base.css
-   Warm festive-orange × deep slate. Modern, professional, human.
-   ========================================================================== */
 
 *, *::before, *::after { box-sizing: border-box; }
 
 :root {
-  /* Brand */
   --primary: #e8590c;
   --primary-700: #c2410c;
   --primary-800: #9a3412;
@@ -17,7 +12,6 @@
   --primary-depth: linear-gradient(160deg, #f76707 0%, #d9480f 60%, #b53a09 100%);
   --primary-glow: rgba(232, 89, 12, 0.28);
 
-  /* Neutrals */
   --slate-50: #f8fafc;
   --slate-100: #f1f5f9;
   --slate-200: #e2e8f0;
@@ -29,7 +23,6 @@
   --slate-800: #1e293b;
   --slate-900: #0f172a;
 
-  /* Accents */
   --accent-amber: #d97706;
   --accent-amber-light: #fef3c7;
   --accent-blue: #2563eb;
@@ -41,32 +34,26 @@
   --accent-purple: #7c3aed;
   --accent-purple-light: #ede9fe;
 
-  /* Surfaces */
   --border-subtle: #eef2f6;
   --bg-body: #faf9f7;
   --bg-card: #ffffff;
 
-  /* Radii */
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 20px;
   --radius-xl: 28px;
 
-  /* Shadows — layered elevation: tight contact + soft ambient */
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 2px 6px -1px rgba(15, 23, 42, 0.08), 0 6px 16px -8px rgba(15, 23, 42, 0.12);
   --shadow-md: 0 1px 2px rgba(15, 23, 42, 0.06), 0 6px 16px -6px rgba(15, 23, 42, 0.14), 0 16px 34px -14px rgba(15, 23, 42, 0.22);
   --shadow-lg: 0 2px 4px rgba(15, 23, 42, 0.06), 0 12px 28px -10px rgba(15, 23, 42, 0.2), 0 30px 60px -20px rgba(15, 23, 42, 0.28);
   --shadow-brand: 0 2px 4px rgba(154, 52, 18, 0.25), 0 12px 28px -8px rgba(232, 89, 12, 0.55);
   --shadow-amber: 0 2px 4px rgba(146, 64, 14, 0.2), 0 14px 30px -10px rgba(245, 158, 11, 0.5);
 
-  /* Type */
   --font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Inter", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-display: "Segoe UI", "Inter", "SF Pro Display", -apple-system, Roboto, Arial, sans-serif;
   --font-mono: "Cascadia Code", "SF Mono", Consolas, "Courier New", monospace;
 }
 
-/* scroll-padding keeps anchored sections (e.g. #services) from hiding
-   under the 64px sticky navbar when jumping via in-page links. */
 html { scroll-behavior: smooth; scroll-padding-top: 78px; }
 
 body {
@@ -98,16 +85,13 @@ p { margin-top: 0; }
 a { color: var(--primary); text-decoration: none; transition: color 0.15s ease; }
 a:hover { color: var(--primary-700); }
 
-/* Warm tap highlight instead of the default grey flash on mobile. */
 a, button { -webkit-tap-highlight-color: rgba(232, 89, 12, 0.15); }
 
 button { cursor: pointer; font-family: inherit; }
 input, select, textarea { font-family: inherit; }
-/* Media never overflows its container at any width (bitmap, vector, embeds). */
 img, svg, video, iframe { max-width: 100%; }
 img { display: block; }
 
-/* App shell */
 .App {
   display: flex;
   flex-direction: column;
@@ -115,7 +99,6 @@ img { display: block; }
 }
 .main-content { flex: 1 0 auto; width: 100%; }
 
-/* Generic white widget card used all over the app */
 .profile-card-block {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
@@ -124,13 +107,11 @@ img { display: block; }
   padding: 1.5rem;
 }
 
-/* Scrollbars */
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-track { background: transparent; }
 *::-webkit-scrollbar-thumb { background: var(--slate-300); border-radius: 99px; border: 2px solid var(--bg-body); }
 *::-webkit-scrollbar-thumb:hover { background: var(--slate-400); }
 
-/* Tiny utilities */
 .small { font-size: 0.82rem; }
 .solid { font-weight: 800; }
 .total { font-weight: 800; }
@@ -140,7 +121,6 @@ img { display: block; }
 .success { color: var(--accent-emerald); }
 .no-data { color: var(--slate-500); }
 
-/* Keyframes */
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
 @keyframes floatySoft { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
@@ -151,7 +131,6 @@ img { display: block; }
 @keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
 @keyframes marqueeTrack { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 
-/* Respect users who prefer reduced motion: kill ambient animation. */
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after {

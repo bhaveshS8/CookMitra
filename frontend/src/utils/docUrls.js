@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
 import API from "../api/axios";
 
-// Signed document URLs (P0-2). Private docs (aadhar_*/pan_*) are served via
-// short-lived single-purpose tokens minted by POST /api/docs/signed-url
-// (Authorization header — the session JWT never goes in a URL). Public
-// profile photos (photo_*) stay bare.
 const cache = new Map(); // storedPath -> { url, exp }
 const CACHE_MS = 4 * 60 * 1000;
 

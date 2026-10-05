@@ -1,7 +1,3 @@
-// Business clock runs on Asia/Kolkata: pin the process timezone FIRST (before
-// any Date is constructed) so server-local calls agree with IST. All booking
-// math additionally resolves IST explicitly (F-08), so this is defense in
-// depth — a host that ignores TZ still computes correct cutoffs.
 if (!process.env.TZ) process.env.TZ = "Asia/Kolkata";
 const express = require("express");
 const cors = require("cors");
@@ -22,21 +18,9 @@ dotenv.config();
 
 const app = express();
 
-// Behind reverse proxies (Render/Railway/Nginx/Heroku) so req.protocol/secure
-// reflect the real client connection for HTTPS cookie/redirect logic.
 app.set("trust proxy", 1);
 
 // ---- Security + throughput headers/payload hardening (1000-user ready) ----
-// helmet: safe defaults (HSTS in production, noSniff, frameguard).
-// crossOriginResourcePolicy "cross-origin" keeps /uploads images + API
-// usable when the frontend is hosted on a different origin (CLIENT_URL).
-// A restrictive CSP is enabled: same-origin scripts/styles plus the
-// explicitly required third parties (Razorpay checkout, Google Identity
-// Services + Fonts). Inline CRA runtime chunks are allowed via
-// 'unsafe-inline' for scripts/styles ONLY (no 'unsafe-eval'), and images
-// may be data:/blob: for upload previews. Objects/frames default to none;
-// framing is denied (frameguard) except the Razorpay/Google flows that use
-// popups, not iframes.
 const cspDirectives = {
   defaultSrc: ["'self'"],
   scriptSrc: [
@@ -65,40 +49,22 @@ app.use(
   helmet({
     contentSecurityPolicy: { directives: cspDirectives },
     crossOriginResourcePolicy: { policy: "cross-origin" },
-    // Sign in with Google opens an accounts.google.com popup that must talk
-    // back to this page via window.opener. Helmet's default COOP
-    // (same-origin) severs that link, so the popup closes and no credential
-    // ever arrives — but ONLY in production, where this server (not the CRA
-    // dev server) serves the page. Google's own GIS docs require
-    // same-origin-allow-popups for this flow.
     crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
     referrerPolicy: { policy: "strict-origin-when-cross-origin" },
   })
 );
-// Extra hardening headers not covered by helmet defaults.
 app.use((req, res, next) => {
-  // No sniffing of uploads/API payloads.
   res.setHeader("X-Content-Type-Options", "nosniff");
-  // Least-privilege device APIs for the whole app.
   res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)");
   next();
 });
-// Rate limits. Counters live in memory per bucket by default; the
 // security-critical, low-traffic buckets (auth, payments) use a MongoDB-backed
-// store so the limits stay exact with 2+ replicas — no Redis, no new service.
-// See utils/rateLimitStore.js. A store outage degrades to in-memory limits
-// instead of 500-ing every request.
-// Login/reset/visit stay generous enough for real bursts but blunt brute force
-// and accidental poll storms. Standard + legacy headers off to save bytes.
 const limitOpts = { standardHeaders: false, legacyHeaders: false };
 const generalLimiter = rateLimit({
   ...limitOpts,
   store: rateLimitStore("general"),
   windowMs: 60 * 1000,
   max: Number(process.env.RATE_LIMIT_GENERAL || 300),
-  // Health/readiness checks must never be throttled: load balancers / uptime
-  // monitors poll these paths from a single IP and would otherwise exhaust
-  // the bucket (and get a 429 instead of the status they need).
   skip: (req) => req.path === "/api/health" || req.path === "/api/ready",
   message: { message: "Too many requests — please slow down and retry." },
 });
@@ -124,12 +90,8 @@ const visitLimiter = rateLimit({
   message: { message: "Too many requests — please slow down and retry." },
 });
 app.use("/api/", generalLimiter);
-// compression AFTER rate limiters: rejected 429s skip gzip entirely,
-// saving CPU on traffic spikes. Threshold 1kb keeps small JSON uncompressed.
 app.use(compression({ threshold: 1024 }));
 
-// One line of operational truth at boot: with 2+ replicas, any bucket left
-// in-memory has its effective limit multiplied by the replica count.
 {
   const { shared, memory } = describeRateLimitStores();
   console.log(
@@ -157,32 +119,24 @@ if (process.env.NODE_ENV === "production") {
     );
   }
   try {
-    // Reuse the same placeholder detection as the payments route.
     const { isConfigured, keyId } = require("./config/razorpay");
     if (!isConfigured) {
       console.warn(
         "CONFIG NOTICE: Razorpay keys missing/placeholder — POST /api/payments/order will return 503 until real RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET are set."
       );
     } else if (String(keyId || "").startsWith("rzp_test_")) {
-      // Test keys authenticate against Razorpay's sandbox only: live
       // traffic would fail at checkout. Loud prod warning (not a boot
-      // refusal — same-origin staging builds legitimately run test keys).
       console.warn(
         "CONFIG WARNING: RAZORPAY_KEY_ID is a TEST key while NODE_ENV=production — live checkout requires rzp_live_ keys. Set live keys or expect payment failures."
       );
     }
   } catch {
-    // non-fatal: payments route reports its own status
   }
   if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
     console.warn(
       "CONFIG NOTICE: RAZORPAY_WEBHOOK_SECRET is not set — POST /api/payments/webhook cannot verify signatures (browser payments still work, webhook reconcile is skipped)."
     );
   }
-  // Opt-in hard gate for real-money deployments: with REQUIRE_PAYMENTS=true
-  // the process refuses to boot unless live gateway keys AND the webhook
-  // secret are present, so a misconfigured deploy can never silently take
-  // (or fail) payments.
   if (process.env.REQUIRE_PAYMENTS === "true") {
     let paymentsReady = false;
     try {
@@ -202,8 +156,6 @@ if (process.env.NODE_ENV === "production") {
     console.warn(
       "CONFIG NOTICE: SMTP_HOST/SMTP_USER are not set — password-reset emails cannot be delivered (users get a generic message and no link arrives). Set SMTP_HOST/PORT/USER/PASS/FROM to enable."
     );
-    // Opt-in hard gate: with REQUIRE_SMTP=true the process refuses to boot
-    // without mail delivery, so password-reset can never silently break.
     if (process.env.REQUIRE_SMTP === "true") {
       console.error(
         "CONFIG ERROR: REQUIRE_SMTP=true but SMTP_HOST/SMTP_USER are missing. Refusing to start."
@@ -218,23 +170,11 @@ if (process.env.NODE_ENV === "production") {
   }
 }
 
-// Background retry loop — never throws, never exits. The API stays up
-// (health reports db status) even while MongoDB is unreachable.
 connectDB();
 
-// Payout safety invariant: offline references must be unique at the DATABASE
-// level, not just via the app-level check (two concurrent settles can pass
-// the check simultaneously). Auto-index creation proved unreliable in this
-// deployment (uniq_payout_reference was absent on live bookings), so ensure
-// the payout indexes explicitly here — idempotent, retrying, never fatal.
 const { ensurePayoutIndexes } = require("./utils/payoutIndexes");
 ensurePayoutIndexes({ connection: mongoose.connection });
 
-// Fail-fast on uncaught exceptions (S-14): continuing to serve with
-// potentially corrupt in-memory state risks wrong bookings/payments. The
-// process manager (Render / Docker / cluster master) restarts us; the
-// health check fails until then. Unhandled rejections are still logged
-// without exiting (request-scoped promise bugs shouldn't drop the process).
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled promise rejection (server kept alive):", reason);
 });
@@ -243,15 +183,11 @@ process.on("uncaughtException", (err) => {
   try {
     mongoose.connection.close(false);
   } catch {
-    // best-effort
   } finally {
     process.exit(1);
   }
 });
 
-// CORS: allow the deployed frontend origin (CLIENT_URL, comma-separated for
-// multiple environments). In production the app is same-origin, so CORS only
-// matters for separately hosted frontends.
 const parseOrigins = (v) =>
   (v || "")
     .split(",")
@@ -262,8 +198,6 @@ const corsOrigins = parseOrigins(process.env.CLIENT_URL);
 const isProduction = process.env.NODE_ENV === "production";
 app.use(
   cors({
-    // In production with no CLIENT_URL set, default to same-origin only
-    // (no cross-origin headers at all). In dev, allow everything.
     origin:
       !isProduction && corsOrigins.length === 0
         ? true
@@ -273,19 +207,10 @@ app.use(
     credentials: true,
   })
 );
-// Razorpay webhooks need the RAW request body for HMAC verification — mount
-// before express.json() (body-parser skips bodies that are already parsed,
-// so the JSON parser below leaves webhook requests untouched).
 app.use("/api/payments/webhook", express.raw({ type: "application/json", limit: "100kb" }));
-// Same for the WhatsApp inbound webhook (X-Hub-Signature-256 over raw bytes).
 app.use("/api/whatsapp/webhook", express.raw({ type: "application/json", limit: "100kb" }));
-// Bounded JSON bodies: a 10MB default lets one client burn memory per request.
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: false, limit: "100kb" }));
-// Request IDs: every request gets a correlation id (client-supplied
-// X-Request-Id is echoed only when it looks like an id, otherwise minted).
-// Included in access logs and 5xx error logs so a payment can be traced
-// across checkout → webhook → refund → payout. Never logged with secrets.
 const crypto = require("crypto");
 let requestCounter = 0;
 app.use((req, res, next) => {
@@ -298,13 +223,9 @@ app.use((req, res, next) => {
     req.id = id;
     res.setHeader("X-Request-Id", id);
   } catch {
-    // never block a request on observability
   }
   next();
 });
-// Scrub single-purpose doc tokens out of access logs: the signed URL query
-// (?docToken=) must never be persisted to log files (P0-2). Session JWTs are
-// never in URLs anymore, so nothing else needs scrubbing.
 morgan.token("scrubbed-url", (req) => {
   const url = req.originalUrl || req.url || "";
   return url.replace(/([?&]docToken=)[^&\s]*/g, "$1[REDACTED]");
@@ -312,25 +233,14 @@ morgan.token("scrubbed-url", (req) => {
 morgan.token("req-id", (req) => req.id || "-");
 app.use(
   morgan(isProduction ? ':remote-addr - :remote-user [:date[clf]] ":method :scrubbed-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent" req=:req-id' : "dev", {
-    // Keep health-check noise out of production logs.
     skip: (req) => (req.path === "/api/health" || req.path === "/api/ready") && isProduction,
   })
 );
 
-// Uploaded cook verification documents (Aadhaar / PAN / photo).
-// Identity docs are private: public profile photos (photo_*) stay open, but
-// aadhar_*/pan_* are served ONLY via short-lived single-purpose signed URLs
-// (GET /api/docs/view?docToken=..., minted by POST /api/docs/signed-url).
-// Long-lived session JWTs are NEVER accepted in URLs (P0-2): they leak via
-// browser history, server logs, and Referer headers. Browsers fetch these
-// via plain <img>/<a>/<iframe> (no auth headers), which is exactly what the
-// expiring doc token is for.
 const uploadAccess = async (req, res, next) => {
   try {
     const base = path.basename(req.path || "");
     if (/^photo_/i.test(base)) return next();
-    // Legacy ?token=<session JWT> support has been REMOVED. Any request
-    // still carrying it is rejected with a clear migration message.
     if (req.query && String(req.query.token || "").trim()) {
       return res.status(401).json({
         message: "Document links using session tokens are no longer supported. Please refresh to get a secure view link.",
@@ -362,8 +272,6 @@ const uploadAccess = async (req, res, next) => {
     if (Number(account.tokenVersion) > 0 && decoded.tv !== Number(account.tokenVersion)) {
       return res.status(401).json({ message: "Session expired. Please log in again." });
     }
-    // Filenames embed the OWNER cook: <field>_<userId>_<ts>_... — the owner
-    // or an admin may view; everyone else is refused.
     const { ownerIdOf } = require("./utils/storage");
     const ownerId = ownerIdOf(base);
     const isOwner = ownerId && ownerId.toLowerCase() === String(account._id).toLowerCase();
@@ -375,9 +283,6 @@ const uploadAccess = async (req, res, next) => {
     return res.status(401).json({ message: "Authentication required to view this document" });
   }
 };
-// Static root is the PARENT of the storage dir so the public URL prefix stays
-// /uploads/cook-docs/<file> in every environment (UPLOAD_DIR must therefore
-// end in "cook-docs" — enforced in utils/storage).
 const { uploadDir } = require("./utils/storage");
 app.use("/uploads", uploadAccess, express.static(path.dirname(uploadDir)));
 
@@ -400,12 +305,9 @@ app.use("/api/cook", require("./routes/cookEarnings"));
 app.use("/api/admin/cancellations", require("./routes/cancellations"));
 app.use("/api/admin/cook-incentives", require("./routes/adminCookEarnings"));
 app.use("/api/admin/cook-payouts", require("./routes/adminCookEarnings"));
-// Visit pings fire once per browser session — own lighter bucket so a traffic
-// spike can't eat the general budget (or vice versa).
 app.use("/api/stats/public/visit", visitLimiter);
 app.use("/api/stats/public", require("./routes/stats"));
 
-// Export limiters for route-level use (e.g. stricter OTP verify).
 app.set("rateLimiters", { generalLimiter, authLimiter, strictLimiter, visitLimiter });
 
 app.get("/api/health", (req, res) => {
@@ -417,10 +319,6 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Readiness (for load-balancer gating): 200 only when the database is
-// connected. Liveness (/api/health) stays 200 while the process retries the
-// connection in the background — readiness stops traffic instead, so
-// financial operations never run against a partially-connected store.
 app.get("/api/ready", (req, res) => {
   if (mongoose.connection.readyState === 1) {
     return res.json({ ready: true, timestamp: new Date().toISOString() });
@@ -428,10 +326,6 @@ app.get("/api/ready", (req, res) => {
   return res.status(503).json({ ready: false, db: "disconnected" });
 });
 
-// ---- Static frontend (single-service deployment) ----
-// When a production build exists (frontend/build copied in, or built in a
-// monorepo image), serve it from this process and fall back to index.html for
-// client-side routes. API + /uploads routes above always win.
 const frontendBuild = path.join(__dirname, "..", "frontend", "build");
 if (fs.existsSync(path.join(frontendBuild, "index.html"))) {
   app.use(express.static(frontendBuild, { maxAge: "1y", index: false }));
@@ -444,9 +338,6 @@ if (fs.existsSync(path.join(frontendBuild, "index.html"))) {
   console.log("Serving frontend build from", frontendBuild);
 }
 
-// Unknown API routes answer JSON (not Express's default HTML 404), matching
-// the API error shape. Placed after the frontend fallback above, which passes
-// /api + /uploads through via next().
 app.use("/api", (req, res) => {
   res.status(404).json({ message: "API route not found" });
 });
@@ -454,9 +345,6 @@ app.use("/api", (req, res) => {
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-// A previous instance (or a nodemon restart race) can still hold the port
-// for a moment. Retry instead of dying instantly — instant exit(1) here is
-// what made the backend look like it "closes automatically".
 const MAX_LISTEN_RETRIES = Number(process.env.PORT_RETRY_ATTEMPTS || 10);
 const LISTEN_RETRY_MS = Number(process.env.PORT_RETRY_MS || 1000);
 let listenRetries = 0;
@@ -486,14 +374,11 @@ server.on("error", (err) => {
   console.error("Server error:", err);
 });
 
-// Graceful shutdown — close the listener (frees the port immediately for the
-// next instance) and the DB connection instead of dying mid-request.
 const shutdown = (signal) => {
   console.log(`Received ${signal} — closing server gracefully...`);
   server.close(() => {
     mongoose.connection.close(false).finally(() => process.exit(0));
   });
-  // Force-exit if keep-alive sockets hang the graceful close.
   setTimeout(() => process.exit(0), 5000).unref();
 };
 process.on("SIGINT", () => shutdown("SIGINT"));

@@ -35,31 +35,22 @@ import BookingPayment from "./pages/BookingPayment";
 import { TermsConditions, PrivacyPolicy, RefundPolicy, ContactUs, CancellationRefundPolicy } from "./pages/Legal";
 import "./App.css";
 
-// Customer-only pages (Find Cooks / Book a Cook).
-// Guests + customers can view; admins -> /admin, cooks -> cook dashboard.
 const NonAdminRoute = ({ children }) => {
   const user = useSelector((s) => s.auth.user);
   const token = useSelector((s) => s.auth.token);
   const loading = useSelector((s) => s.auth.loading);
   if (loading) return <div className="loading">Loading...</div>;
-  // Only honor the role when a real token backs it — otherwise treat as guest.
   if (!token || !user) return children;
   if (user?.role === "admin") return <Navigate to="/admin" replace />;
   if (user?.role === "cook") return <Navigate to="/dashboard/cook-bookings" replace />;
   return children;
 };
 
-// Opens the single app-wide SSE stream (booking_request / booking_assigned /
-// booking_ignored / booking_expired → realtime-booking-* DOM events). Mounted
-// once here so cook + admin popups, the customer waiting screen and the
-// notification bell all react instantly; every consumer degrades to its
-// existing poll loop when the stream is unreachable.
 const RealtimeBootstrap = () => {
   useRealtime();
   return null;
 };
 
-// Kicks off the first-visit location bootstrap once per app mount.
 const LocationBootstrap = () => {
   const dispatch = useDispatch();
   useEffect(() => {
@@ -68,8 +59,6 @@ const LocationBootstrap = () => {
   return null;
 };
 
-// Revalidate any stored session when the app boots so a suspended/deleted
-// account (or an expired token) cannot linger as a fake logged-in state.
 const SessionBootstrap = () => {
   const dispatch = useDispatch();
   useEffect(() => {
@@ -79,7 +68,6 @@ const SessionBootstrap = () => {
         import("./store/authSlice").then((m) => dispatch(m.fetchCurrentUser()));
       }
     } catch {
-      // storage unavailable — stay logged out
     }
   }, [dispatch]);
   return null;
@@ -98,8 +86,6 @@ function App() {
           <Navbar />
           <main className="main-content">
             <Routes>
-              {/* Cooks + admins never see the marketing home page —
-                  they land directly on their dashboard. */}
               <Route
                 path="/"
                 element={
@@ -112,15 +98,11 @@ function App() {
               <Route path="/register" element={<Register />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
-              {/* Compliance pages (required for payment-gateway activation) —
-                  public for every role, including guests. */}
               <Route path="/terms" element={<TermsConditions />} />
               <Route path="/privacy" element={<PrivacyPolicy />} />
               <Route path="/refunds" element={<RefundPolicy />} />
               <Route path="/customer-cancellation-refund-policy" element={<CancellationRefundPolicy />} />
               <Route path="/contact" element={<ContactUs />} />
-              {/* Find Cooks listing removed — all discovery goes through
-                  Book a Cook. Old /cooks URLs land there too. */}
               <Route
                 path="/cooks"
                 element={<Navigate to="/cook-on-demand" replace />}

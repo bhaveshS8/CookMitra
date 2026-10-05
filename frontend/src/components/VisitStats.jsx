@@ -3,9 +3,6 @@ import { useFetch } from "../hooks/useFetch";
 import { Eye, Users, RefreshCw } from "lucide-react";
 import VisitChart from "./VisitChart";
 
-// Site Visits — admin tab showing the in-house visit counter
-// (POST /api/stats/public/visit, one ping per browser session).
-// Totals + SVG analytics graph + top pages + top cities. No chart lib.
 const RANGES = [
   { days: 7, label: "7 days" },
   { days: 30, label: "30 days" },

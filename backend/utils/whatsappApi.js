@@ -1,15 +1,3 @@
-// Automatic WhatsApp notifications via the Meta WhatsApp Business Cloud API.
-//
-// Setup (see docs/WHATSAPP_SETUP.md):
-//   WHATSAPP_ENABLED=true
-//   WHATSAPP_TOKEN=<system-user permanent token from Meta app dashboard>
-//   WHATSAPP_PHONE_NUMBER_ID=<phone number ID from WhatsApp > API setup>
-//
-// Behavior contract (notification outage must NEVER break bookings):
-//  - When unconfigured/disabled, every send resolves { ok:false, skipped:true }.
-//  - Every public function catches internally and resolves (never rejects),
-//    so controllers can fire-and-forget without try/catch.
-//  - Invalid recipient numbers resolve { ok:false, skipped:true }.
 
 const {
   normalizeIndianMobile,
@@ -44,7 +32,6 @@ const status = () => {
   const { enabled, phoneNumberId } = getConfig();
   const hasToken = Boolean(String(process.env.WHATSAPP_TOKEN || "").trim());
   return {
-    // enabled === fully send-ready (flag + token + phone ID).
     enabled,
     configured: Boolean(hasToken && phoneNumberId),
     flag: String(process.env.WHATSAPP_ENABLED || "false"),
@@ -54,13 +41,11 @@ const status = () => {
   };
 };
 
-// E.164 recipient for the Cloud API (India default).
 const toE164 = (phone) => {
   const mobile = normalizeIndianMobile(phone);
   return mobile ? `91${mobile}` : null;
 };
 
-// Low-level Graph API post. Never throws — always resolves a result object.
 const postToMessages = async (payload) => {
   const { enabled, token, phoneNumberId } = getConfig();
   if (!enabled) return { ok: false, skipped: true, reason: "whatsapp-disabled" };
@@ -85,13 +70,11 @@ const postToMessages = async (payload) => {
   }
 };
 
-// Low-level text send. Never throws — always resolves a result object.
 const sendWhatsAppText = async (toPhone, body) => {
   const to = toE164(toPhone);
   if (!isWhatsAppEnabled()) return { ok: false, skipped: true, reason: "whatsapp-disabled" };
   if (!to) return { ok: false, skipped: true, reason: "invalid-recipient" };
   if (!body || !String(body).trim()) return { ok: false, skipped: true, reason: "empty-body" };
-  // WhatsApp text limit is 4096 chars — truncate defensively.
   const text = String(body).slice(0, 4000);
   return postToMessages({
     messaging_product: "whatsapp",
@@ -102,13 +85,6 @@ const sendWhatsAppText = async (toPhone, body) => {
   });
 };
 
-// Interactive booking request for the COOK with tap-to-decide buttons.
-// Button payloads carry the booking id (accept:<id> / reject:<id>) so the
-// inbound webhook can authorize the tap against that exact booking.
-// Free-form interactive messages deliver inside the 24h customer-service
-// window; for cold starts set WHATSAPP_REQUEST_TEMPLATE (+_LANG) to an
-// approved template carrying the same wording — the template path is used
-// first and falls back to interactive when Meta rejects it.
 const acceptPayload = (bookingId) => `accept:${bookingId}`;
 const rejectPayload = (bookingId) => `reject:${bookingId}`;
 
@@ -160,17 +136,12 @@ const sendCookRequestInteractive = async (cookPhone, { customerName, booking }) 
         ],
       },
     });
-    // Template approved + in-window: done. Otherwise (e.g. 132000 template
-    // not found, 131030 window rules) fall through to interactive below.
     if (tpl.ok) return tpl;
     console.warn("WhatsApp template request failed, falling back to interactive:", tpl.error || tpl.reason);
   }
   return postToMessages(interactive);
 };
 
-// Resolve display names + phones for both parties. Accepts explicit overrides
-// (controllers that already loaded the users) and falls back to a User lookup.
-// Never throws — missing data resolves to nulls (that side is then skipped).
 const resolveParties = async (booking, opts = {}) => {
   let cookName = opts.cookName || null;
   let cookPhone = opts.cookPhone || null;
@@ -214,15 +185,10 @@ const resolveParties = async (booking, opts = {}) => {
       }
     }
   } catch {
-    // non-fatal: send with whatever we have
   }
   return { cookName, cookPhone, customerName, customerPhone };
 };
 
-// Central dispatcher for every booking lifecycle event.
-//   event: request | accepted | rejected | confirmed | started |
-//          hours_complete | completed | review | cancelled | rescheduled | expired
-// Resolves when both sends settle. Never rejects.
 const sendBookingWhatsApp = async (event, booking, opts = {}) => {
   try {
     if (!isWhatsAppEnabled()) return { ok: false, skipped: true, reason: "whatsapp-disabled" };
@@ -234,8 +200,6 @@ const sendBookingWhatsApp = async (event, booking, opts = {}) => {
 
     switch (event) {
       case "request":
-        // Cook side is sent as interactive buttons (see sends below) —
-        // cookMessage stays null so the plain-text path doesn't double-send.
         cookMessage = null;
         customerMessage = [
           "*Cook Mitra: Booking request sent* ✅",
@@ -307,15 +271,11 @@ const sendBookingWhatsApp = async (event, booking, opts = {}) => {
     }
 
     const sends = [];
-    // Booking requests go to the cook as an interactive Accept/Decline
-    // message; everything else stays plain text.
     if (event === "request" && cookPhone && booking?._id) {
       sends.push(
         (async () => {
           const r = await sendCookRequestInteractive(cookPhone, { customerName, booking });
           if (r.ok) return { side: "cook", ...r };
-          // Interactive unsupported here (or template rejected and no
-          // fallback) — degrade to the plain-text request, never silence.
           const text = buildBookingRequestMessage({ customerName, booking });
           return { side: "cook", ...(await sendWhatsAppText(cookPhone, text)) };
         })()
@@ -334,13 +294,10 @@ const sendBookingWhatsApp = async (event, booking, opts = {}) => {
   }
 };
 
-// Fire-and-forget wrapper for controllers: schedules the send without
-// delaying the HTTP response and swallows every failure.
 const notifyWhatsApp = (event, booking, opts = {}) => {
   try {
     Promise.resolve(sendBookingWhatsApp(event, booking, opts)).catch(() => {});
   } catch {
-    // never let notification scheduling throw into request handling
   }
 };
 

@@ -1,7 +1,3 @@
-// Standalone regression test for Meta WhatsApp Cloud API auto-notifications.
-// Run:  node backend/whatsapp-api.test.js — exits non-zero on failure.
-// No DB, no network: global fetch is stubbed, parties are passed explicitly
-// (so no User lookup runs).
 process.env.WHATSAPP_ENABLED = "false";
 process.env.WHATSAPP_TOKEN = "";
 process.env.WHATSAPP_PHONE_NUMBER_ID = "";
@@ -52,7 +48,6 @@ const parties = {
 
 (async () => {
   try {
-    // ── 1. Plain-text builders (single source of truth) ──
     const req = buildBookingRequestMessage({ customerName: "Aditi Rao", booking });
     check("request message has customer + venue", req.includes("Aditi Rao") && req.includes("H-12 Green Park"), req.slice(0, 60));
     check("request message hides customer phone pre-accept", !req.includes("9123456780") && req.includes("unlock after you accept"), "privacy");
@@ -72,13 +67,11 @@ const parties = {
     const review = buildReviewMessage({ cookName: "Priya Sharma", booking });
     check("review asks for rating + link", review.includes("rate your cook") && review.includes("/bookings/"), "review");
 
-    // ── 2. wa.me links unchanged (delegate to the same builders) ──
     const url = buildBookingWhatsAppUrl({ cookPhone: "9876543210", customerName: "Aditi Rao", booking });
     check("wa.me targets cook", url.startsWith("https://wa.me/919876543210"), url.split("?")[0]);
     const decoded = decodeURIComponent(url.split("text=")[1] || "");
     check("wa.me text matches builder", decoded === req, "identical");
 
-    // ── 3. Disabled mode never touches the network ──
     let fetchCalls = 0;
     global.fetch = async () => {
       fetchCalls++;
@@ -88,7 +81,6 @@ const parties = {
     check("disabled mode skips", disabledRes.skipped === true, JSON.stringify(disabledRes));
     check("disabled mode makes no HTTP calls", fetchCalls === 0, String(fetchCalls));
 
-    // ── 4. Enabled mode sends to BOTH user + cook ──
     process.env.WHATSAPP_ENABLED = "true";
     process.env.WHATSAPP_TOKEN = "test_token";
     process.env.WHATSAPP_PHONE_NUMBER_ID = "123456789";
@@ -113,7 +105,6 @@ const parties = {
     check("cook gets job sheet", cookBody.includes("Job Confirmed") && cookBody.includes("9123456780"), cookBody.slice(0, 60));
     check("customer gets confirmation", custBody.includes("Payment Received") && custBody.includes("Priya Sharma"), custBody.slice(0, 60));
 
-    // ── 5. Every lifecycle event produces a send (no silent events) ──
     const events = ["request", "accepted", "rejected", "confirmed", "started", "hours_complete", "completed", "review", "cancelled", "rescheduled", "expired"];
     for (const ev of events) {
       sent.length = 0;
@@ -129,11 +120,9 @@ const parties = {
       check(`event '${ev}' sends`, r.ok === true && sent.length >= 1, `${sent.length} msg(s)`);
     }
 
-    // ── 6. Invalid numbers are skipped, never crash ──
     const bad = await api.sendWhatsAppText("not-a-number", "hello");
     check("invalid recipient skipped", bad.skipped === true, bad.reason);
 
-    // ── 7. Meta HTTP error resolves (never rejects) ──
     global.fetch = async () => ({
       ok: false,
       status: 401,
@@ -142,7 +131,6 @@ const parties = {
     const errRes = await api.sendWhatsAppText("9876543210", "hello");
     check("API error resolves ok:false", errRes.ok === false && !errRes.skipped, errRes.error);
 
-    // ── 8. notifyWhatsApp wrapper never throws, even with garbage ──
     let threw = false;
     try {
       api.notifyWhatsApp("confirmed", null, {});

@@ -4,11 +4,6 @@ import API from "../api/axios";
 import { formatCurrency } from "../utils/constants";
 import { AnalyticsEvents, track } from "../utils/analytics";
 
-// "Have a Coupon Code?" — enter → Apply → instant discount + final amount.
-// Props: amount (pre-discount fee), serviceType, onApplied(result|null),
-// initialCode (a previously applied code restored after login/retry —
-// re-validated once against the live fee, never trusted blindly).
-// The server re-validates everything at booking time; this is a preview.
 const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
   const [code, setCode] = useState("");
   const [applying, setApplying] = useState(false);
@@ -18,8 +13,6 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
   const lastService = useRef(serviceType);
   const initialTried = useRef(null);
 
-  // The preview belongs to a specific fee + service — a changed total
-  // (e.g. different hours) forces a fresh apply instead of showing stale math.
   useEffect(() => {
     if (applied && (lastAmount.current !== amount || lastService.current !== serviceType)) {
       setApplied(null);
@@ -32,9 +25,6 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amount, serviceType]);
 
-  // Restore a code carried across the login wall / retry: re-validate it
-  // against the live fee exactly once (a stale/invalid code just surfaces
-  // the server error instead of silently discounting).
   useEffect(() => {
     const c = String(initialCode || "").trim().toUpperCase();
     if (!c || applying || applied || initialTried.current === `${c}|${amount}|${serviceType}`) return;

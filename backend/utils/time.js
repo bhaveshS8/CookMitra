@@ -1,13 +1,5 @@
-// Business-time utilities — single source of truth for date/time validation.
-//
-// Official business timezone: Asia/Kolkata. Server-local getHours()/getDate()
-// MUST NOT drive booking decisions (a UTC host shifts "today" by 5.5h).
-// All user-facing slot math uses IST derived via Intl; stored event
-// timestamps remain UTC Date instants.
 const BUSINESS_TZ = "Asia/Kolkata";
-// Bookings may not be placed more than this far ahead (slot-squat guard).
 const MAX_BOOKING_HORIZON_DAYS = 180;
-// OTP validity window after the session end (startService refuses older).
 const OTP_VALIDITY_AFTER_END_MS = 24 * 60 * 60 * 1000;
 
 const FULL_TIME_RE = /^(\d{1,2}):(\d{2})$/;
@@ -26,7 +18,6 @@ const parseTimeStrict = (t) => {
 const isOnGrid = (minutes, step = 30) =>
   Number.isInteger(minutes) && minutes % step === 0;
 
-// Strict YYYY-MM-DD with real calendar validation (rejects 2026-02-30 etc.).
 const parseDayStrict = (s) => {
   const m = String(s || "").match(DAY_RE);
   if (!m) return null;
@@ -67,16 +58,8 @@ const partsInTz = (date, tz) => {
 const istDayString = (d = new Date()) => partsInTz(d, BUSINESS_TZ).day;
 const istNowMinutes = (d = new Date()) => partsInTz(d, BUSINESS_TZ).minutes;
 
-// ── IST-anchored instants (F-08) ──────────────────────────────────────────
-// Asia/Kolkata has never observed DST, so +05:30 is exact — not an
-// approximation. These helpers build UTC Date instants from IST wall times so
-// booking math is identical on EVERY host timezone (a UTC host previously
-// shifted cutoffs, expiry, and rival-day queries by 5.5h via server-local
-// setHours/getHours). On an IST-pinned host they produce exactly the same
-// instants the old local-time code did.
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
-// IST calendar parts of any instant (or null when unparsable).
 const istPartsOf = (input) => {
   const d = input instanceof Date ? input : new Date(input);
   if (Number.isNaN(d.getTime())) return null;
@@ -94,10 +77,6 @@ const istPartsOf = (input) => {
   return { y, mo, d: day };
 };
 
-// UTC instant of IST midnight starting the business day of `input`.
-// Accepts "YYYY-MM-DD" (taken as the IST day itself) or a Date (IST day of
-// that instant — recovers the intended day for rows written as local-midnight
-// on either IST or UTC hosts).
 const istMidnight = (input) => {
   if (typeof input === "string") {
     const m = String(input).match(DAY_RE);
@@ -109,15 +88,12 @@ const istMidnight = (input) => {
   return new Date(Date.UTC(p.y, p.mo - 1, p.d) - IST_OFFSET_MS);
 };
 
-// { start, end } UTC instants covering that IST business day (end inclusive).
 const istDayRange = (input) => {
   const start = istMidnight(input);
   if (!start) return null;
   return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1) };
 };
 
-// UTC instant of an IST wall time ("HH:MM") on the business day of
-// `dateInput` ("YYYY-MM-DD" or Date). Null on any malformed input.
 const istEventInstant = (dateInput, hm) => {
   const m = String(hm || "").match(FULL_TIME_RE);
   if (!m) return null;
@@ -142,7 +118,6 @@ const istEventInstant = (dateInput, hm) => {
   return new Date(Date.UTC(y, mo - 1, d, h, mi) - IST_OFFSET_MS);
 };
 
-// IST weekday (0=Sunday..6=Saturday) of an instant or "YYYY-MM-DD".
 const istWeekday = (input) => {
   let y;
   let mo;
@@ -159,7 +134,6 @@ const istWeekday = (input) => {
     mo = p.mo;
     d = p.d;
   }
-  // Weekday from the UTC instant of that IST noon (noon avoids any edge).
   return new Date(Date.UTC(y, mo - 1, d, 12, 0) - IST_OFFSET_MS).getUTCDay();
 };
 

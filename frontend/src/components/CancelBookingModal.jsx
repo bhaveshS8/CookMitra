@@ -14,9 +14,7 @@ export const CANCEL_REASONS = [
   { value: "OTHER", label: "Other" },
 ];
 
-// Cancel dialog driven ENTIRELY by GET /bookings/:id/cancellation-preview.
-// The frontend never calculates charges or refunds — it only displays the
-// backend's numbers and sends back { reason, reasonNote }.
+// Figures come from /cancellation-preview; frontend never computes refunds.
 const CancelBookingModal = ({ bookingId, onClose, onCancelled }) => {
   const showToast = useShowToast();
   const [preview, setPreview] = useState(null);
@@ -147,7 +145,6 @@ const CancelBookingModal = ({ bookingId, onClose, onCancelled }) => {
   );
 };
 
-// Cook/admin: record a customer no-show after reaching the venue.
 export const NoShowModal = ({ bookingId, onClose, onMarked }) => {
   const showToast = useShowToast();
   const [reason, setReason] = useState("");

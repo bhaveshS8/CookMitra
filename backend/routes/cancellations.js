@@ -1,5 +1,3 @@
-// Admin Cancellations & Refunds console (§25). Money moves only via the
-// existing /api/payouts refund paths; these routes manage review workflow.
 const express = require("express");
 
 const router = express.Router();

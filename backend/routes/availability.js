@@ -13,9 +13,6 @@ const {
 } = require("../controllers/availabilityController");
 
 router.get("/my", auth, authorize("cook"), getMySlots);
-// Batched search MUST sit above "/:cookId" or "search" parses as a cook id.
-// Public but expensive (500-cook fan-in): own tighter bucket so scrapers
-// cannot burn the general budget.
 const searchLimiter = rateLimit({
   standardHeaders: false,
   legacyHeaders: false,

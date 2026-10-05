@@ -1,14 +1,3 @@
-// Standalone regression test for the Redis-free rate-limit store.
-// Run:  node backend/rate-limit-store.test.js  — exits non-zero on any failure.
-//
-// The risk this pins down: express-rate-limit's `passOnStoreError` defaults to
-// FALSE, so a rejected store promise is rethrown into the error middleware —
-// i.e. a database hiccup would turn EVERY request into a 500. The shared store
-// must therefore degrade to in-memory limits instead.
-//
-// The store is driven through a real express app, with Mongoose stubbed so the
-// suite runs without a database. `mongoose.connection.readyState` and the
-// RateLimitHit statics are the only touchpoints the store uses.
 
 const http = require("http");
 const express = require("express");
@@ -32,7 +21,6 @@ const check = (name, ok, detail) => {
   ok ? passes++ : failures++;
 };
 
-// ── Stub the Mongoose surface the store touches ─────────────────────────────
 const realReadyState = Object.getOwnPropertyDescriptor(
   mongoose.connection,
   "readyState"
@@ -57,10 +45,6 @@ const restore = () => {
   Object.assign(RateLimitHit, savedStatics);
 };
 
-// In-memory stand-in for the RateLimitHit collection that honours the
-// aggregation-pipeline update the same way MongoDB would server-side. This is
-// what makes the concurrency claim testable: two overlapping updates must both
-// be counted, never one overwriting the other.
 const fakeCollection = () => {
   const docs = new Map();
   return {
@@ -73,7 +57,6 @@ const fakeCollection = () => {
         if (!options?.upsert) return null;
         doc = { _id };
       }
-      // Evaluate the pipeline exactly as written in windowPipeline().
       const step = pipeline?.[0]?.$set || {};
       const now = new Date();
       const currentReset = doc.resetAt ? new Date(doc.resetAt) : null;
@@ -105,7 +88,6 @@ const fakeCollection = () => {
   };
 };
 
-// Drives `count` requests through an app protected by `max` hits per window.
 const hitEndpoint = async (store, { max = 2, count = 3 } = {}) => {
   const app = express();
   app.use(
@@ -146,9 +128,7 @@ const withEnv = async (value, fn) => {
   }
 };
 
-// ── Runner ──────────────────────────────────────────────────────────────────
 const main = async () => {
-  // ── Bucket selection ────────────────────────────────────────────────────
   await withEnv(undefined, () => {
     const { shared, memory } = describeRateLimitStores();
     check(
@@ -194,7 +174,6 @@ const main = async () => {
     );
   });
 
-  // ── Pipeline shape ──────────────────────────────────────────────────────
   const step = windowPipeline(new Date(), new Date(Date.now() + 60000))?.[0]?.$set || {};
   check(
     "window pipeline increments inside a live window and resets a lapsed one",
@@ -214,7 +193,6 @@ const main = async () => {
     step.resetAt?.$cond?.[1] === "$resetAt"
   );
 
-  // ── withTimeout ─────────────────────────────────────────────────────────
   const fast = await withTimeout(Promise.resolve("ok"), 50, "nope");
   check("withTimeout passes a fast result through", fast === "ok");
   let timedOut = false;
@@ -225,7 +203,6 @@ const main = async () => {
   }
   check("withTimeout rejects instead of hanging forever", timedOut);
 
-  // ── Store behaviour with a stubbed database ─────────────────────────────
   const fake = fakeCollection();
   RateLimitHit.findOneAndUpdate = fake.findOneAndUpdate;
   RateLimitHit.updateOne = fake.updateOne;
@@ -253,8 +230,6 @@ const main = async () => {
   );
   check("resetTime is a Date the limiter can use", first.resetTime instanceof Date);
 
-  // Two overlapping increments must BOTH land: the read-modify-write the old
-  // design implied would have let the second write back a stale count.
   const racestore = new MongoRateLimitStore({ prefix: "race:" });
   racestore.init({ windowMs: 60000 });
   await Promise.all([racestore.increment("k"), racestore.increment("k")]);
@@ -265,7 +240,6 @@ const main = async () => {
     `totalHits=${third.totalHits}`
   );
 
-  // A lapsed window starts over instead of counting forever.
   fake.docs.set("auth:old", {
     _id: "auth:old",
     totalHits: 99,
@@ -299,7 +273,6 @@ const main = async () => {
     `totalHits=${afterReset.totalHits}`
   );
 
-  // ── Resilience: failures degrade, never 500 ─────────────────────────────
   RateLimitHit.findOneAndUpdate = async () => {
     throw new Error("db exploded");
   };
@@ -312,7 +285,6 @@ const main = async () => {
     degraded.join(",")
   );
 
-  // A disconnected database must fail fast, not queue behind Mongoose's buffer.
   setConnected(false);
   let fastFail = false;
   try {
@@ -338,7 +310,6 @@ const main = async () => {
     healthy.join(",")
   );
 
-  // ── E11000: two requests racing to create a brand-new key ───────────────
   let attempts = 0;
   RateLimitHit.findOneAndUpdate = async () => {
     attempts += 1;
@@ -357,10 +328,6 @@ const main = async () => {
   );
 
   console.log(`\n${passes} passed, ${failures} failed`);
-  // Set the code and let the loop drain naturally. Calling process.exit() here
-  // aborts the process on Windows while libuv is still closing handles
-  // (`Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)` in src/win/async.c),
-  // which surfaced as a bogus non-zero exit and broke `npm test` chaining.
   process.exitCode = failures > 0 ? 1 : 0;
 };
 

@@ -23,11 +23,7 @@ import {
 } from "lucide-react";
 import { AnalyticsEvents, track } from "../utils/analytics";
 
-// Mirror of MAX_BOOKING_HORIZON_DAYS on the server — the calendar simply
-// doesn't offer days the API would refuse.
 const MAX_HORIZON_DAYS = 180;
-// Mirror of RESCHEDULE_REASONS on the server (bookingController) — the value
-// sent is the label itself, stored on the reschedules[] audit entry.
 const REASONS = [
   "Change of plans",
   "Personal reason",
@@ -57,17 +53,10 @@ const friendlyError = (err, fallback) => {
   return fallback;
 };
 
-// RescheduleModal — move a booking to a new date/time, optionally with a new
-// cook when the current cook cannot cover the new slot.
-// Date feed: GET /bookings/:id/reschedule-options?date
-// Slot+cook feed: GET /bookings/:id/reschedule-options?date=&startTime=
-// Move: PATCH /bookings/:id/reschedule { date, startTime, reason?, cookId? }
-// Duration and price never change — the copy says so, the backend enforces it.
 const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
   const showToast = useShowToast();
   const navigate = useNavigate();
   const [date, setDate] = useState(() => {
-    // Default to the booking's own day when it is still today or later.
     const own = getLocalDateStr(booking?.date);
     return own && own >= localTodayStr() ? own : localTodayStr();
   });
@@ -76,7 +65,6 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [selected, setSelected] = useState("");
-  // Cook availability for the picked slot: null until a time is chosen.
   const [cookInfo, setCookInfo] = useState(null);
   const [cookLoading, setCookLoading] = useState(false);
   const [replacementCooks, setReplacementCooks] = useState([]);
@@ -124,8 +112,6 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
     fetchSlots(date);
   }, [date, fetchSlots]);
 
-  // Cook availability for the picked time — current cook first, replacements
-  // when the current cook cannot cover the slot.
   const fetchCookAvailability = useCallback(
     async (day, startTime) => {
       setCookLoading(true);
@@ -147,8 +133,6 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
           });
         }
       } catch (err) {
-        // A 400 here is usually outside-working-hours or lead-time: surface
-        // the server's own user-friendly message.
         setCookInfo({ available: false, error: friendlyError(err, "Could not check cook availability — please try again.") });
         setReplacementCooks([]);
       } finally {
@@ -158,7 +142,6 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
     [booking?._id]
   );
 
-  // Close on Escape (unless a move is in flight) and lock the page scroll.
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -172,7 +155,6 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
     };
   }, [onClose, submitting]);
 
-  // The booking's own start time only counts as "current" on its own day.
   const currentKey = useMemo(() => {
     if (!currentSlot || currentSlot.date !== date) return "";
     return String(currentSlot.startTime || "");
@@ -241,7 +223,6 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
       const msg = friendlyError(err, "We couldn't complete the reschedule. Please try again.");
       setSubmitError(msg);
       showToast(msg, "error");
-      // Slot or cook changed under us — reload the feeds.
       if (status === 409) {
         fetchSlots(date);
       }
@@ -260,8 +241,6 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
     navigate(`/bookings/${booking._id}`);
   };
 
-  // Portaled to document.body: escapes .main-content's pageIn stacking
-  // context so the sticky navbar can never paint over the dialog.
   return createPortal(
     <div className="login-modal-overlay" onClick={close}>
       <div
@@ -318,7 +297,6 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
           </div>
         ) : (
           <div className="rs-body">
-            {/* Step 1 — current booking */}
             <section className="rs-current" aria-label="Current booking">
               <h4 className="rs-section-title">Current booking</h4>
               <dl className="rs-current-grid">
@@ -406,7 +384,6 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
               </div>
             )}
 
-            {/* Cook availability for the picked slot */}
             {selected ? (
               <section className="rs-cook" aria-label="Cook availability" aria-live="polite">
                 {cookLoading ? (
@@ -491,7 +468,6 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
               </section>
             ) : null}
 
-            {/* Reason */}
             <label className="rs-label" htmlFor="rs-reason">
               Reason <span className="rs-optional">(optional)</span>
             </label>
@@ -528,7 +504,6 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
 
             {submitError ? <p className="rs-error" role="alert">{submitError}</p> : null}
 
-            {/* Confirmation summary */}
             {confirming && selected ? (
               <section className="rs-confirm" aria-label="Confirm reschedule" aria-live="polite">
                 <h4 className="rs-section-title">Confirm reschedule</h4>

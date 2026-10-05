@@ -1,5 +1,3 @@
-// Admin console for leads, incentives, referrals + weekly payouts (§14).
-// All routes auth + authorize("admin"). Money moves only here.
 
 const crypto = require("crypto");
 const Booking = require("../models/Booking");
@@ -17,7 +15,6 @@ const {
   countVerifiedLeadsInWindow,
 } = require("../utils/cookEarningsService");
 
-// ── Leads ────────────────────────────────────────────────────────────────
 exports.listAllLeads = async (req, res, next) => {
   try {
     const filter = {};
@@ -38,7 +35,6 @@ const setLeadState = async ({ leadId, adminId, status, verificationStatus, reaso
   const lead = await CookLead.findById(leadId);
   if (!lead) return null;
   if (["verified", "rejected", "duplicate", "invalid", "converted"].includes(lead.status) && !verified) {
-    // Terminal states change only via explicit re-verify path — settled stays settled.
   }
   lead.status = status;
   lead.verificationStatus = verificationStatus;
@@ -56,7 +52,6 @@ exports.verifyLead = async (req, res, next) => {
     const lead = await CookLead.findById(req.params.id);
     if (!lead) return res.status(404).json({ message: "Lead not found" });
     if (lead.status === "verified") return res.json(lead); // idempotent
-    // Cross-cook duplicate check at verify time (submitted concurrently).
     const clash = await CookLead.findOne({
       _id: { $ne: lead._id },
       normalizedPhone: lead.normalizedPhone,
@@ -72,12 +67,10 @@ exports.verifyLead = async (req, res, next) => {
     const updated = await setLeadState({
       leadId: lead._id, adminId: req.user.id, status: "verified", verificationStatus: "verified", verified: true,
     });
-    // Refresh the cook's incentive eligibility (may newly qualify).
     try {
       const { refreshIncentiveEligibility } = require("../utils/cookEarningsService");
       await refreshIncentiveEligibility(lead.cook);
     } catch {
-      // non-fatal
     }
     await audit({ actor: req.user.id, actorRole: "ADMIN", event: "lead_verified", cook: lead.cook, refId: lead._id, refModel: "CookLead", detail: `${lead.customerName} verified` });
     await notifyCook({ cookId: lead.cook, type: "lead_verified", message: `Lead for ${lead.customerName} is verified — it now counts toward your incentives.`, link: "/cook/earnings" });
@@ -120,7 +113,6 @@ exports.markLeadDuplicate = async (req, res, next) => {
   }
 };
 
-// ── Incentives ───────────────────────────────────────────────────────────
 exports.listIncentives = async (req, res, next) => {
   try {
     const filter = {};
@@ -132,7 +124,6 @@ exports.listIncentives = async (req, res, next) => {
       CookIncentive.find(filter).sort({ createdAt: -1 }).populate("cook", "name phone"),
       pg
     );
-    // Attach live server-computed counts (display aid; stored counts update on verify).
     const enriched = await Promise.all(
       (rows || []).map(async (r) => {
         const o = r.toObject ? r.toObject() : r;
@@ -155,7 +146,6 @@ exports.approveIncentive = async (req, res, next) => {
     const inc = await CookIncentive.findById(req.params.id);
     if (!inc) return res.status(404).json({ message: "Incentive not found" });
     if (inc.status === "approved" || inc.status === "paid") return res.json(inc);
-    // Backend re-validates qualification (§9) — frontend can never approve.
     const live = await countVerifiedLeadsInWindow(inc.cook, inc.startDate, inc.endDate);
     const expired = new Date() > new Date(inc.endDate);
     if (live < inc.target || expired) {
@@ -207,7 +197,6 @@ exports.holdIncentive = async (req, res, next) => {
   }
 };
 
-// ── Referrals ────────────────────────────────────────────────────────────
 exports.listReferrals = async (req, res, next) => {
   try {
     const filter = {};
@@ -256,7 +245,6 @@ exports.approveReferral = async (req, res, next) => {
   }
 };
 
-// ── Weekly payouts ───────────────────────────────────────────────────────
 exports.listCookPayouts = async (req, res, next) => {
   try {
     const filter = {};
@@ -273,8 +261,6 @@ exports.listCookPayouts = async (req, res, next) => {
   }
 };
 
-// POST /api/admin/cook-payouts/build { cookId, weekStart?, weekEnd? }
-// Collects eligible bookings into one idempotent weekly cycle (§3/§5).
 exports.buildCookPayout = async (req, res, next) => {
   try {
     const cookId = String(req.body?.cookId || req.body?.cook || "");
@@ -288,7 +274,6 @@ exports.buildCookPayout = async (req, res, next) => {
     const idem = `cycle:${cookId}:${weekStart.toISOString().slice(0, 10)}:${weekEnd.toISOString().slice(0, 10)}`;
     const existing = await CookPayout.findOne({ idempotencyKey: idem });
     if (existing) return res.json({ ...existing.toObject(), alreadyExists: true });
-    // Eligible bookings: completed + paid + verified, held ones excluded.
     const candidates = await Booking.find({
       cook: cookId,
       status: "completed",
@@ -344,8 +329,6 @@ exports.buildCookPayout = async (req, res, next) => {
       }
       throw e;
     }
-    // Pin bookings to this cycle (only those still unclaimed — atomic guard
-    // against two cycles claiming the same booking).
     await Booking.updateMany(
       {
         _id: { $in: eligible.map((b) => b._id) },
@@ -387,7 +370,6 @@ const transitionCycle = async ({ id, adminId, to, allowedFrom, extra = {}, event
     cycle.paymentDate = new Date();
   }
   await cycle.save();
-  // Mirror onto member bookings (payoutInfo only — never touches booking.payout ledger).
   const bookingStatus = to === "paid" ? "paid" : to === "approved" ? "approved" : to === "held" ? "held" : undefined;
   if (bookingStatus) {
     await Booking.updateMany(
@@ -426,7 +408,6 @@ exports.payCookPayout = async (req, res, next) => {
   try {
     const reference = String(req.body?.reference || req.body?.paymentReference || "").trim().slice(0, 120);
     if (reference.length < 4) return res.status(400).json({ message: "A payment reference is required" });
-    // Global uniqueness of the payment reference (double-payment prevention).
     const dup = await CookPayout.findOne({ paymentReference: reference, status: "paid" }).select("_id");
     if (dup && String(dup._id) !== String(req.params.id)) {
       return res.status(409).json({ message: "This reference already paid another cycle", code: "DUPLICATE_PAYOUT_REFERENCE" });

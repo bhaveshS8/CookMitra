@@ -1,7 +1,3 @@
-/* ==========================================================================
-   Cooks — listing page + public cook profile + booking widget
-   Warm festive-orange × deep slate. Responsive, attractive, user-friendly.
-   ========================================================================== */
 
 .cooks-page-container {
   max-width: 1200px;
@@ -10,7 +6,6 @@
   animation: riseIn 0.3s ease;
 }
 
-/* Spacing for the results meta row + availability hint on this page */
 .cooks-page-container .results-meta-bar { margin: 1rem 0 0.35rem; }
 .cooks-page-container .field-hint {
   display: inline-flex;
@@ -18,7 +13,6 @@
   gap: 0.35rem;
 }
 
-/* Filter toolbar */
 .cooks-filter-bar {
   background: #fff;
   border: 1px solid var(--border-subtle);
@@ -52,10 +46,8 @@
   outline-offset: 2px;
 }
 
-/* Grid + cards */
 .cooks-grid-modern {
   display: grid;
-  /* min() keeps a single column fitting on 320–360px phones */
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr));
   gap: 1.4rem;
   margin-top: 1.4rem;
@@ -75,7 +67,6 @@
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
   animation: riseIn 0.35s ease backwards;
 }
-/* Subtle festive top accent that appears on hover */
 .cook-card-modern::before {
   content: "";
   position: absolute;
@@ -96,7 +87,6 @@
   border-color: var(--primary);
   box-shadow: 0 0 0 4px var(--primary-glow), var(--shadow-md);
 }
-/* Stagger cards slightly for a lively listing feel */
 .cooks-grid-modern .cook-card-modern:nth-child(2) { animation-delay: 0.04s; }
 .cooks-grid-modern .cook-card-modern:nth-child(3) { animation-delay: 0.08s; }
 .cooks-grid-modern .cook-card-modern:nth-child(n+4) { animation-delay: 0.12s; }
@@ -155,7 +145,6 @@
   color: var(--slate-700);
 }
 
-/* Clamp the bio so cards stay even and scannable */
 .cook-bio-preview {
   color: var(--slate-600);
   font-size: 0.92rem;
@@ -193,7 +182,6 @@
 .rate-unit { font-size: 0.76rem; color: var(--slate-500); }
 .cook-card-bottom .btn { flex-shrink: 0; }
 
-/* Public cook profile */
 .cook-profile-page-container {
   max-width: 1140px;
   margin: 0 auto;
@@ -243,7 +231,6 @@
 }
 .cook-profile-hero-content { flex: 1; min-width: 0; }
 .cook-profile-hero-content h1 { font-size: 1.7rem; color: var(--slate-900); }
-/* Badge + meta rows inside the hero (replaces fragile inline flex) */
 .cook-profile-badges {
   display: flex;
   align-items: center;
@@ -277,7 +264,6 @@
 .cook-profile-right-col { position: sticky; top: 84px; min-width: 0; }
 .cook-profile-left-col .profile-card-block h2 { margin-bottom: 0.7rem; }
 
-/* Services grid on the public profile (responsive, replaces inline grid) */
 .cook-services-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
@@ -305,7 +291,6 @@
 }
 .cook-service-tile p { font-size: 0.85rem; color: var(--slate-600); margin: 0; }
 
-/* Review cards on the public profile */
 .cook-review-card {
   padding: 1.25rem;
   border-radius: var(--radius-md);
@@ -323,7 +308,6 @@
   margin-bottom: 0.4rem;
 }
 
-/* Respect users who prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .cooks-page-container,
   .cook-profile-page-container,
@@ -336,7 +320,6 @@
   .cook-card-modern:hover,
   .cook-service-tile:hover { transform: none; }
 }
-/* ---- Small phones: cook listing + public profile chrome ------------- */
 @media (max-width: 375px) {
   .cooks-grid-modern { gap: 0.8rem; }
   .cook-card-modern { padding: 1.05rem 1rem; }

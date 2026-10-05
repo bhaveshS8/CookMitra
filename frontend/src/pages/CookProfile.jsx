@@ -53,19 +53,16 @@ const CookProfile = () => {
   };
 
   const reviewCount = cook?.rating?.count || 0;
-  // Never fabricate a rating: unreviewed cooks show "New".
   const avgRating = reviewCount > 0 ? Number(cook?.rating?.average) || 0 : null;
 
   return (
     <div className="cook-profile-page-container">
-      {/* Back Link */}
       <div style={{ marginBottom: "1.5rem" }}>
         <Link to="/cook-on-demand" className="back-link-bar">
           <ArrowLeft size={16} /> Back to Book a Cook
         </Link>
       </div>
 
-      {/* Hero Banner Card */}
       <div className="cook-profile-hero">
         <div className="cook-profile-avatar-large">
           <CookAvatar photoUrl={cook?.photoUrl} name={cook?.user?.name} />
@@ -120,10 +117,8 @@ const CookProfile = () => {
         </div>
       </div>
 
-      {/* Main Grid: Left Column Info, Right Column Booking Widget */}
       <div className="cook-profile-grid">
         <div className="cook-profile-left-col">
-          {/* About */}
           <div className="profile-card-block">
             <h2>About {cook?.user?.name}</h2>
             <p style={{ lineHeight: 1.7, color: "var(--slate-700)", fontSize: "1rem" }}>
@@ -131,7 +126,6 @@ const CookProfile = () => {
             </p>
           </div>
 
-          {/* Specialties */}
           <div className="profile-card-block">
             <h2>Festive Specialties</h2>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.6rem" }}>
@@ -143,7 +137,6 @@ const CookProfile = () => {
             </div>
           </div>
 
-          {/* Services Offered */}
           <div className="profile-card-block">
             <h2>Services Offered</h2>
             <div className="cook-services-grid">
@@ -161,7 +154,6 @@ const CookProfile = () => {
             </div>
           </div>
 
-          {/* Customer Reviews */}
           <div className="profile-card-block">
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.25rem" }}>
               <h2 style={{ margin: 0 }}>Customer Reviews ({reviews?.length || 0})</h2>
@@ -199,7 +191,6 @@ const CookProfile = () => {
           </div>
         </div>
 
-        {/* Right Column: Sticky Booking Widget */}
         <div className="cook-profile-right-col">
           <BookingForm
             cookId={id}

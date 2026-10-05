@@ -1,6 +1,3 @@
-// whatsapp-inbound.test.js — cook Accept/Decline via WhatsApp.
-// Run:  node backend/whatsapp-inbound.test.js — exits non-zero on failure.
-// No DB, no network: models + fetch stubbed; HMACs computed like Meta would.
 process.env.WHATSAPP_ENABLED = "true";
 process.env.WHATSAPP_TOKEN = "test_token";
 process.env.WHATSAPP_PHONE_NUMBER_ID = "123456789";
@@ -42,7 +39,6 @@ const mkBooking = (over = {}) => ({
   save: async function () { return this; },
   ...over,
 });
-// Chainable query mock mirroring Mongoose (.select().sort().limit()).
 const chainResult = (result) => {
   const q = {
     select: () => q,
@@ -53,8 +49,6 @@ const chainResult = (result) => {
   };
   return q;
 };
-// Booking.find mock routing: requested-filter -> pendings, otherwise rivals.
-// Returns the chainable SYNCHRONOUSLY like Mongoose (never a bare Promise).
 const mockFind = (pendings = [], rivals = []) => (filter) =>
   chainResult(filter && filter.status === "requested" ? pendings : rivals);
 const cookUser = { _id: COOK_ID, name: "Priya", phone: "9876543210", mobile: "9876543210", role: "COOK", status: "active" };
@@ -97,7 +91,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
 
 (async () => {
   try {
-    // ── handshake ──
     {
       const out = [];
       const res = { statusCode: 0, body: null, status(c) { this.statusCode = c; return this; }, send(b) { this.body = b; return this; }, json(b) { this.body = b; return this; } };
@@ -109,7 +102,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       check("handshake accepts token / refuses impostor", out.every(Boolean), out.join(","));
     }
 
-    // ── bad signature refused, nothing touched ──
     {
       sent.length = 0;
       let touched = false;
@@ -132,7 +124,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
     const notifs = [];
     Notification.create = async (d) => { notifs.push(d); return d; };
 
-    // ── button ACCEPT happy path ──
     {
       sent.length = 0; notifs.length = 0;
       const doc = mkBooking();
@@ -157,7 +148,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       check("cook gets confirmation", /Accepted/.test(cookTexts), cookTexts.slice(0, 60));
     }
 
-    // ── button REJECT happy path (unpaid -> no refund) ──
     {
       sent.length = 0; notifs.length = 0;
       const doc = mkBooking();
@@ -172,7 +162,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       check("customer notified rejected", notifs.some((n) => n.type === "booking_rejected"), notifs.map((n) => n.type).join(","));
     }
 
-    // ── expired tap refused, customer told ──
     {
       sent.length = 0; notifs.length = 0;
       const doc = mkBooking({ requestExpiresAt: new Date(Date.now() - 1000) });
@@ -186,7 +175,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       check("customer told expired", notifs.some((n) => n.type === "booking_expired"), notifs.map((n) => n.type).join(","));
     }
 
-    // ── tap from an unknown number -> silent, untouched ──
     {
       sent.length = 0;
       const doc = mkBooking();
@@ -201,7 +189,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       check("stranger tap writes nothing", wrote === false, `wrote=${wrote}`);
     }
 
-    // ── tap naming another cook's booking -> refused, untouched ──
     {
       sent.length = 0;
       const doc = mkBooking();
@@ -218,7 +205,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       check("foreign tap writes nothing", wrote === false && doc.status === "requested", `wrote=${wrote} status=${doc.status}`);
     }
 
-    // ── text ACCEPT with single pending -> accepted ──
     {
       sent.length = 0; notifs.length = 0;
       const full = mkBooking();
@@ -234,7 +220,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       check("text ACCEPT (single pending) works", r.statusCode === 200 && r.body?.handled === 1 && full.status === "accepted", JSON.stringify(r.body));
     }
 
-    // ── text with multiple pendings -> disambiguation, no write ──
     {
       sent.length = 0;
       mockParties();
@@ -253,7 +238,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       check("ambiguous text lists pendings, writes nothing", r.body?.handled === 0 && wrote === false && /2 pending/.test(cookTexts), cookTexts.slice(0, 80));
     }
 
-    // ── Meta retry of the same tap (same wamid) -> deduped, single claim ──
     {
       sent.length = 0; notifs.length = 0;
       const doc = mkBooking();
@@ -270,7 +254,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
         seen.add(e.key);
         return e;
       };
-      // reset to requested between the two deliveries (same tap retried)
       const retryMsg = { from: COOK_WA, id: "wamid.retry1", type: "interactive", interactive: { type: "button_reply", button_reply: { id: `accept:${BID}`, title: "Accept" } } };
       const raw = inboundBody([retryMsg]);
       const r1 = await postInbound(raw, sign(raw));
@@ -279,7 +262,6 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       check("retry deduped: one claim only", r1.body?.handled === 1 && r2.body?.handled === 0 && claims === 1, `h1=${r1.body?.handled} h2=${r2.body?.handled} claims=${claims}`);
     }
 
-    // ── race lost (dashboard won) -> truthful reply ──
     {
       sent.length = 0;
       const doc = mkBooking();

@@ -17,8 +17,6 @@ import { buildRetryState } from "../utils/bookingRetry";
 import ConfirmDialog from "../components/ConfirmDialog";
 
 const WINDOW_MS = 5 * 60 * 1000; // 5-minute acceptance window
-// Safe polling: 4s while the waiting page is open (spec: 2–5s), paused in
-// background tabs. Stops the moment the booking leaves REQUESTED.
 const POLL_MS = 4000;
 const REDIRECT_S = 6;
 
@@ -65,9 +63,6 @@ const BookingWaiting = () => {
   const aliveRef = useRef(true);
   const pollRef = useRef(null);
 
-  // Consecutive poll failures before surfacing an error: a single transient
-  // blip must not kick the customer off the waiting screen (F-05), but a
-  // persistently failing fetch must not spin forever either.
   const failCountRef = useRef(0);
   const load = useCallback(async () => {
     try {
@@ -102,9 +97,6 @@ const BookingWaiting = () => {
         setPhase("error");
         return;
       }
-      // Non-404 (network/server) failures: stay on the waiting screen for a
-      // couple of retries, then show the error state with a retry action
-      // instead of spinning silently forever.
       failCountRef.current += 1;
       if (failCountRef.current >= 3) {
         handledRef.current = true;
@@ -116,8 +108,6 @@ const BookingWaiting = () => {
   useEffect(() => {
     aliveRef.current = true;
     load();
-    // Pause polling while the tab is hidden — background tabs otherwise keep
-    // hammering the API for users who switched away mid-wait.
     const startPoll = () => {
       stopPoll();
       pollRef.current = setInterval(() => {
@@ -148,9 +138,6 @@ const BookingWaiting = () => {
     };
   }, [load]);
 
-  // Real-time: a cook (or the admin) accepting fires booking_assigned on the
-  // app-wide SSE stream — fetch the authoritative state at once instead of
-  // waiting for the next 4s poll. Expiry also pushes booking_expired now.
   useEffect(() => {
     const mine = String(bookingId || "");
     const onAssigned = (e) => {
@@ -171,8 +158,6 @@ const BookingWaiting = () => {
     };
   }, [bookingId, load]);
 
-  // Sorry screen auto-redirects back to finding cooks — carrying the  // booking snapshot so the customer lands on step 3 (pick another cook
-  // for the same slot) instead of starting over on step 1.
   useEffect(() => {
     if (phase !== "sorry") return undefined;
     setRedirectIn(REDIRECT_S);
@@ -199,23 +184,16 @@ const BookingWaiting = () => {
     try {
       const res = await API.patch(`/bookings/${bookingId}/cancel`);
       handledRef.current = true;
-      // Show the SERVER-confirmed outcome (alreadyCancelled conflicts return
-      // 200 with the canonical state — never assume the local guess).
       setSorryReason(res.data?.status || "cancelled");
       setPhase("sorry");
       showToast(res.data?.message || "Request cancelled — the slot has been released.", "info");
     } catch (err) {
-      // A 409 (already accepted/confirmed by the cook racing this tap) lands
-      // here: surface the server message and reload the authoritative state
-      // instead of showing a stale "cancelled" screen.
       showToast(err.response?.data?.message || "Could not cancel the request", "error");
       setCancelling(false);
       load();
     }
   };
 
-  // "Find another cook" — back to step 3 with the same plan/slot, so the
-  // customer picks a different chef without re-typing anything.
   const goFindAnotherCook = useCallback(() => {
     navigate("/cook-on-demand", {
       replace: true,
@@ -223,7 +201,6 @@ const BookingWaiting = () => {
     });
   }, [navigate, booking]);
 
-  // Countdown against the server-set 5-minute acceptance window.
   const createdAtMs = booking?.createdAt ? new Date(booking.createdAt).getTime() : null;
   const expiresAtMs = booking?.requestExpiresAt
     ? new Date(booking.requestExpiresAt).getTime()
@@ -231,9 +208,6 @@ const BookingWaiting = () => {
       ? createdAtMs + WINDOW_MS
       : null;
   const remainingMs = expiresAtMs ? Math.max(0, expiresAtMs - now) : WINDOW_MS;
-  // Deadline reached locally: don't sit on 00:00 until the next 8s poll —
-  // stop polling and fetch once immediately so the server-confirmed outcome
-  // (usually expired, flipped on read) shows right away.
   useEffect(() => {
     if (phase !== "waiting" || !expiresAtMs || handledRef.current) return;
     if (expiresAtMs - Date.now() > 0) return;
@@ -250,7 +224,6 @@ const BookingWaiting = () => {
   const progress = Math.max(0, Math.min(1, remainingMs / WINDOW_MS));
   const RING = 2 * Math.PI * 54; // r = 54 in the SVG viewBox
   const service = SERVICE_DETAILS[booking?.serviceType] || {};
-  // Accepted phase shows the server-assigned cook (authoritative state).
   const cookName = booking?.cook?.name || "Your cook";
 
   if (phase === "loading") {
@@ -324,7 +297,6 @@ const BookingWaiting = () => {
     );
   }
 
-  // phase === "waiting"
   return (
     <div className="booking-flow-page">
       <span className="bf-emoji e1" aria-hidden="true">🥟</span>

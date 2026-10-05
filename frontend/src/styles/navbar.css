@@ -1,8 +1,4 @@
-/* ==========================================================================
-   Navbar + Footer
-   ========================================================================== */
 
-/* ---- Navbar ---- */
 .navbar {
   position: sticky;
   top: 0;
@@ -56,7 +52,6 @@
   flex-shrink: 0;
 }
 
-/* Cook Mitra logo mark (PNG asset, displayed as-is with rounded edges) */
 .brand-logo-img {
   width: 48px;
   height: 48px;
@@ -204,7 +199,6 @@
 
 .navbar-mobile-actions { display: none; gap: 0.6rem; align-items: center; margin-top: 0; margin-left: auto; }
 
-/* ---- Footer ---- */
 .footer-modern {
   background: #120d08;
   color: var(--slate-400);
@@ -254,7 +248,6 @@
 .footer-bottom-bar a { color: var(--slate-400); }
 .footer-bottom-bar a:hover { color: #fff; }
 
-/* ---- Header location picker (auto-detect + manual search) ---- */
 .loc-wrap { position: relative; }
 .loc-pill {
   display: inline-flex;
@@ -350,8 +343,6 @@
   padding: 0.5rem 0.6rem;
 }
 .loc-footnote { margin: 0; font-size: 0.74rem; color: var(--slate-400); }
-/* Desktop nav sits at the right edge — anchor the dropdown to the pill's
-   right so it never overflows the viewport. */
 .navbar-nav .loc-dropdown { left: auto; right: 0; }
 
 @media (max-width: 1150px) {
@@ -360,7 +351,6 @@
   .mobile-menu .loc-pill-label { max-width: none; flex: 1; text-align: left; }
   .mobile-menu .loc-dropdown { position: static; width: 100%; max-width: none; box-shadow: none; margin-top: 0.5rem; }
 }
-/* ---- Small phones: keep the compact bar from crowding ----------------- */
 @media (max-width: 375px) {
   .navbar-inner { gap: 0.6rem; }
   .navbar-mobile-actions { gap: 0.35rem; }
@@ -368,10 +358,7 @@
 @media (max-width: 320px) {
   .navbar-inner { gap: 0.4rem; padding: 0 0.6rem; }
   .navbar-mobile-actions { gap: 0.25rem; }
-  /* The brand text is the only flexible item left — let it shrink, never
-     push the hamburger/bell/avatar off-screen. */
   .navbar-brand { min-width: 0; }
   .navbar-brand span { overflow: hidden; text-overflow: ellipsis; }
-  /* Drawer + location dropdown keep full usable width. */
   .loc-pill { max-width: 100%; }
 }

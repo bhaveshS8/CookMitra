@@ -55,8 +55,6 @@ import {
 const BookingDetails = () => {
   const { bookingId } = useParams();
   const user = useSelector((s) => s.auth.user);
-  // Live local day: keeps the Today/Tomorrow badge correct across midnight
-  // even if this page stays open past 12 AM.
   const today = useLocalDay();
   const showToast = useShowToast();
   const location = useLocation();
@@ -66,23 +64,14 @@ const BookingDetails = () => {
   const [error, setError] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [noShowOpen, setNoShowOpen] = useState(false);
-  // Backend-computed cancellation preview (§15) — the only source for the
-  // charge/refund figures shown on this page.
   const [cancelPreview, setCancelPreview] = useState(null);
   const [now, setNow] = useState(Date.now());
-  // Cook enters the customer's OTP to start the service clock.
   const [otpInput, setOtpInput] = useState("");
   const [startingService, setStartingService] = useState(false);
   const [otpError, setOtpError] = useState("");
-  // Reschedule picker (customer/admin only — see canReschedule below).
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
-  // Post-service refund request (customer only — the backend decides
-  // eligibility; this state only mirrors its answer).
   const [refundInfo, setRefundInfo] = useState(null);
   const [refundOpen, setRefundOpen] = useState(false);
-  // Deep link from the dashboard's Action Required card (?action=refund):
-  // auto-open the request modal once eligibility confirms it, then drop the
-  // query so a refetch can't reopen it.
   const refundAction = new URLSearchParams(location.search).get("action");
   useEffect(() => {
     if (refundAction === "refund" && refundInfo?.eligible && !refundOpen) {
@@ -108,10 +97,6 @@ const BookingDetails = () => {
     fetchDetails();
   }, [fetchDetails]);
 
-  // Refund eligibility is server-computed (scheduled end + 1h, not completed,
-  // paid, no existing request). Fetched only for paid, non-terminal bookings
-  // on the customer's own page — cancelled bookings keep the legacy refund
-  // line above, cooks never see refund UI.
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -160,8 +145,6 @@ const BookingDetails = () => {
     }
   };
 
-  // The Cancel dialog (CancelBookingModal) performs the API call itself with
-  // the chosen reason — this just merges the cancelled booking into state.
   const handleCancelled = (updated) => {
     if (updated && typeof updated === "object") {
       setBooking((prev) => ({ ...prev, ...updated }));
@@ -171,8 +154,6 @@ const BookingDetails = () => {
     setCancelPreview(null);
   };
 
-  // Cancellation preview for the info card below (customer, active booking
-  // only — the modal re-fetches fresh numbers at confirm time).
   useEffect(() => {
     let alive = true;
     const load = async () => {
@@ -194,13 +175,6 @@ const BookingDetails = () => {
     };
   }, [booking?._id, booking?.status, booking?.serviceStartedAt, user?.role]);
 
-  // Once the cook verifies the OTP the service clock starts — Cancel
-  // disappears; it can no longer be called off here.
-  // (Gated on the actual clock, mirroring the backend — merely reaching the
-  // scheduled hour is not a start.)
-  // An upcoming booking may be cancelled only until 30 minutes before the
-  // scheduled service start (backend enforces the same cutoff — this only
-  // hides doomed actions).
   const serviceStarted = Boolean(booking?.serviceStartedAt);
   const cancelLocked = isCancelLocked(booking, now);
 
@@ -279,29 +253,18 @@ const BookingDetails = () => {
     label: (booking.serviceType || "").replace(/_/g, " "),
   };
   const end = sessionEndDate(booking);
-  // Redefined window: after OTP start this is actual start → actual end.
   const serviceWindow = effectiveServiceWindow(booking);
   const remainingLabel = end ? formatRemaining(end, now) : null;
   const isActive = ["requested", "accepted", "confirmed", "in_progress"].includes(booking.status);
-  // Cancel mirrors the backend 30-minute cutoff (admins exempt there): hide
-  // the button once moves are locked so users aren't offered a doomed action.
-  // The backend also refuses self-serve cancel once the session is live
-  // (in_progress) for non-admins — hide there too so the button never offers
-  // an action the API would reject.
   const canCancel =
     isActive &&
     !serviceStarted &&
     user?.role !== "admin" &&
     booking.status !== "in_progress" &&
     !cancelLocked;
-  // OTP service-start state.
   const sessionLive = ["accepted", "confirmed", "in_progress"].includes(booking.status);
   const showOtpForm =
     user?.role === "cook" && sessionLive && !booking.serviceStartedAt;
-  // Reschedule (v1: customer own-booking + admin any-booking, instant move).
-  // canRescheduleBooking mirrors the backend (status, lock, cap, started
-  // flags); the locked-note below explains a doomed action instead of
-  // offering it — same pattern as the cancel lock note.
   const canReschedule = canRescheduleBooking(booking, user, now);
   const reschedulableStatus =
     ["requested", "accepted", "confirmed"].includes(booking.status) &&
@@ -322,8 +285,6 @@ const BookingDetails = () => {
     customerPhone: user?.phone,
     booking,
   });
-  // After payment the cook needs the customer's name, number and location —
-  // prefer the server-built job sheet link, fall back to the client builder.
   const isPaid = booking?.payment?.status === "paid";
   const jobSheetWa = isPaid
     ? booking.cookWhatsappUrl ||
@@ -345,8 +306,6 @@ const BookingDetails = () => {
         customerName: user?.name,
       }));
 
-  // Journey tracker: where is this booking in its life? Note "accepted"
-  // means the cook said yes but payment may still be pending.
   const journeySteps = [
     { key: "requested", label: "Requested", hint: "Waiting for cook" },
     {
@@ -369,13 +328,7 @@ const BookingDetails = () => {
           ? "Expired"
           : "";
 
-  // Refund status for a cancelled paid booking — refunds are approved or
-  // rejected by an admin (nothing moves automatically). Unpaid bookings
-  // show nothing: no money moved.
   const refundLine = (() => {
-    // Refund copy is money-information for the customer (and support). On the
-    // cook's page a cancelled booking shows ONLY the slot-freed line — there
-    // is nothing for the cook to act on here, so never build the string.
     if (user?.role === "cook") return "";
     if (booking?.status !== "cancelled") return "";
     const pay = booking?.payment || {};
@@ -424,7 +377,6 @@ const BookingDetails = () => {
         </Link>
       </div>
 
-      {/* Hero */}
       <div className="bd-hero">
         <div className="bd-hero-top">
           <span className="bd-eyebrow">
@@ -468,7 +420,6 @@ const BookingDetails = () => {
         </div>
       </div>
 
-      {/* Journey tracker */}
       {!journeyEndedBad && journeyIdx >= 0 && (
         <ol className="bd-journey" aria-label="Booking progress">
           {journeySteps.map((s, i) => (
@@ -507,9 +458,6 @@ const BookingDetails = () => {
         </div>
       )}
 
-      {/* NOTE: no standalone arrival banner here by design — arrival is only
-          recorded via the OTP-verified service start (manual arrival taps
-          are disabled), which already shows its own started banner below. */}
       {booking.hoursCompleted && !booking.review && (
         <div className="bd-banner warn">
           <BellRing size={18} />
@@ -545,9 +493,6 @@ const BookingDetails = () => {
         );
       })()}
 
-      {/* Service timings: actual OTP clock when the service started, else
-          the scheduled slot (covers old bookings from before the OTP clock).
-          Hidden for requests that never became a service. */}
       {(booking.serviceStartedAt ||
         ["in_progress", "completed"].includes(booking.status) ||
         booking.hoursCompleted) && (() => {
@@ -631,11 +576,6 @@ const BookingDetails = () => {
         </div>
       )}
 
-      {/* Booking summary: cook + order in one card
-          (session facts live in the hero chips above).
-          Cook viewers never see the cook block (their own number, Call and
-          WhatsApp buttons) — they get the Customer card + Venue below
-          instead. The order (dishes/notes) still shows: it's the job sheet. */}
       <div className="bd-card">
         <h3 className="bd-card-head">
           <Receipt size={18} /> Booking Summary
@@ -643,7 +583,6 @@ const BookingDetails = () => {
 
         {user?.role !== "cook" && (
           <>
-            {/* Cook */}
             <div className="bd-cook">
               <div className="bd-cook-avatar" aria-hidden="true">
                 <CookAvatar photoUrl={booking.cook?.photoUrl} name={booking.cook?.name} alt="" />
@@ -677,7 +616,6 @@ const BookingDetails = () => {
           </>
         )}
 
-        {/* Order (only when there is something in it) */}
         {(booking.selectedItems?.length > 0 || booking.notes) && (
           <>
             <hr className="bd-sec-div" />
@@ -700,10 +638,6 @@ const BookingDetails = () => {
         )}
       </div>
 
-      {/* Customer contact — cook only. The backend shares the customer's
-          phone once the booking is accepted (it stays hidden while
-          "requested"); the tel: link opens the device dialer. Reuses the
-          bd-cook card styles so no new CSS is needed. */}
       {user?.role === "cook" && (
         <div className="bd-card">
           <h3 className="bd-card-head">
@@ -736,9 +670,6 @@ const BookingDetails = () => {
         </div>
       )}
 
-      {/* Venue card — hidden for customers ("user"): they already know their
-          own address. Cooks (and admins) still see it to navigate to the
-          customer's location. */}
       {user?.role !== "customer" && (
         <div className="bd-card bd-summary-card">
           <h3 className="bd-card-head">
@@ -755,7 +686,6 @@ const BookingDetails = () => {
         </div>
       )}
 
-      {/* Timeline (admin only — hidden on customer/cook logins) */}
       {booking.statusHistory?.length > 0 && user?.role === "admin" && (
         <div className="bd-card bd-venue-card">
           <h3 className="bd-card-head">
@@ -775,8 +705,6 @@ const BookingDetails = () => {
         </div>
       )}
 
-      {/* Reschedule history — every move with its reason + cook change.
-          Customer-safe: only slot/cook/reason/by display, never internals. */}
       {Array.isArray(booking.reschedules) && booking.reschedules.length > 0 && (
         <div className="bd-card bd-venue-card">
           <h3 className="bd-card-head">
@@ -819,9 +747,6 @@ const BookingDetails = () => {
         </div>
       )}
 
-      {/* Post-service refund (customer only). The button appears only when
-          the backend reports the booking eligible (end + 1h, not completed,
-          paid, no existing request); every other state shows status copy. */}
       {user?.role === "customer" && refundInfo && (() => {
         const rs = refundInfo.refundStatus || booking?.payment?.refundStatus || "none";
         const amt = refundInfo.refundAmount || refundInfo.paidAmount || booking?.payment?.paidAmount || booking?.amount;
@@ -906,9 +831,6 @@ const BookingDetails = () => {
         return null;
       })()}
 
-      {/* Cancellation — backend-computed eligibility + estimate (§23).
-          Active bookings show the live preview; cancelled ones show the
-          immutable snapshot recorded at cancellation time. */}
       {user?.role === "customer" && cancelPreview?.canCancel && (
         <div className="bd-card bd-cancel-card" role="status">
           <h3 className="bd-card-head">
@@ -953,10 +875,6 @@ const BookingDetails = () => {
         </div>
       )}
 
-      {/* Actions — reschedule + cancel. Rendered only when it applies, so
-          completed/cancelled/expired bookings never show an empty bar.
-          Inside 30 minutes of the start (or past the 2-move cap) the move
-          locks — a note says so instead of offering a doomed button. */}
       {(canCancel ||
         canReschedule ||
         showRescheduleLockedNote ||
@@ -1012,7 +930,6 @@ const BookingDetails = () => {
           />
         </div>
       )}
-      {/* Cook-only: report an issue about this customer to the admin. */}
       {user?.role === "cook" && booking.customer && (
         <div className="bd-card bd-review-card">
           <h3 className="bd-card-head">
@@ -1028,7 +945,6 @@ const BookingDetails = () => {
           />
         </div>
       )}
-      {/* Customer: report an issue about this cook / session to the admin. */}
       {user?.role === "customer" && booking.cook && (
         <div className="bd-card bd-review-card">
           <h3 className="bd-card-head">
@@ -1091,8 +1007,6 @@ const BookingDetails = () => {
           booking={booking}
           onClose={() => setRescheduleOpen(false)}
           onRescheduled={(updated) => {
-            // The move keeps the cook, duration and price — merge the fresh
-            // slot/count/history over local state; the modal already toasts.
             if (updated && typeof updated === "object") {
               setBooking((prev) => ({ ...prev, ...updated }));
             } else {
@@ -1107,8 +1021,6 @@ const BookingDetails = () => {
           eligibility={refundInfo}
           onClose={() => setRefundOpen(false)}
           onRequested={() => {
-            // The request only queues for admin review — refresh both the
-            // booking (payment.refundStatus) and the eligibility card.
             fetchDetails();
             API.get(`/bookings/${booking._id}/refund-eligibility`)
               .then((res) => setRefundInfo(res.data))

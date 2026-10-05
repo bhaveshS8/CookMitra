@@ -1,9 +1,3 @@
-// Customer cancellation & refund policy tests.
-// Run:  node backend/cancellation-refund.test.js  — exits non-zero on failure.
-//
-// Pure engine tests run dependency-free; controller/complaint tests drive the
-// REAL controllers with in-memory fakes (no DB). mongoose readyState is
-// flipped to "connected" so the atomic-claim paths execute against the fakes.
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 
@@ -34,7 +28,6 @@ const check = (name, ok, detail) => {
   else failures += 1;
 };
 
-// ── Engine: categories from server-side truth ────────────────────────────
 const H = 60 * 60 * 1000;
 const mkBooking = (over = {}) => ({
   _id: "b1",
@@ -66,7 +59,6 @@ const startOf = (b) => {
   check("before assignment → 100%", r.allowed && r.cancellationCategory === "BEFORE_ASSIGNMENT" && r.finalRefund === 1000 && r.refundPercent === 100, JSON.stringify({ c: r.cancellationCategory, f: r.finalRefund }));
 }
 {
-  // Exact spec example: 499 → 499.
   const b = mkBooking({ cook: null, status: "requested", amount: 499, payment: { status: "pending", refundStatus: "none" } });
   const r = evaluateCancellation({ booking: b, currentTime: Date.now(), actorRole: "customer" });
   check("before assignment unpaid: allowed, 0 refund queued", r.allowed && r.finalRefund === 0 && r.refundPercent === 100);
@@ -128,13 +120,11 @@ const startOf = (b) => {
   check("started service not self-cancellable", !evaluateCancellation({ booking: s, currentTime: Date.now(), actorRole: "customer" }).allowed);
 }
 
-// ── Engine: paise-safe amounts ────────────────────────────────────────────
 check("449 × 75% = 336.75 exactly", computeRefund(449, 75) === 336.75, String(computeRefund(449, 75)));
 check("1000 × 90% = 900", computeRefund(1000, 90) === 900);
 check("999 × 75% = 749.25", computeRefund(999, 75) === 749.25);
 check("no float drift on thirds", computeRefund(100, 33.33) === 33.33);
 {
-  // Gateway fee deducted only when configured + real gateway payment.
   policyConfig.gatewayFixedFee = 20;
   const b = mkBooking({ amount: 1000, payment: { status: "paid", paidAmount: 1000, razorpayPaymentId: "pay_1", refundStatus: "none", testMode: false } });
   const r = evaluateCancellation({ booking: b, currentTime: startOf(b) - 10 * H, actorRole: "customer" });
@@ -147,7 +137,6 @@ check("no float drift on thirds", computeRefund(100, 33.33) === 33.33);
   check("no fee when unconfigured", z.nonRefundableCharges === 0 && z.finalRefund === 750);
 }
 {
-  // Refund base = actual paid service amount (coupon-adjusted), never cook share.
   const b = mkBooking({ amount: 449, slabPrice: 499, discount: 50, cookPayout: 382, commission: 67, payment: { status: "paid", paidAmount: 449, refundStatus: "none" } });
   check("base is paidAmount (449), not slab/cook share", refundBaseOf(b) === 449);
   const r = evaluateCancellation({ booking: b, currentTime: startOf(b) - 10 * H, actorRole: "customer" });
@@ -158,7 +147,6 @@ check("policy versioned", typeof policyVersion === "string" && policyVersion.len
 check("customer reasons structured", CUSTOMER_CANCELLATION_REASONS.join() === "CHANGE_OF_PLANS,WRONG_BOOKING_DETAILS,WRONG_ADDRESS,SERVICE_NO_LONGER_REQUIRED,OTHER");
 check("complaint reasons per spec", CUSTOMER_COMPLAINT_REASONS.join() === "COOK_DID_NOT_ARRIVE,MAJOR_SERVICE_DEVIATION,SERVICE_QUALITY_ISSUE,UNPROFESSIONAL_BEHAVIOR,OTHER");
 
-// ── queueRefundForApproval: override + idempotency ────────────────────────
 {
   const q = bookingController.queueRefundForApproval;
   const b = () => ({ status: "cancelled", amount: 1000, payment: { status: "paid", paidAmount: 1000, refundStatus: "none", testMode: false }, statusHistory: [] });
@@ -174,7 +162,6 @@ check("complaint reasons per spec", CUSTOMER_COMPLAINT_REASONS.join() === "COOK_
   check("zero policy refund queues nothing", q(d4, "x", 0) === 0 && d4.payment.refundStatus === "none");
 }
 
-// ── Controller fakes ─────────────────────────────────────────────────────
 const realReadyState = mongoose.connection.readyState;
 mongoose.connection.readyState = 1; // run atomic-claim paths against fakes
 
@@ -222,8 +209,6 @@ const mkDoc = (over = {}) => {
   };
   return b;
 };
-// Default claim: apply $set (including dotted paths like "noShow.marked")
-// to the stored doc when the live-status filter matches.
 const applySet = (doc, set = {}) => {
   for (const [k, v] of Object.entries(set)) {
     const parts = k.split(".");
@@ -276,7 +261,6 @@ const runCancel = async (user, body) => {
 (async () => {
   installFakes();
 
-  // Customer cancel >24h: 90% snapshot + queued refund.
   storeDoc = mkDoc();
   claimImpl = defaultClaim;
   notifications.length = 0;
@@ -292,7 +276,6 @@ const runCancel = async (user, body) => {
     check("customer notified with refund figure", notifications.some((n) => String(n.message || "").includes("₹900")));
   }
 
-  // Idempotent repeat: no double refund, no new audit rows.
   {
     const n0 = notifications.length;
     const a0 = audits.length;
@@ -301,7 +284,6 @@ const runCancel = async (user, body) => {
     check("no duplicate refund/audit on repeat", notifications.length === n0 && audits.length === a0);
   }
 
-  // Money fields from the client are ignored.
   storeDoc = mkDoc();
   {
     const r = await runCancel(CUSTOMER, { reason: "CHANGE_OF_PLANS", refundPercent: 100, refundAmount: 99999, cancellationCharge: 0, refundStatus: "PROCESSED", refundReference: "HAX" });
@@ -309,14 +291,12 @@ const runCancel = async (user, body) => {
     check("client money fields ignored", ci.refundPercentage === 90 && ci.finalRefundAmount === 900 && !r.body.payment.refundReference && !ci.refundReference);
   }
 
-  // Cross-customer cancel refused.
   storeDoc = mkDoc();
   {
     const r = await runCancel(STRANGER, { reason: "CHANGE_OF_PLANS" });
     check("cannot cancel another customer's booking", r.statusCode === 403);
   }
 
-  // Reason validation: invalid rejected, OTHER needs a note.
   storeDoc = mkDoc();
   {
     const r = await runCancel(CUSTOMER, { reason: "BOGUS" });
@@ -332,14 +312,12 @@ const runCancel = async (user, body) => {
     check("OTHER with description accepted", r.statusCode === 200 && r.body.cancellationInfo.cancellationReasonNote === "Family emergency");
   }
 
-  // Unpaid cancel: allowed, NOT_APPLICABLE, nothing queued.
   storeDoc = mkDoc({ payment: { status: "pending", paidAmount: 0, refundStatus: "none" } });
   {
     const r = await runCancel(CUSTOMER, { reason: "CHANGE_OF_PLANS" });
     check("unpaid cancel allowed, no refund", r.statusCode === 200 && r.body.cancellationInfo.refundStatus === "NOT_APPLICABLE" && r.body.payment.refundStatus === "none");
   }
 
-  // Cook arrived: customer self-cancel blocked (no bypass to a refund).
   storeDoc = mkDoc({ cookArrived: true, serviceStartedAt: new Date() });
   {
     const r = await runCancel(CUSTOMER, { reason: "CHANGE_OF_PLANS" });
@@ -347,7 +325,6 @@ const runCancel = async (user, body) => {
     check("blocked cancel flips nothing", storeDoc.status === "confirmed");
   }
 
-  // Cook cancels: COOK_CANCELLED, 100%, never customer-classified.
   storeDoc = mkDoc();
   {
     const r = await runCancel(COOK, {});
@@ -357,7 +334,6 @@ const runCancel = async (user, body) => {
     check("customer told a replacement is attempted", notifications.some((n) => /alternative cook/i.test(n.message || "")));
   }
 
-  // Race: two simultaneous cancels — one winner, one alreadyCancelled.
   storeDoc = mkDoc();
   {
     let calls = 0;
@@ -374,7 +350,6 @@ const runCancel = async (user, body) => {
     claimImpl = defaultClaim;
   }
 
-  // Race: cancel vs service start — start wins, cancel refused.
   storeDoc = mkDoc();
   {
     claimImpl = () => ({ modifiedCount: 0 });
@@ -385,7 +360,6 @@ const runCancel = async (user, body) => {
     claimImpl = defaultClaim;
   }
 
-  // Preview: backend numbers only.
   storeDoc = mkDoc();
   {
     const r = res();
@@ -403,7 +377,6 @@ const runCancel = async (user, body) => {
     check("preview unavailable after start", r.body?.canCancel === false && /started/i.test(r.body?.message || ""));
   }
 
-  // No-show: cook records, 0%, no queue; customer/stranger refused.
   storeDoc = mkDoc({ cookArrived: true });
   {
     const r = res();
@@ -429,10 +402,8 @@ const runCancel = async (user, body) => {
     check("stranger cook cannot mark no-show", r.statusCode === 403);
   }
 
-  // ── Complaints ──────────────────────────────────────────────────────
   const cBookings = {};
   const cComplaints = [];
-  // findOne returns a query-like ({ select }) like real Mongoose.
   Complaint.findOne = () => ({ select: async () => null });
   Complaint.create = async (d) => {
     const c = { _id: `c${cComplaints.length}`, ...d };
@@ -465,7 +436,6 @@ const runCancel = async (user, body) => {
     check("unsupported complaint refused (never auto-refund)", r.statusCode === 400 || r.statusCode === 409, `s=${r.statusCode}`);
   }
   {
-    // Duplicate: an open complaint already exists for this booking+filer.
     Complaint.findOne = () => ({ select: async () => ({ _id: "c0" }) });
     const r = await fileComplaint({ id: "cust1", role: "CUSTOMER" }, { category: "OTHER", message: "Filing again on the same booking today" }, "cb1");
     check("duplicate complaint → 409", r.statusCode === 409, `s=${r.statusCode}`);

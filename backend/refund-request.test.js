@@ -1,15 +1,3 @@
-// Standalone regression test for CUSTOMER POST-SERVICE REFUND REQUESTS.
-// Run:  node backend/refund-request.test.js  — exits non-zero on any failure.
-//
-// Rule: scheduledEnd + 1h <= now, booking NOT completed (nor cancelled /
-// rejected / expired), paid non-test payment with a positive refundable
-// amount, and no existing refund request. The customer files { reason, note }
-// only — the amount is always computed server-side. Approved work reuses the
-// existing payoutController approve/reject/settle paths (tested in
-// finance-audit.test.js); this file proves the request gate + its integration
-// points (queue visibility, caps, ledger, notifications, history).
-//
-// Drives the REAL refundController with in-memory fakes (no DB).
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 
@@ -32,14 +20,12 @@ const STRANGER = { id: "cust9", role: "CUSTOMER" };
 const COOK = { id: "cook1", role: "COOK" };
 const ADMIN = { id: "admin1", role: "ADMIN" };
 
-// ── In-memory fakes ─────────────────────────────────────────────────────────
 let bookingDoc = null;
 let claimImpl = null;
 const claimCalls = [];
 const notificationLog = [];
 const ledgerRows = [];
 
-// Service ran 3h ago for 2h (ended 1h ago + margin): eligible by default.
 const hoursAgo = (h) => new Date(Date.now() - h * 60 * 60 * 1000);
 
 const baseDoc = (over = {}) => {
@@ -145,7 +131,6 @@ const callEligibility = (user) =>
   });
 
 (async () => {
-  // ── 1. Eligible read ──────────────────────────────────────────────────────
   {
     reset();
     const r = await callEligibility(CUSTOMER);
@@ -157,7 +142,6 @@ const callEligibility = (user) =>
     check("1. stranger -> 403", stranger.status === 403, `s=${stranger.status}`);
   }
 
-  // ── 2. Exact 1-hour boundary ──────────────────────────────────────────────
   {
     reset({ serviceEndsAt: new Date(Date.now() - 59 * 60 * 1000 - 59 * 1000) });
     const early = controller.refundEligibility(bookingDoc, Date.now());
@@ -167,9 +151,7 @@ const callEligibility = (user) =>
     check("2. end+60:00 -> eligible", onTime.eligible === true, String(onTime.eligible));
   }
 
-  // ── 3. Static schedule fallback (no OTP clock) ────────────────────────────
   {
-    // Yesterday 17:00–20:00 IST: end+1h long past.
     const y = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const p = (n) => String(n).padStart(2, "0");
     const dayStr = `${y.getFullYear()}-${p(y.getMonth() + 1)}-${p(y.getDate())}`;
@@ -178,7 +160,6 @@ const callEligibility = (user) =>
     check("3. static IST schedule drives eligibility", e.eligible === true, `${e.reasonCode}`);
   }
 
-  // ── 4. Status guards ──────────────────────────────────────────────────────
   for (const status of ["completed", "cancelled", "rejected", "expired"]) {
     reset({ status });
     const e = controller.refundEligibility(bookingDoc, Date.now());
@@ -190,7 +171,6 @@ const callEligibility = (user) =>
     check(`4. ${status} past end+1h eligible`, e.eligible === true, `${e.reasonCode}`);
   }
 
-  // ── 5. Payment guards ─────────────────────────────────────────────────────
   {
     reset({ payment: { status: "pending" } });
     check("5. unpaid ineligible", controller.refundEligibility(bookingDoc, Date.now()).reasonCode === "no_payment", "");
@@ -204,7 +184,6 @@ const callEligibility = (user) =>
     check("5. refunded blocks", controller.refundEligibility(bookingDoc, Date.now()).reasonCode === "no_payment", controller.refundEligibility(bookingDoc, Date.now()).reasonCode);
   }
 
-  // ── 6. Happy path: claim, ledger, notifications, history ──────────────────
   {
     reset();
     claimImpl = async (filter, update) => {
@@ -226,7 +205,6 @@ const callEligibility = (user) =>
     check("6. no duplicate customer notice", notificationLog.filter((n) => String(n.user) === "cust1").length === 1, "");
   }
 
-  // ── 7. Client cannot set the amount ───────────────────────────────────────
   {
     reset();
     claimImpl = async (filter, update) => bookingDoc;
@@ -236,7 +214,6 @@ const callEligibility = (user) =>
     check("7. $set carries server amount only", set["payment.refundAmount"] === 1110 && !("payment.status" in set) && set["payment.refundStatus"] === "pending", JSON.stringify(Object.keys(set)));
   }
 
-  // ── 8. Auth + input validation ────────────────────────────────────────────
   {
     reset();
     claimImpl = async () => bookingDoc;
@@ -253,7 +230,6 @@ const callEligibility = (user) =>
     check("8. no claim attempted on validation failure", claimCalls.length === 0, `calls=${claimCalls.length}`);
   }
 
-  // ── 9. Too early / completed via POST ─────────────────────────────────────
   {
     reset({ serviceEndsAt: new Date(Date.now() - 30 * 60 * 1000) });
     claimImpl = async () => bookingDoc;
@@ -264,7 +240,6 @@ const callEligibility = (user) =>
     check("9. completed -> 400 completed copy", done.status === 400 && /already been completed/.test(String(done.payload?.message)), `s=${done.status} ${done.payload?.message || ""}`);
   }
 
-  // ── 10. Duplicate protection (two tabs, one winner) ───────────────────────
   {
     reset();
     let calls = 0;
@@ -284,7 +259,6 @@ const callEligibility = (user) =>
     check("10. single ledger row", ledgerRows.filter((l) => l.type === "refund.requested").length === 1, `n=${ledgerRows.length}`);
   }
 
-  // ── 11. Completion race: completion wins → clean refusal ──────────────────
   {
     reset();
     claimImpl = async () => null;
@@ -293,7 +267,6 @@ const callEligibility = (user) =>
     check("11. completed race -> 400, no invalid request", r.status === 400 && bookingDoc.payment.refundStatus === "none" && ledgerRows.length === 0, `s=${r.status} rs=${bookingDoc.payment.refundStatus}`);
   }
 
-  // ── 12. No auto-refund: request only queues ───────────────────────────────
   {
     reset();
     claimImpl = async (filter, update) => {
@@ -308,7 +281,6 @@ const callEligibility = (user) =>
     check("12. booking status untouched", bookingDoc.status === "confirmed", bookingDoc.status);
   }
 
-  // ── 13. Missing booking → 404 ─────────────────────────────────────────────
   {
     bookingDoc = null;
     const r = await callRequest(CUSTOMER, { reason: "Other" });
@@ -317,7 +289,6 @@ const callEligibility = (user) =>
     check("13. eligibility unknown -> 404", e.status === 404, `s=${e.status}`);
   }
 
-  // ── 14. Route surface ─────────────────────────────────────────────────────
   {
     const fs = require("fs");
     const path = require("path");
@@ -334,7 +305,6 @@ const callEligibility = (user) =>
     check("14. GET eligibility mounted", routeSrc.includes('"/:id/refund-eligibility"'), "");
   }
 
-  // ── 15. Admin decision integration (existing payout paths) ─────────────────
   {
     const payout = require("./controllers/payoutController");
     const callApprove = (user, body) =>
@@ -345,10 +315,6 @@ const callEligibility = (user) =>
           resolve({ status: res.statusCode, payload: res.body })
         );
       });
-    // Partial approval of a customer request (gateway unconfigured in tests
-    // → manual path, same guards + ledger + notify shape as full approval).
-    // Faithful claim applier: honors the refundStatus filter (claim + final
-    // atomic commit), applies $set dotted paths and history like Mongo would.
     reset({ payment: { refundStatus: "pending", refundAmount: 1110, refundReason: "Cook did not arrive" } });
     claimImpl = async (filter, update) => {
       const want = filter["payment.refundStatus"];
@@ -370,7 +336,6 @@ const callEligibility = (user) =>
     check("15. history names the partial", /Partial refund of ₹700/.test(String(bookingDoc.statusHistory[0]?.note)), String(bookingDoc.statusHistory[0]?.note));
     check("15. ledger refund.approved = 700", ledgerRows.some((l) => l.type === "refund.approved" && l.amount === 700), ledgerRows.map((l) => `${l.type}:${l.amount}`).join(","));
     check("15. customer told partially approved", notificationLog.some((n) => /partially approved/.test(n.message) && /₹700/.test(n.message)), notificationLog.map((n) => n.message).join("|"));
-    // Over-cap partial is refused.
     reset({ payment: { refundStatus: "pending", refundAmount: 1110 } });
     claimImpl = async () => bookingDoc;
     const over = await callApprove(ADMIN, { amount: 50000 });
@@ -378,7 +343,6 @@ const callEligibility = (user) =>
     check("15. over-cap moves nothing", bookingDoc.payment.refundStatus === "pending", bookingDoc.payment.refundStatus);
   }
 
-  // ── 16. Reject notifies the cook too (payout unblocked) ───────────────────
   {
     const payout = require("./controllers/payoutController");
     reset({ payment: { refundStatus: "pending", refundAmount: 1110, refundReason: "Cook did not arrive" } });

@@ -1,26 +1,9 @@
-// Centralized customer cancellation & refund policy engine (§2).
-// THE single source of truth for cancellation eligibility, refund percentage
-// and refund amounts. Controllers must call this — never re-implement the
-// slabs. The frontend never computes refunds; it only displays these values.
-//
-// Boundary rule (documented, deterministic — §7):
-//   msUntilStart > 24h            → MORE_THAN_24_HOURS  (90%)
-//   24h >= msUntilStart > 6h      → WITHIN_24_HOURS     (75%)
-//   msUntilStart <= 6h            → WITHIN_6_HOURS      (50%)
-// i.e. exactly 24h resolves to WITHIN_24_HOURS, exactly 6h to WITHIN_6_HOURS.
-//
-// Money rule (§10/§31): paise-integer arithmetic throughout (no float drift —
-// ₹449 × 75% = ₹336.75 exactly), rounded to 2 decimals. The refund base is
-// ALWAYS the eligible customer/service amount actually paid
-// (payment.paidAmount, falling back to booking.amount — the coupon-adjusted
-// final price). Never cook payout, commission, or pre-coupon price.
 
+// Cancellation/refund engine: boundaries — exactly 24h → WITHIN_24_HOURS, exactly 6h → WITHIN_6_HOURS; base = paidAmount, paise-safe.
 const { istEventInstant } = require("./time");
 const policyConfig = require("../config/cancellationPolicy");
-
 const MS_24H = 24 * 60 * 60 * 1000;
 const MS_6H = 6 * 60 * 60 * 1000;
-
 const TERMINAL_STATUSES = ["cancelled", "completed", "rejected", "expired", "unattended"];
 
 const CUSTOMER_CANCELLATION_REASONS = [
@@ -31,7 +14,6 @@ const CUSTOMER_CANCELLATION_REASONS = [
   "OTHER",
 ];
 
-// Complaint reasons a customer may file from "Report a Problem" (§19).
 const CUSTOMER_COMPLAINT_REASONS = [
   "COOK_DID_NOT_ARRIVE",
   "MAJOR_SERVICE_DEVIATION",
@@ -40,7 +22,6 @@ const CUSTOMER_COMPLAINT_REASONS = [
   "OTHER",
 ];
 
-// Cases that must NEVER auto-refund — admin verification required (§21).
 const NOT_AUTO_REFUNDABLE = [
   "CHANGE_OF_PLANS",
   "CUSTOMER_UNAVAILABLE",
@@ -54,7 +35,6 @@ const NOT_AUTO_REFUNDABLE = [
 const toPaise = (rupees) => Math.round(Number(rupees || 0) * 100);
 const fromPaise = (paise) => Math.round(Number(paise || 0)) / 100;
 
-// Paise-safe: base × percent → 2-decimal rupees. 449 × 75 = 336.75 exactly.
 const computeRefund = (baseAmount, refundPercent) => {
   const basePaise = toPaise(baseAmount);
   if (!(basePaise > 0)) return 0;
@@ -62,8 +42,6 @@ const computeRefund = (baseAmount, refundPercent) => {
   return fromPaise(Math.round((basePaise * pct) / 100));
 };
 
-// Scheduled service-start instant (IST wall time → UTC instant, host-TZ safe).
-// Mirrors bookingController.sessionStartDate without the require cycle.
 const serviceStartInstant = (booking) => {
   try {
     if (!booking?.date || !booking?.startTime) return null;
@@ -73,9 +51,6 @@ const serviceStartInstant = (booking) => {
   }
 };
 
-// Whether a real gateway charge may be deducted (§11): only when configured
-// (>0), and only against a real captured gateway payment. Never invented,
-// never applied to test/unpaid money.
 const gatewayDeductionFor = (booking) => {
   const fee = Number(policyConfig.gatewayFixedFee) || 0;
   if (!(fee > 0)) return 0;
@@ -88,14 +63,11 @@ const gatewayDeductionFor = (booking) => {
 const slabFor = (category) =>
   policyConfig.slabs[category] || { cancellationChargePercent: 0, refundPercent: 0 };
 
-// Derive the cancellation category from server-side booking truth (§3).
-// opts: { actorRole: customer|cook|admin, noShow?: boolean, cookFailed?: boolean }
 const deriveCategory = (booking, nowMs, opts = {}) => {
   const role = String(opts.actorRole || "customer").toLowerCase();
   if (opts.noShow) return "CUSTOMER_NO_SHOW";
   if (opts.cookFailed) return "COOK_FAILED_SERVICE";
   if (role === "cook") return "COOK_CANCELLED";
-  // Customer path below.
   if (!booking?.cook) return "BEFORE_ASSIGNMENT";
   if (booking?.cookArrived || booking?.serviceStartedAt) return "COOK_ARRIVED";
   const start = serviceStartInstant(booking);
@@ -106,7 +78,6 @@ const deriveCategory = (booking, nowMs, opts = {}) => {
   return "WITHIN_6_HOURS";
 };
 
-// Main entry: evaluateCancellation({ booking, currentTime, actorRole, noShow, cookFailed }).
 const evaluateCancellation = ({ booking, currentTime, actorRole = "customer", noShow = false, cookFailed = false } = {}) => {
   const nowMs = Number(currentTime) || Date.now();
   const role = String(actorRole || "customer").toLowerCase();
@@ -128,8 +99,6 @@ const evaluateCancellation = ({ booking, currentTime, actorRole = "customer", no
   if (TERMINAL_STATUSES.includes(booking.status)) {
     return fail("BOOKING_NOT_CANCELLABLE", "This booking can no longer be cancelled.");
   }
-  // Started service can never be self-serve cancelled (race guard pairs with
-  // the atomic claim in cancelBooking — §17). Admins may still record it.
   if ((booking.serviceStartedAt || booking.status === "in_progress") && role !== "admin") {
     return fail(
       "SERVICE_ALREADY_STARTED",
@@ -137,8 +106,6 @@ const evaluateCancellation = ({ booking, currentTime, actorRole = "customer", no
       { cancellationCategory: booking.cookArrived ? "COOK_ARRIVED" : null }
     );
   }
-  // Cook arrival locks customer self-serve cancellation (§8): no bypass via
-  // a frontend cancel after the cook reaches the venue. Admins record 0%.
   if (booking.cookArrived && role === "customer" && !noShow) {
     const slab = slabFor("COOK_ARRIVED");
     const base = refundBaseOf(booking);
@@ -175,7 +142,6 @@ const evaluateCancellation = ({ booking, currentTime, actorRole = "customer", no
   };
 };
 
-// Eligible refund base (§31): actual customer-paid service amount.
 const refundBaseOf = (booking) => {
   const paid = Number(booking?.payment?.paidAmount);
   if (Number.isFinite(paid) && paid > 0) return Math.round(paid * 100) / 100;
@@ -184,7 +150,6 @@ const refundBaseOf = (booking) => {
   return 0;
 };
 
-// Existing 30-minute self-serve cutoff (kept — §1 flow must not break).
 const isWithin30MinCutoff = (booking, nowMs = Date.now()) => {
   const start = serviceStartInstant(booking);
   if (!start) return false;

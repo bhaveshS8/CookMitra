@@ -7,22 +7,14 @@ const { verifyWebhook, handleInbound } = require("../controllers/whatsappControl
 
 const router = express.Router();
 
-// Meta inbound webhook (cook Accept/Decline taps). No session auth by design —
-// the X-Hub-Signature-256 HMAC over the RAW body is the credential, and every
-// tap is re-authorized against the sender's WhatsApp number + booking state.
-// (server.js mounts express.raw() for this path so verification can run.)
 router.get("/webhook", verifyWebhook);
 router.post("/webhook", handleInbound);
 
-// Public (authenticated) status — reports readiness WITHOUT leaking secrets.
-// Frontend uses this to decide whether to show "updates on WhatsApp" hints.
 router.get("/status", auth, (req, res) => {
   const s = status();
   res.json({ enabled: s.enabled, configured: s.configured });
 });
 
-// Admin-only test send: verifies token + phone ID + recipient delivery.
-// Body: { to: "9876543210", message?: "custom text" }
 router.post(
   "/test",
   auth,

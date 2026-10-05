@@ -1,8 +1,3 @@
-// Standalone regression test for the post-payment WhatsApp shares + customer
-// confirmation notification (no deps, no DB).
-// Run:  node backend/pay-whatsapp.test.js — exits non-zero on failure.
-// Uses a locally-signed Razorpay-style payment (verified path only — the old
-// demo mark-paid path is gone, so bare { method } must NOT confirm).
 const crypto = require("crypto");
 process.env.RAZORPAY_KEY_SECRET = "test_secret_for_unit_test";
 const Booking = require("./models/Booking");
@@ -27,9 +22,6 @@ const bookingDoc = new Booking({
   addressDetails: { flatNo: "H-12", society: "Green Park", city: "Delhi" },
   location: { lat: 28.6139, lng: 77.209 },
   amount: 900,
-  // Stored by POST /payments/order at checkout time — payBooking binds the
-  // submitted triple to this id (replay protection). Fixtures must carry it,
-  // exactly like a real booking awaiting confirmation.
   payment: { status: "pending", razorpayOrderId: "order_test_1" },
   status: "accepted",
   statusHistory: [],
@@ -49,9 +41,6 @@ const ledgerRows = [];
 
 const notifications = [];
 Booking.findOne = () => bookingDoc;
-// Emulate the atomic pay claim (accepted+unpaid -> confirmed+paid) without a
-// DB: only the live booking wins; anything else loses like the real
-// conditional update. Ledger writes are captured in-memory (no buffering).
 Booking.findOneAndUpdate = async (filter, update) => {
   if (String(filter?._id) !== String(bookingDoc._id)) return null;
   if (bookingDoc.status !== "accepted" || bookingDoc.payment?.status === "paid") return null;
@@ -96,7 +85,6 @@ const next = (e) => {
 
 (async () => {
   try {
-    // Unverified payments must NEVER confirm: bare { method } is rejected.
     const bareDoc = new Booking({
       _id: "507f1f77bcf86cd799439021",
       customer: "507f1f77bcf86cd799439012",
@@ -157,7 +145,6 @@ const next = (e) => {
     check("booking confirmed after payment", resBody.status === "confirmed", resBody.status);
     check("payment recorded as paid", resBody.payment?.status === "paid", resBody.payment?.status);
 
-    // --- In-app notifications (cook + customer website account) ---
     check(
       "two notifications created (cook + customer)",
       notifications.length === 2,
@@ -181,7 +168,6 @@ const next = (e) => {
       cookNotif?.type || "(missing)"
     );
 
-    // --- Job sheet -> cook's WhatsApp ---
     check(
       "cookWhatsappUrl targets the cook's number",
       cookWa.startsWith("https://wa.me/919876543210"),
@@ -197,7 +183,6 @@ const next = (e) => {
       "pin"
     );
 
-    // --- Confirmation -> customer's own WhatsApp ---
     const selfMsg = decodeURIComponent(selfWa.split("text=")[1] || "");
     console.log("--- Customer confirmation message ---");
     console.log(selfMsg);

@@ -24,10 +24,8 @@ import { AnalyticsEvents, track } from "../utils/analytics";
 import { SERVICE_DETAILS, formatCurrency, formatDate, formatTimeRange12, formatIsoToIstDay } from "../utils/constants";
 
 const WINDOW_MS = 5 * 60 * 1000; // 5-minute payment window
-// Calmed for scale (see BookingWaiting): 8s halves sustained poll rps.
 const POLL_MS = 8000;
 const REDIRECT_S = 6;
-// Circumference of the countdown ring (SVG r=54).
 const RING = 2 * Math.PI * 54;
 
 const METHODS = [
@@ -37,18 +35,12 @@ const METHODS = [
   { id: "wallet", label: "Wallet", desc: "Paytm · Amazon Pay", icon: Wallet },
 ];
 
-// What happens after tapping Pay, per method. Card numbers / UPI IDs are
-// collected ONLY inside Razorpay's secure popup (PCI-DSS) — never in our
-// own inputs, so there is intentionally no inline card/UPI form here.
 const METHOD_HINTS = {
   upi: "After tapping Pay, a secure Razorpay popup opens — pick GPay / PhonePe / Paytm there, or enter your UPI ID and approve the collect request.",
   card: "After tapping Pay, enter card number, expiry & CVV in the secure Razorpay popup — we never see or store card details.",
   netbanking: "After tapping Pay, choose your bank and approve in the secure Razorpay popup.",
   wallet: "After tapping Pay, choose your wallet and approve in the secure Razorpay popup.",
 };
-// Razorpay Checkout method keys hidden for each choice, so the gateway opens
-// focused on the method the customer picked (best-effort — unknown keys are
-// ignored by Checkout).
 const HIDE_METHODS = {
   upi: ["card", "netbanking", "wallet", "emi", "paylater", "cardless_emi"],
   card: ["upi", "netbanking", "wallet", "emi", "paylater", "cardless_emi"],
@@ -56,7 +48,6 @@ const HIDE_METHODS = {
   wallet: ["upi", "card", "netbanking", "emi", "paylater", "cardless_emi"],
 };
 
-// Load Razorpay Checkout.js once (cached promise). False when offline/blocked.
 let razorpayScriptPromise = null;
 const loadRazorpay = () => {
   if (typeof window !== "undefined" && window.Razorpay) return Promise.resolve(true);
@@ -89,8 +80,6 @@ const BookingPayment = () => {
   const [redirectIn, setRedirectIn] = useState(REDIRECT_S);
   const [cookWaUrl, setCookWaUrl] = useState(null);
   const [selfWaUrl, setSelfWaUrl] = useState(null);
-  // True when the backend has automatic WhatsApp push configured — the success
-  // screen then notes that updates arrive on WhatsApp by themselves.
   const [waAuto, setWaAuto] = useState(false);
   useEffect(() => {
     let alive = true;
@@ -99,7 +88,6 @@ const BookingPayment = () => {
         if (alive && res.data?.enabled) setWaAuto(true);
       })
       .catch(() => {
-        // status endpoint unavailable — manual share buttons below still work
       });
     return () => {
       alive = false;
@@ -108,11 +96,7 @@ const BookingPayment = () => {
   const handledRef = useRef(false);
   const aliveRef = useRef(true);
   const pollRef = useRef(null);
-  // True once Razorpay reports a successful payment (Checkout also fires
-  // `ondismiss` when it closes after success — this tells the two apart).
   const completedRef = useRef(false);
-  // Set when payment.failed already toasted, so the following ondismiss
-  // doesn't pile a misleading "cancelled" message on top.
   const failedSilentDismissRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -133,11 +117,9 @@ const BookingPayment = () => {
         handledRef.current = true;
         setPhase("expired");
       } else if (st === "requested") {
-        // Cook never accepted (or the window lapsed) — back to waiting.
         handledRef.current = true;
         navigate(`/bookings/${bookingId}/wait`, { replace: true });
       } else {
-        // Don't clobber an in-flight payment with the idle phase.
         setPhase((p) => (p === "processing" ? p : "pay"));
       }
     } catch (err) {
@@ -152,7 +134,6 @@ const BookingPayment = () => {
   useEffect(() => {
     aliveRef.current = true;
     load();
-    // Pause polling while the tab is hidden (see BookingWaiting).
     const startPoll = () => {
       stopPoll();
       pollRef.current = setInterval(() => {
@@ -181,7 +162,6 @@ const BookingPayment = () => {
     };
   }, [load]);
 
-  // Expired screen auto-redirects back to finding cooks
   useEffect(() => {
     if (phase !== "expired") return undefined;
     setRedirectIn(REDIRECT_S);
@@ -198,16 +178,7 @@ const BookingPayment = () => {
     return () => clearInterval(iv);
   }, [phase, navigate]);
 
-  // Real Razorpay flow: create a gateway order for this booking's window,
-  // collect the payment in Checkout (UPI/cards per the chosen method), then
-  // confirm with the verified signature. Nothing is ever marked paid without
-  // gateway verification, and nothing auto-opens WhatsApp — the success
-  // screen offers optional share buttons instead.
-  // Synchronous double-tap guard (F-03): React state lags a render, so two
-  // rapid taps both pass a `phase === "processing"` check and mint two
-  // gateway orders. The ref flips in the same tick — the loser returns
-  // before any network call. The backend in-flight mint guard is the
-  // second layer; this is UX protection, not security.
+  // UX guard only — not security.
   const payingRef = useRef(false);
   const payNow = async () => {
     if (payingRef.current || phase === "processing") return;
@@ -224,15 +195,12 @@ const BookingPayment = () => {
     completedRef.current = false;
     failedSilentDismissRef.current = false;
     try {
-      // Refuse to start when the window is nearly gone — money captured after
-      // expiry can't attach to a live booking.
       const msLeft = expiresAtMsForPay();
       if (msLeft != null && msLeft < 30000) {
         setPhase("pay");
         showToast("Payment window almost over — please rebook to get a fresh window.", "error");
         return;
       }
-      // 1) Gateway order (honest errors only — never a fake confirmation).
       const cookId = booking?.cook?._id || booking?.cook;
       let order;
       try {
@@ -248,8 +216,6 @@ const BookingPayment = () => {
         order = res.data;
       } catch (err) {
         if (err.response?.status === 503) {
-          // Gateway unconfigured (no Razorpay keys). A 503 is infrastructure
-          // failure, never payment success — show an honest error.
           handledRef.current = false;
           setPhase("pay");
           showToast(
@@ -265,7 +231,6 @@ const BookingPayment = () => {
         );
         return;
       }
-      // 2) Fully-discounted session: server confirms at no cost — no gateway.
       if (order?.free || order?.amountPaise === 0 || Number(order?.amountPaise || 0) <= 0) {
         const res = await API.patch(`/bookings/${bookingId}/pay`, { method, payment: null });
         completedRef.current = true;
@@ -284,14 +249,12 @@ const BookingPayment = () => {
         }, 6000);
         return;
       }
-      // 3) Razorpay Checkout.
       const loaded = await loadRazorpay();
       if (!loaded || !window.Razorpay) {
         setPhase("pay");
         showToast("Couldn't load the payment gateway. Check your connection and retry.", "error");
         return;
       }
-      // Pause polling auto-redirects while Checkout is open.
       handledRef.current = true;
       const rzp = new window.Razorpay({
         key: order.keyId,
@@ -326,19 +289,15 @@ const BookingPayment = () => {
               method,
             });
             showToast("Payment successful — booking confirmed!", "success");
-            // Linger so the customer can use the WhatsApp share buttons.
             setTimeout(() => {
               if (aliveRef.current) navigate(`/bookings/${bookingId}`, { replace: true });
             }, 6000);
           } catch (err) {
             completedRef.current = false;
             if (err.response?.status === 410) {
-              // Server freed the slot — the window closed mid-payment.
               setPhase("expired");
               showToast(err.response?.data?.message || "Payment window expired — slot released.", "error");
             } else if (err.response?.status === 409) {
-              // Slot taken by another booking, or a duplicate confirm raced.
-              // If the server kept this booking paid, treat as success.
               if (err.response?.data?.alreadyPaid || err.response?.data?.status === "confirmed") {
                 completedRef.current = true;
                 setBooking((prev) => ({ ...(prev || {}), ...(err.response?.data || {}) }));
@@ -358,8 +317,6 @@ const BookingPayment = () => {
         },
         modal: {
           ondismiss: () => {
-            // Fires on manual close AND after success/failure — only a plain
-            // manual close counts here.
             if (completedRef.current) return;
             if (failedSilentDismissRef.current) {
               failedSilentDismissRef.current = false;
@@ -386,7 +343,6 @@ const BookingPayment = () => {
     }
   };
 
-  // Milliseconds left in the payment window (null when unknown).
   const expiresAtMsForPay = () => {
     const acceptedEntry = (booking?.statusHistory || []).find((s) => s.status === "accepted");
     const acceptedMs = acceptedEntry?.timestamp ? new Date(acceptedEntry.timestamp).getTime() : null;
@@ -398,7 +354,6 @@ const BookingPayment = () => {
     return exp ? Math.max(0, exp - Date.now()) : null;
   };
 
-  // Countdown against the server-set 5-minute payment window.
   const acceptedEntry = (booking?.statusHistory || []).find((s) => s.status === "accepted");
   const acceptedMs = acceptedEntry?.timestamp ? new Date(acceptedEntry.timestamp).getTime() : null;
   const expiresAtMs = booking?.paymentExpiresAt
@@ -462,7 +417,6 @@ const BookingPayment = () => {
     );
   }
 
-  // phases "pay" and "processing" render below
   if (phase === "success") {
     return (
       <div className="booking-flow-page">

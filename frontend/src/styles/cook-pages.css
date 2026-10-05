@@ -1,9 +1,4 @@
-/* ==========================================================================
-   Cook dashboard hero, availability, on-demand page, setup, tracking,
-   admin dossier, doc uploads + add-cook modal. Responsive + user-friendly.
-   ========================================================================== */
 
-/* Cook dashboard hero */
 .cook-modern-hero {
   position: relative;
   overflow: hidden;
@@ -16,7 +11,6 @@
   padding: 1.7rem 1.5rem;
   animation: riseIn 0.3s ease;
 }
-/* Soft festive glow deco — pure decoration, never intercepts clicks */
 .cook-modern-hero::after {
   content: "";
   position: absolute;
@@ -36,8 +30,6 @@
   position: relative;
   z-index: 1;
 }
-/* Fixed-size wrapper so the photo, the initial fallback and the
-   verified dot all share one consistent circle. */
 .cook-modern-avatar-wrap {
   position: relative;
   width: 88px;
@@ -47,8 +39,6 @@
   flex-shrink: 0;
   aspect-ratio: 1 / 1;
 }
-/* The hero avatar links to the cook's profile page — no link styling, and
-   a subtle zoom hint that it is clickable. */
 .cook-modern-avatar-link {
   text-decoration: none;
   color: inherit;
@@ -88,7 +78,6 @@
   box-shadow: var(--shadow-brand);
   overflow: hidden;
 }
-/* Verified dot sits on the dark hero — ring tinted to match the banner */
 .cook-modern-avatar-wrap .verified-dot {
   width: 26px;
   height: 26px;
@@ -97,7 +86,6 @@
   bottom: 0;
   border-color: #3d1606;
 }
-/* Scoped to the text column only (was matching every inner div) */
 .cook-modern-hero-copy { flex: 1; min-width: 240px; }
 .cook-modern-hero-copy h1 { color: #fff; font-size: 1.5rem; margin: 0 0 0.3rem; }
 .cook-modern-hero-copy p { color: rgba(255, 255, 255, 0.8); margin: 0; }
@@ -126,7 +114,6 @@
 .cook-glass-btn:focus-visible { outline: 3px solid rgba(255, 255, 255, 0.6); outline-offset: 2px; }
 .cook-glass-btn.solid { background: var(--primary-gradient); border-color: transparent; box-shadow: var(--shadow-brand); }
 
-/* Cook on/off availability toggle (hero action button) */
 .avail-toggle {
   display: inline-flex;
   align-items: center;
@@ -160,7 +147,6 @@
 }
 
 .cook-modern-stats { margin-top: 1rem; }
-/* Cook stat cards are buttons jumping to filtered bookings views */
 .cook-modern-stats .dashboard-stat-card {
   font: inherit;
   color: inherit;
@@ -173,7 +159,6 @@
   outline-offset: 2px;
 }
 .cook-modern-tabs { background: #fff; }
-/* Tabs with icons: keep icon + label aligned */
 .cook-modern-tabs .tab-btn,
 .tabs-navigation-bar .tab-btn {
   display: inline-flex;
@@ -195,13 +180,11 @@
   flex-shrink: 0;
 }
 
-/* Primary decision row vs quieter day-of tools on cook booking cards */
 .cook-actions-primary { margin-top: 0.9rem; }
 .cook-actions-primary .btn { min-height: 46px; padding: 0.6rem 1.25rem; font-size: 0.95rem; }
 .cook-actions-secondary { margin-top: 0.5rem; }
 .cook-actions-secondary .btn { font-size: 0.8rem; }
 
-/* "More info" expander keeps secondary booking details one tap away */
 .cook-more {
   border: 1px dashed var(--slate-200);
   border-radius: var(--radius-sm);
@@ -247,7 +230,6 @@
   color: var(--slate-600);
 }
 
-/* Next-job highlight strip */
 .cook-next-job {
   display: flex;
   align-items: center;
@@ -262,9 +244,6 @@
   flex-wrap: wrap;
 }
 
-/* ==========================================================================
-   Book a Cook page
-   ========================================================================== */
 
 .ondemand-page {
   max-width: 1180px;
@@ -273,7 +252,6 @@
   animation: riseIn 0.3s ease;
 }
 
-/* Hero banner */
 .ondemand-hero {
   padding: 2.2rem 1.7rem;
   margin-bottom: 1.5rem;
@@ -287,7 +265,6 @@
 .ondemand-hero .section-title { font-size: 1.85rem; margin-top: 0.35rem; }
 .ondemand-hero .section-description { color: var(--slate-600); max-width: 60ch; }
 
-/* Step indicator */
 .ondemand-steps {
   display: flex;
   align-items: center;
@@ -326,7 +303,6 @@
 .ondemand-step.done { color: var(--accent-emerald); }
 .ondemand-step.done .ondemand-step-dot { background: var(--accent-emerald); color: #fff; }
 
-/* Form card */
 .ondemand-form-card {
   background: #fff;
   border: 1px solid var(--border-subtle);
@@ -342,7 +318,6 @@
 }
 .ondemand-form-card .form-control { min-height: 46px; }
 
-/* Consistent spacing inside the form card */
 .ondemand-form-card > .form-row + .form-row,
 .ondemand-form-card > .form-group + .form-group,
 .ondemand-form-card > .form-row + .form-group,
@@ -365,7 +340,6 @@
   gap: 0.45rem;
 }
 
-/* Location detection box */
 .ondemand-locate-box {
   border: 1.5px dashed var(--slate-300);
   border-radius: var(--radius-md);
@@ -388,12 +362,10 @@
   border: 1px solid #fde68a;
 }
 
-/* Step 2 — back button + results */
 .ondemand-back-row {
   margin-bottom: 0.75rem;
 }
 
-/* Best-match results on on-demand */
 .match-results-head {
   display: flex;
   align-items: center;
@@ -407,7 +379,6 @@
   color: var(--slate-800);
   font-size: 1.1rem;
 }
-/* Match cook card */
 .match-card {
   display: flex;
   flex-direction: column;
@@ -484,8 +455,6 @@
   padding: 0.3rem 0.75rem;
 }
 
-/* Specialty tags on match card — long values clamp with an ellipsis so
-   they can never push past the card edge on narrow phones. */
 .match-card .tags {
   display: flex;
   flex-wrap: wrap;
@@ -502,10 +471,6 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-/* Cards size to their content only: an empty specialties row must not
-   reserve a gap row. In the ≥768px step-3 grid each card also hugs its
-   own height instead of stretching to the tallest sibling. Phones keep
-   full-width column stretch (height there is already content-driven). */
 .match-card .tags:empty {
   display: none;
 }
@@ -516,11 +481,6 @@
   }
 }
 
-/* Compact step-3 cook cards on small screens: tighter padding/gaps, a
-   smaller avatar and rate pill, specialties clipped to one line, and the
-   book box turned into a single row (slot details left, Book button right)
-   instead of the roomy stacked desktop layout. Covers phones and
-   portrait tablets, where the full-size card dominated the viewport. */
 @media (max-width: 768px) {
   .ondemand-page .match-card {
     gap: 0.45rem;
@@ -589,7 +549,6 @@
   }
 }
 
-/* Bookable slot chips — comfortable tap targets */
 .slot-list {
   display: flex;
   flex-wrap: wrap;
@@ -608,7 +567,6 @@
 }
 .slot-list .slot-chip:disabled { opacity: 0.65; cursor: wait; }
 
-/* Slot payment info note */
 .slot-pay-note {
   font-size: 0.82rem;
   color: var(--slate-500);
@@ -619,7 +577,6 @@
   margin: 0;
 }
 
-/* No results state */
 .ondemand-page .no-data {
   border: 1.5px dashed var(--slate-300);
   border-radius: var(--radius-lg);
@@ -631,20 +588,15 @@
 }
 .ondemand-page .no-data p { margin: 0; }
 
-/* Booking submit button area spacing */
 .ondemand-form-card > .btn-block:last-of-type {
   margin-top: 1.4rem;
 }
 
-/* Phone info banner inside form */
 .ondemand-form-card > div:has(.loc-msg) + .form-row,
 .ondemand-form-card > .error-message + div {
   margin-top: 0;
 }
 
-/* ==========================================================================
-   Cook Setup (create / manage profile) page
-   ========================================================================== */
 
 .cook-setup-page {
   max-width: 720px;
@@ -660,7 +612,6 @@
 }
 .cook-setup-head h1 { font-size: 1.85rem; margin: 0; }
 .cook-setup-head svg { color: var(--primary); flex-shrink: 0; }
-/* Two-up rows that gracefully collapse on phones (replaces inline grids) */
 .cook-form-grid-2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -673,7 +624,6 @@
   margin-bottom: 0.5rem;
   align-items: center;
 }
-/* Service toggle tiles */
 .cook-service-toggles {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -704,9 +654,6 @@
   color: var(--primary);
 }
 
-/* ==========================================================================
-   Doc uploads (Aadhaar / PAN / photo) — shared by setup + dashboard
-   ========================================================================== */
 
 .cook-doc-box {
   border: 1.5px dashed var(--slate-300);
@@ -742,9 +689,6 @@
   flex-shrink: 0;
 }
 
-/* ==========================================================================
-   Live tracking page (cook + customer share dashboard chrome)
-   ========================================================================== */
 
 .track-map-frame {
   width: 100%;
@@ -771,9 +715,6 @@
   flex-wrap: wrap;
 }
 
-/* ==========================================================================
-   Admin cook dossier
-   ========================================================================== */
 
 .dossier-table-card {
   background: #fff;
@@ -791,9 +732,6 @@
 .dossier-table-card tbody tr:last-child { border-bottom: none; }
 .dossier-table-card tbody tr:hover { background: var(--slate-50); }
 
-/* ==========================================================================
-   Admin verification-document viewer (thumbs + lightbox)
-   ========================================================================== */
 
 .admin-doc-grid {
   display: flex;
@@ -906,9 +844,6 @@
   .admin-doc-lightbox { padding: 0.6rem; }
 }
 
-/* ==========================================================================
-   Add-cook (admin) modal + shared modal form rows
-   ========================================================================== */
 
 .modal-form-grid-2 {
   display: grid;
@@ -918,9 +853,6 @@
 .add-cook-modal .form-control { min-height: 46px; }
 .add-cook-modal .service-pick-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); }
 
-/* ==========================================================================
-   Recent-reviews teaser on the cook profile tab + tab count pill
-   ========================================================================== */
 
 .tab-count-pill {
   display: inline-flex;
@@ -992,18 +924,12 @@
   .cook-service-toggle:hover { transform: none; }
 }
 
-/* ==========================================================================
-   Cook workspace refresh — hero dashboard, stat shortcuts, status-accented
-   booking cards, rating hero. Modern + thumb-friendly.
-   ========================================================================== */
 
 .cook-dash { animation: riseIn 0.3s ease; }
 
-/* Hero text legibility on the dark banner */
 .cook-modern-hero-copy h1 { color: #fff; }
 .cook-hero-sub { color: rgba(255, 255, 255, 0.82); margin: 0; font-size: 0.92rem; }
 .cook-hero-badges { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.65rem; }
-/* Pills that stay readable on the dark hero */
 .hero-pill {
   display: inline-flex;
   align-items: center;
@@ -1021,7 +947,6 @@
 .hero-pill.warn { background: rgba(217, 119, 6, 0.9); border-color: transparent; }
 .hero-pill.bad { background: rgba(225, 29, 72, 0.88); border-color: transparent; }
 
-/* Clickable stat cards (buttons reset to card look) */
 .cook-stat-btn {
   font: inherit;
   text-align: left;
@@ -1030,7 +955,6 @@
 }
 .cook-stat-btn:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
 
-/* Status-accented booking cards */
 .booking-item-card.cook-booking-card { border-left: 4px solid var(--slate-200); }
 .booking-item-card.cook-booking-card.st-requested { border-left-color: var(--accent-amber); }
 .booking-item-card.cook-booking-card.st-accepted,
@@ -1051,9 +975,6 @@
   box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.25), var(--shadow-md);
 }
 
-/* New-request cards: warm highlight so they stand out in every tab, with
-   direct Accept / Ignore buttons sized for thumbs on every screen. On
-   phones the shared .booking-actions-row rule stacks them full-width. */
 .booking-item-card.cook-booking-card.st-requested {
   border-color: #fcd9a8;
   background: linear-gradient(180deg, #fffdf6 0%, #fff9ef 100%);
@@ -1071,7 +992,6 @@
 }
 .cook-request-actions .btn:disabled { opacity: 0.65; cursor: wait; transform: none; }
 
-/* Customer row inside a cook booking card */
 .cook-card-customer {
   display: flex;
   align-items: center;
@@ -1103,7 +1023,6 @@
   gap: 0.35rem;
 }
 
-/* Amount + paid pill row */
 .cook-card-money {
   display: flex;
   align-items: center;
@@ -1126,7 +1045,6 @@
 .cook-pay-pill.paid { background: var(--accent-emerald-light); color: #065f46; }
 .cook-pay-pill.unpaid { background: var(--accent-amber-light); color: #92400e; }
 
-/* Setup intro card */
 .cook-setup-intro {
   background: linear-gradient(150deg, #fff 0%, #fff7ef 100%);
   border: 1px solid var(--border-subtle);
@@ -1156,7 +1074,6 @@
   padding: 0.32rem 0.75rem;
 }
 
-/* Rating hero (reviews summary) */
 .cook-rating-hero {
   position: relative;
   overflow: hidden;
@@ -1181,16 +1098,7 @@
   .cook-card-customer h3 { white-space: normal; }
 }
 
-/* ==========================================================================
-   Modern cook booking cards (all tabs: today / tomorrow / upcoming / past /
-   needs-action / reports). Card list becomes a responsive grid on wide
-   screens; each card is a header + meta grid + actions stack that collapses
-   cleanly to one column on phones.
-   ========================================================================== */
 
-/* Responsive grid: single card per row on every screen. Phones stack
-   full-width; tablet/laptop keep one roomy row card capped + centered so
-   lines stay readable on wide screens. */
 .bookings-list-modern.cook-bookings-grid {
   width: 100%;
   max-width: 100%;
@@ -1205,7 +1113,6 @@
   height: 100%;
 }
 @media (min-width: 768px) and (max-width: 1023px) {
-  /* Tablet: one card per row at 70% width, centered */
   .bookings-list-modern.cook-bookings-grid {
     grid-template-columns: 1fr;
     gap: 0.9rem;
@@ -1213,8 +1120,6 @@
     margin-inline: auto;
   }
   .booking-item-card.cook-booking-card.cb-card { padding: 1rem 1.1rem; border-radius: 18px; }
-  /* Directions pill gets its own row below the address so long venue
-     text can never overlap or squeeze it. */
   .cb-meta-item .cook-addr-directions.cb-directions {
     display: flex;
     width: fit-content;
@@ -1225,7 +1130,6 @@
   }
 }
 @media (min-width: 1024px) {
-  /* Laptop: one card per row at 70% width, centered */
   .bookings-list-modern.cook-bookings-grid {
     grid-template-columns: 1fr;
     gap: 1rem;
@@ -1233,8 +1137,6 @@
     margin-inline: auto;
   }
   .booking-item-card.cook-booking-card.cb-card { padding: 1.1rem 1.25rem; }
-  /* Directions pill gets its own row below the address so long venue
-     text can never overlap or squeeze it. */
   .cb-meta-item .cook-addr-directions.cb-directions {
     display: flex;
     width: fit-content;
@@ -1249,7 +1151,6 @@
   .booking-item-card.cook-booking-card.cb-card { padding: 1.15rem 1.3rem; }
 }
 
-/* Card shell — modern gradient, soft shadow, status accent bar. */
 .booking-item-card.cook-booking-card.cb-card {
   position: relative;
   overflow: hidden;
@@ -1285,7 +1186,6 @@
     0 18px 32px -18px rgba(15, 23, 42, 0.4);
   border-color: #fed7aa;
 }
-/* Status accents (kept in sync with the st-* classes set in JSX). */
 .booking-item-card.cook-booking-card.cb-card.st-requested { border-left-color: var(--accent-amber, #f59e0b); }
 .booking-item-card.cook-booking-card.cb-card.st-accepted,
 .booking-item-card.cook-booking-card.cb-card.st-confirmed { border-left-color: var(--accent-blue, #3b82f6); }
@@ -1296,7 +1196,6 @@
 .booking-item-card.cook-booking-card.cb-card.st-expired { border-left-color: var(--slate-300, #cbd5e1); }
 .booking-item-card.cook-booking-card.cb-card.st-unattended { border-left-color: #dc2626; }
 
-/* Header: customer identity + status badges. */
 .cb-top {
   display: flex;
   align-items: flex-start;
@@ -1334,11 +1233,8 @@
 .cb-badges .badge { font-size: 0.68rem; padding: 0.28rem 0.65rem; }
 .cb-badges .badge svg { width: 12px; height: 12px; }
 
-/* Meta grid: When / Where / Amount. */
 .cb-meta {
   display: grid;
-  /* Auto-collapse: 2 cols when the card is wide, 1 col in narrow tablet
-     cards or phones — never forces a squeeze. */
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
   gap: 0.55rem;
   margin-top: 0.85rem;
@@ -1380,8 +1276,6 @@
 }
 .cb-meta-item .cook-pay-pill { margin-top: 0.25rem; }
 
-/* Highlighted customer-location block: full-width row with a warm wash,
-   stronger border and bolder address text so the venue stands out. */
 .cb-meta-item.cb-meta-where {
   grid-column: 1 / -1;
   background: linear-gradient(180deg, #fffdf4 0%, #fef6e7 100%);
@@ -1406,9 +1300,7 @@
   display: inline-flex;
 }
 
-/* Big, thumb-friendly Directions button inside the highlighted block. */
 
-/* Big, thumb-friendly Directions button inside the highlighted block. */
 .cb-meta-item .cook-addr-directions.cb-directions {
   display: inline-flex;
   align-items: center;
@@ -1441,7 +1333,6 @@
 }
 .cb-meta-item .cook-addr-directions.cb-directions svg { flex-shrink: 0; }
 
-/* Note + hours-done banners. */
 .cb-note {
   margin: 0.7rem 0 0;
   font-size: 0.84rem;
@@ -1482,12 +1373,8 @@
 }
 .cb-hours-done svg { color: #b45309; flex-shrink: 0; }
 
-/* Actions. */
 .cb-actions { margin-top: 0.85rem; }
 .cb-actions .btn { border-radius: 99px; font-weight: 800; min-height: 42px; }
-/* New-request Accept / Ignore stay the tallest, fullest buttons on the card
-   (this outranks .cb-actions .btn above and the older .cook-request-actions
-   rule so the 5-minute decision is always the most tappable thing). */
 .cb-actions.cook-request-actions .btn {
   flex: 1 1 160px;
   min-height: 48px;
@@ -1518,9 +1405,6 @@
      0 12px 32px -12px rgba(220, 38, 38, 0.35);
 }
 
-/* Tabs: keep scrollable + thumb-friendly on small screens.
-   Cards: single column on phones/tablets, 2-col grid on desktop (above).
-   The location block + Directions button get full width on small screens. */
 @media (max-width: 480px) {
   .cook-tabs { gap: 0.25rem; padding: 0.22rem; border-radius: 12px; }
   .cook-tab { font-size: 0.78rem; padding: 0.42rem 0.65rem; min-height: 42px; gap: 0.3rem; }
@@ -1551,8 +1435,6 @@
   .cb-actions .btn { flex: 1 1 150px; justify-content: center; }
 }
 @media (min-width: 768px) and (max-width: 1023px) {
-  /* Tablet cards are ~340px wide: actions share the row when they fit,
-     otherwise they wrap — never squeezed. */
   .cb-actions { display: flex; flex-wrap: wrap; }
   .cb-actions .btn { flex: 1 1 150px; justify-content: center; }
   .cb-actions.cook-request-actions .btn { flex: 1 1 160px; }
@@ -1563,7 +1445,6 @@
   .booking-item-card.cook-booking-card.cb-card:hover { transform: none; }
   .cb-meta-item .cook-addr-directions.cb-directions:active { transform: none; }
 }
-/* ---- Small phones: cook booking cards + tabs ------------------------ */
 @media (max-width: 375px) {
   .cook-tabs { gap: 0.2rem; padding: 0.2rem; }
   .cook-tab { font-size: 0.74rem; padding: 0.4rem 0.5rem; min-height: 42px; gap: 0.25rem; }

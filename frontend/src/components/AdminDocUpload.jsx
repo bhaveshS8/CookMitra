@@ -4,11 +4,6 @@ import { useShowToast } from "../store/hooks";
 import { resolveFileUrl } from "./CookDocUploads";
 import { Upload, FileCheck, Loader2 } from "lucide-react";
 
-// Admin-side "upload on behalf of a cook" panel. Posts each file straight to
-// POST /cooks/:id/upload-docs (admin-gated) — the backend saves it, attaches
-// the URL to the cook's profile and notifies the cook. :id may be a CookProfile
-// id or the cook's User id; `current` carries the profile's present doc URLs so
-// the panel can show "on file / replace" states.
 const FIELDS = [
   { key: "aadhar", label: "Aadhaar Card", urlKey: "aadharCardUrl" },
   { key: "pan", label: "PAN Card", urlKey: "panCardUrl" },
@@ -21,8 +16,6 @@ const AdminDocUpload = ({ cookId, current = {}, onUploaded }) => {
 
   const upload = async (field, file) => {
     if (!file || !cookId) return;
-    // Must match backend/middleware/upload.js multer fileSize limit — instant
-    // client-side error instead of a wasted upload round-trip.
     if (file.size > 2 * 1024 * 1024) {
       showToast("File too large — each file must be 2MB or less", "error");
       return;

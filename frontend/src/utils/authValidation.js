@@ -1,7 +1,5 @@
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
-// Strip an optional Indian country/trunk prefix so "+91 98765 43210",
-// "919876543210" and "09876543210" all validate as the same 10-digit core.
 export const getPhoneCore = (v) => {
   let digits = String(v || "").replace(/\D/g, "");
   if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
@@ -13,8 +11,6 @@ export const normalizeEmail = (v) => String(v || "").trim().toLowerCase();
 
 export const normalizePhone = (v) => {
   const core = getPhoneCore(v);
-  // Store the 10-digit core when valid; otherwise keep the trimmed input
-  // so validation (not normalization) surfaces the problem.
   if (/^[6-9]\d{9}$/.test(core)) return core;
   return String(v || "").trim();
 };
@@ -52,8 +48,6 @@ export const validatePassword = (v, { allowEmpty = false } = {}) => {
   return "";
 };
 
-// 0–4 score for the strength meter (length + variety). An 8-char minimum
-// passes; this only guides users toward stronger passwords.
 export const passwordStrength = (v) => {
   const s = String(v || "");
   let score = 0;
@@ -67,7 +61,6 @@ export const passwordStrength = (v) => {
 
 export const strengthLabel = (score) => ["Too weak", "Weak", "Fair", "Good", "Strong"][score] || "";
 
-// Map axios errors to friendly, actionable form messages.
 export const authErrorMessage = (err, fallback) => {
   const status = err?.response?.status;
   const serverMsg = err?.response?.data?.message;
@@ -76,8 +69,6 @@ export const authErrorMessage = (err, fallback) => {
   if (status === 403 && /blocked by an administrator/i.test(serverMsg || ""))
     return serverMsg;
   if (status === 401) return serverMsg || "Invalid email or password. Please try again.";
-  // Duplicate email on registration — normalize legacy ("Email already
-  // registered") and current wording to one clear message.
   if (/already\s+(registered|exists)/i.test(serverMsg || ""))
     return "Email already exists, please enter another email";
   if (serverMsg) return serverMsg;
@@ -86,9 +77,6 @@ export const authErrorMessage = (err, fallback) => {
   return fallback;
 };
 
-// Surface express-validator `errors[]` as { field: message } for per-field UI.
-// Also handles single-field duplicate responses like
-// { field: "email", message: "...", code: "EMAIL_EXISTS" }.
 export const fieldErrorsFromResponse = (err) => {
   const data = err?.response?.data;
   const list = data?.errors;

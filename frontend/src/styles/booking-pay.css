@@ -1,6 +1,3 @@
-/* ==========================================================================
-   Booking flow — payment page (methods, amount panel, processing)
-   ========================================================================== */
 
 .bf-grid {
   display: grid;
@@ -27,7 +24,6 @@
   font-weight: 600;
 }
 
-/* Payment methods */
 .bf-methods { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
 .bf-method {
   position: relative;
@@ -65,7 +61,6 @@
   letter-spacing: 0.03em;
 }
 
-/* Amount panel */
 .bf-amount-box {
   display: flex;
   flex-direction: column;
@@ -111,7 +106,6 @@
   font-weight: 650;
 }
 
-/* Processing overlay + card pan */
 .bf-processing {
   position: fixed;
   inset: 0;
@@ -148,9 +142,7 @@
 }
 .bf-pay-card { margin-top: 2rem; }
 
-/* Error / expired state copy */
 .bf-sorry-icon { color: var(--accent-rose); }
-/* ---- Small phones: card art fits the viewport ----------------------- */
 @media (max-width: 375px) {
   .bf-pan { width: min(280px, 100%); height: auto; aspect-ratio: 280 / 168; }
   .bf-pay-card { margin-top: 1.4rem; }

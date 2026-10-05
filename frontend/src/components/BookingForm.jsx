@@ -20,7 +20,6 @@ import {
 } from "lucide-react";
 import LoginPromptModal from "./LoginPromptModal";
 
-/* ── Time helpers ────────────────────────────────────────────────────── */
 const SERVICE_START_MIN = 8 * 60;
 const SERVICE_END_MIN = 20 * 60;
 const STEP_MINUTES = 30;
@@ -88,18 +87,12 @@ const nextNDays = (n) => {
   return days;
 };
 
-/* ── Config ──────────────────────────────────────────────────────────── */
-// Direct cook booking: the customer books THIS cook for a home-cooking
-// session. No service picker — every cook offers home cooking at the same
-// flat launch price. Kept as a constant default for the API payload
-// (backend `serviceType` is still required).
 const DEFAULT_SERVICE_TYPE = "cook_for_me";
 
 const DURATION_OPTIONS = [1, 2, 3, 4];
 const DURATION_MIN = 1;
 const DURATION_MAX = 4;
 
-/* ── Component ───────────────────────────────────────────────────────── */
 const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) => {
   const showToast = useShowToast();
   const user = useSelector((s) => s.auth.user);
@@ -120,13 +113,11 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
   }));
   const [step, setStep] = useState(0);
 
-  // Every step change opens at the top of the page.
   useEffect(() => {
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
   }, [step]);
 
-  // Start each step at the top of the page.
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   }, [step]);
@@ -141,16 +132,12 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
   const [savedLocations, setSavedLocations] = useState([]);
   const [savedIdx, setSavedIdx] = useState("");
   const autoFilled = useRef(false);
-  // Set when the customer explicitly picks a previous place from the saved
-  // dropdown — that choice owns the map pin (its own saved pin, or none), so
-  // the detected-location effect must never override it afterwards.
   const explicitPlacePick = useRef(false);
   const errorRef = useRef(null);
   const [copiedPin, setCopiedPin] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const { location: siteLocation } = useSiteLocation();
 
-  /* ── Resolve cook user id ── */
   useEffect(() => {
     if (cookUserId) { setResolvedCookUserId(cookUserId); return; }
     if (!cookId) return;
@@ -176,42 +163,29 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     Number(formData.durationHours) <= DURATION_MAX;
 
 
-
-  /* ── Derived time values ── */
-
-
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
   
-
-/* ── Estimate ── */
   const nowHM = (() => {
     const n = new Date();
     return `${String(n.getHours()).padStart(2, "0")}:${String(n.getMinutes()).padStart(2, "0")}`;
   })();
 
-  /* ── Hour selector (instead of time slots) ──
-     UI shows hour numbers 08–20; backend uses 30-min grid.
-     Selecting "9" sets startTime to "09:00". */
   const hourOptions = [];
   for (let h = 8; h <= 20; h++) {
     hourOptions.push(`${h}:00`);
   }
-  /* Keep user's current selection visible even if changed */
   if (formData.startTime && !hourOptions.includes(formData.startTime)) {
     hourOptions.unshift(formData.startTime);
   }
 
-  // Launch slab pricing: one flat price per whole-hour session (the server
-  // recomputes it — this is display + coupon preview only).
   const slab = slabPriceForDuration(Number(formData.durationHours));
   const discount = slab != null && coupon ? Math.min(coupon.discount, slab) : 0;
   const finalAmount = slab != null ? Math.max(0, slab - discount) : 0;
 
-  // Derived end time based on start time and duration (service hours limits)
   const derivedEndTime = (() => {
     if (!formData.startTime || !hoursValid) return "";
     const startMin = hmToMinutes(formData.startTime);
@@ -239,7 +213,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       if (!formData.startTime) { setError("Select a start time"); scrollToError(); return; }
       if (!derivedEndTime) { setError("That start + duration ends after 8 PM — pick an earlier start"); scrollToError(); return; }
       if (startInPast) { setError("That time already passed today — pick a later start"); scrollToError(); return; }
-      // A re-verified busy slot must not advance — pick another time.
       if (slotBusyError) { setError(slotBusyError); scrollToError(); return; }
       if (checkingSlot) { setError("Checking live availability — one moment…"); scrollToError(); return; }
     }
@@ -247,11 +220,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     setStep(step + 1);
   };
 
-  // Live per-cook check for the picked slot: the hour grid is static, but
-  // another customer may have booked this cook for the same hours since the
-  // page loaded. Re-verify the exact [startTime, endTime] is still free before
-  // enabling "Send Request", so a busy cook can never be booked from a stale
-  // card. Runs only on step 0 where the slot is picked.
   useEffect(() => {
     setSlotBusyError("");
     if (step !== 0 || !hoursValid || !formData.startTime || !derivedEndTime || !formData.date) return;
@@ -270,7 +238,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
             setSlotBusyError(chk.data.reason || "This cook just got booked for those hours — please pick another time.");
           }
         } else {
-          // Legacy array shape fallback: confirm the picked start survives.
           const list = Array.isArray(chk?.data?.slots) ? chk.data.slots : chk?.data || [];
           if (Array.isArray(list)) {
             const ok = list.some(
@@ -281,8 +248,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
         }
       } catch (err) {
         if (cancelled) return;
-        // A 4xx means the slot is invalid/gone — surface it. Network failures
-        // leave the flow enabled (the server re-checks at creation).
         if (err?.response?.status >= 400 && err?.response?.status < 500) {
           setSlotBusyError(err.response?.data?.message || "That slot is no longer free — please pick another time.");
         }
@@ -296,7 +261,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     };
   }, [step, hoursValid, formData.startTime, derivedEndTime, formData.date, formData.durationHours, resolvedCookUserId, cookUserId]);
 
-  /* ── Map pin ── */
   const pinMapsUrl = coords?.lat != null && coords?.lng != null
     ? `https://www.google.com/maps?q=${coords.lat},${coords.lng}` : null;
 
@@ -310,24 +274,19 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     setCopiedPin(true); setTimeout(() => setCopiedPin(false), 2000);
   };
 
-  /* ── Address builder ── */
   const buildAddress = () =>
     `${formData.flatNo.trim()}, ${formData.society.trim()}${
       formData.landmark.trim() ? `, Near ${formData.landmark.trim()}` : ""
     }${formData.city.trim() ? `, ${formData.city.trim()}` : ""}`;
 
-  /* ── Profile address (locked summary card + Edit button) ── */
   const profileAddress = String(user?.address || "").trim();
   const [addrEditing, setAddrEditing] = useState(false);
-  // Summary shown while locked: the composed form address (profile/saved/
-  // detected fill), falling back to the raw profile string.
   const addrSummary =
     [formData.flatNo, formData.society, formData.landmark ? `Near ${formData.landmark}` : "", formData.city]
       .map((p) => String(p || "").trim())
       .filter(Boolean)
       .join(", ") || profileAddress;
 
-  /* ── Saved locations ── */
   const [savedLoaded, setSavedLoaded] = useState(false);
   useEffect(() => {
     if (user?.role !== "customer") { setSavedLoaded(true); return; }
@@ -352,10 +311,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     if (!saved) return;
     explicitPlacePick.current = true;
     const d = saved.addressDetails || {};
-    // Explicit pick always replaces the auto-filled address block (GPS guesses
-    // or a previously applied entry) — the saved address is authoritative.
-    // Entries without structured details (older bookings) fall back to parsing
-    // their address string, same heuristic as the profile-address fill below.
     const parts = String(saved.address || "").split(",").map((p) => p.trim()).filter(Boolean);
     const src = Object.keys(d).length > 0
       ? d
@@ -376,17 +331,11 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       setCoords({ lat: saved.location.lat, lng: saved.location.lng });
       setLocMsg("Previous location applied with saved pin.");
     } else {
-      // Drop any stale detected pin — it would point at the wrong place
-      // for this address.
       setCoords(null);
       setLocMsg("Previous location applied — verify the address below.");
     }
   };
 
-  // Auto-fill priority: profile address > most recent saved booking >
-  // (next effect) browser-detected location. A profile address also starts
-  // the form in "locked" mode (summary card + Edit button). An explicit pick
-  // from the saved-places dropdown always wins once made.
   useEffect(() => {
     if (autoFilled.current || user?.role !== "customer") return;
     const fill = (src) =>
@@ -402,12 +351,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       });
     const profileAddr = String(user?.address || "").trim();
     if (profileAddr) {
-      // The profile address is top priority and never waits for the saved-
-      // locations fetch: while it waited, the detected-location effect could
-      // claim the fields first and the profile address would never fill.
       autoFilled.current = true;
-      // Split "Flat 402, Sunshine Society, Baner, Pune" into the form fields,
-      // same heuristic as applySavedLocation for unstructured addresses.
       const parts = profileAddr.split(",").map((p) => p.trim()).filter(Boolean);
       fill(
         parts.length === 1
@@ -418,9 +362,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       );
       return;
     }
-    // No profile address: wait for /auth/me (address key) and the saved list
-    // before letting the detected-location effect take the fields, so a past
-    // booking can still outrank detection.
     if (user?.address === undefined || !savedLoaded) return;
     if (savedLocations.length > 0) {
       autoFilled.current = true;
@@ -432,39 +373,16 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     }
   }, [savedLocations, savedLoaded, user?.role, user?.address]);
 
-  // Detected location → Google Maps pin for the cook (+ address auto-fill).
-  //
-  // Pin: a detected place that carries real coordinates is attached to the
-  // booking (payload.location) so it reaches the cook as a tappable Google
-  // Maps link — even when the address fields themselves were filled from the
-  // profile address or a previous booking. The saved-places dropdown is the
-  // only override: an explicit pick carries its own pin (or clears the pin
-  // when that saved entry has none).
-  //
-  // Address text: typed, saved, or profile input always wins; the detected
-  // place only fills empty fields, and never from a stale (>12 h) stored fix.
   useEffect(() => {
     const hasFix =
       Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng);
-    // Reverse-geocoding can fail while the GPS fix itself is valid — the pin
-    // must still go through (coordinates are all the cook's navigation needs).
     if (!hasFix && !siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
-    // Pin first: a detected fix with real coordinates is attached for the
-    // cook's navigation even while profile/saved address sources settle.
     if (hasFix && !explicitPlacePick.current) {
       setCoords((c) => c || { lat: siteLocation.lat, lng: siteLocation.lng });
     }
     if (!siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
-    // Saved pins older than 12 h are not reused as today's venue: the header
-    // pill still shows them, but the form waits for a fresh detect or for the
-    // customer to type the address (last week's address is usually wrong).
-    // Fresh fixes carry a `timestamp`/`savedAt` of just now, so they pass.
     const stamp = Number(siteLocation?.savedAt || siteLocation?.timestamp || 0);
     if (stamp && Date.now() - stamp > 12 * 60 * 60 * 1000) return;
-    // Address fields are owned by the profile address, else by the most
-    // recent saved booking (previous effect). Detection only fills what is
-    // left: guests right away, customers once both sources had their chance
-    // and neither exists.
     if (autoFilled.current) return;
     if (user?.role === "customer") {
       const profileAddr = String(user?.address || "").trim();
@@ -473,9 +391,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     autoFilled.current = true;
     setFormData((prev) => {
       if (prev.flatNo || prev.society || prev.landmark || prev.city) return prev;
-      // Door-level line (house + street) fills "Flat / House no." when the fix
-      // really carried a house number — a bare road/area name belongs in the
-      // society/landmark fields, never in the flat field.
       const exact = siteLocation.hasHouseNumber ? (siteLocation.exactLine || "").trim() : "";
       return {
         ...prev,
@@ -487,9 +402,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     });
   }, [siteLocation?.city, siteLocation?.area, siteLocation?.state, siteLocation?.street, siteLocation?.exactLine, siteLocation?.hasHouseNumber, siteLocation?.timestamp, siteLocation?.savedAt, siteLocation?.lat, siteLocation?.lng, user?.role, user?.address, savedLoaded, savedLocations]);
 
-  // Returning from login with an unfinished booking for THIS cook: restore
-  // the filled fields + pin and land back on the confirm step. Runs once;
-  // another cook's draft or a stale one is left alone.
   const resumedDraft = useRef(false);
   useEffect(() => {
     if (resumedDraft.current || !user) return;
@@ -510,11 +422,9 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, cookId]);
 
-  /* ── Submit (Find-Cook broadcast) ── */
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!user) {
-      // Remember the unfinished booking across the login wall.
       saveBookingDraft({ kind: "cook-profile", cookId: cookId ?? resolvedCookUserId, form: formData, coords });
       setShowLoginModal(true);
       return;
@@ -532,8 +442,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     if (!formData.startTime || !derivedEndTime) { fail("Pick a start time"); return; }
     if (endsAfterServiceDay) { fail("Must end by 8 PM"); return; }
     if (startInPast) { fail("Time passed — pick later"); return; }
-    // Block submit on a re-verified busy slot (the check runs on step 0, but
-    // the slot can fill while the customer types the address on step 1).
     if (slotBusyError) { fail(slotBusyError); return; }
     if (checkingSlot) { fail("Checking live availability — one moment…"); return; }
 
@@ -547,9 +455,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     setSubmitting(true); setError("");
     try {
       const selectedItems = formData.notes.split(/[,;]+/).map((d) => d.trim()).filter(Boolean);
-      // Find-Cook: never send a cook id — the server always creates
-      // cook = null and the first atomic accept wins. (A slot found on this
-      // profile page is a hint, not a reservation.)
       const payload = {
         serviceType: DEFAULT_SERVICE_TYPE,
         date: formData.date,
@@ -584,7 +489,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     } catch (err) {
       const msg = err.response?.data?.message || err.message || "Booking failed.";
       fail(msg); showToast(msg, "error");
-      // Removed undefined refreshSlots call
     } finally {
       setSubmitting(false);
     }
@@ -592,12 +496,10 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
 
   const scrollToError = () => requestAnimationFrame(() => errorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }));
 
-  /* ── Date carousel ── */
   const dateDays = nextNDays(7);
   const STEP_TITLES = ["Schedule", "Confirm"];
   const STEP_DESCS = ["When should we come?", "Where & review"];
 
-  /* ════════════════════════════════════════════════════════════════════ */
   const cookFirst = cookName ? String(cookName).split(" ")[0] : null;
   const cookInitial = cookFirst ? cookFirst[0].toUpperCase() : "C";
   const progressPct = ((step + 1) / STEP_TITLES.length) * 100;
@@ -636,7 +538,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
   <div className={`bk bk-modern bk-v2 bk-step-${step}`}>
    <div className="bk-shell">
 
-    {/* Header — cook identity + trust + live price */}
     <div className="bk-head">
       <div className="bk-head-main">
         <span className="bk-avatar" aria-hidden="true">
@@ -671,7 +572,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       </div>
     </div>
 
-    {/* Error alert */}
     {error && (
       <div ref={errorRef} className="bk-error" role="alert">
         <span className="bk-error-icon"><AlertCircle size={15} /></span>
@@ -679,7 +579,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       </div>
     )}
 
-    {/* Step progress — clickable to go back, with progress bar */}
     <div className="bk-progress-wrap">
       <ol className="bk-steps-modern" aria-label="Booking progress">
         {STEP_TITLES.map((title, i) => {
@@ -715,7 +614,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       <div className="bk-progress-bar" aria-hidden="true"><span style={{ width: `${progressPct}%` }} /></div>
     </div>
 
-    {/* Live recap once anything is picked */}
     {(step > 0 && (scheduleSummary || serviceLabel)) && (
       <div className="bk-livebar" aria-live="polite">
         <span className="bk-livechip"><ChefHat size={12} /> {serviceLabel}</span>
@@ -728,7 +626,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       <div className="bk-step" key={step}>
       {step === 0 && (
           <>
-            {/* Date */}
             <div className="bk-card">
               <div className="bk-card-head-row">
                 <div className="bk-card-label">
@@ -768,7 +665,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
             </div>
           </div>
 
-          {/* Duration — priced cards */}
           <div className="bk-card">
             <div className="bk-card-head-row">
               <div className="bk-card-label">
@@ -811,7 +707,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
             </div>
           </div>
 
-          {/* Start time — grouped, no sideways scroll */}
           <div className="bk-card">
             <div className="bk-card-head-row">
               <div className="bk-card-label">
@@ -872,10 +767,8 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
         </>
       )}
 
-      {/* ── Step 1: Address, Details & Pay summary ── */}
       {step === 1 && (
         <>
-          {/* Recap */}
           <div className="bk-card bk-recap">
             <div className="bk-card-head-row">
               <div className="bk-card-label">
@@ -902,7 +795,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
             </div>
           </div>
 
-          {/* Address */}
           <div className="bk-card">
             <div className="bk-card-head-row">
               <div className="bk-card-label">
@@ -1003,7 +895,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
               </div>
             </div>
             )}
-            {/* Map pin status */}
             <div className={`bk-pin-card ${pinMapsUrl ? "has-pin" : ""}`}>
               <span className="bk-pin-avatar"><MapPinned size={15} /></span>
               <span className="bk-pin-text">
@@ -1022,7 +913,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
             </div>
           </div>
 
-          {/* Details */}
           <div className="bk-card">
             <div className="bk-card-head-row">
               <div className="bk-card-label">
@@ -1065,7 +955,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
             </div>
           </div>
 
-          {/* Price + coupon + submit */}
           <div className="bk-card bk-pay-card">
             <div className="bk-card-head-row">
               <div className="bk-card-label">
@@ -1117,7 +1006,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       )}
       </div>
 
-      {/* Sticky action bar — one thumb-friendly place for Back / Continue / Send */}
       <div className="bk-stickybar">
         <div className="bk-sticky-summary" aria-live="polite">
           <span className="bk-sticky-text">

@@ -10,14 +10,9 @@ const bookingSchema = new mongoose.Schema(
     cook: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      // Find-Cook flow: a fresh REQUESTED booking has no cook yet — the
-      // first atomic accept claims it. Legacy direct bookings always set it.
       required: false,
       default: null,
     },
-    // Cooks who tapped Ignore on a broadcast (cook == null) request. The
-    // booking stays REQUESTED for everyone else; ignored cooks stop seeing
-    // it and cannot later accept it.
     ignoredBy: {
       type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
       default: [],
@@ -58,24 +53,14 @@ const bookingSchema = new mongoose.Schema(
       lat: { type: Number, min: -90, max: 90 },
       lng: { type: Number, min: -180, max: 180 },
     },
-    // Arrival: set when the cook marks themselves arrived at the venue
-    // (manual tap). Drives the "cook has arrived" user notification.
     cookArrived: { type: Boolean, default: false },
     cookArrivedAt: { type: Date },
-    // Service-start OTP: a 4-digit code generated per order. Shown on the
-    // customer's booking details; the cook must enter it on arrival, which
-    // starts the service clock (serviceStartedAt). Never sent to the cook
-    // before verification — always strip from cook-facing serializers.
   serviceOtp: { type: String },
   serviceOtpGeneratedAt: { type: Date },
-  // Brute-force guard for the 4-digit OTP: wrong attempts are counted and
-  // the code locks for 15 minutes after 10 failures (reset on success).
   serviceOtpAttempts: { type: Number, default: 0, min: 0 },
   serviceOtpLockedUntil: { type: Date },
   serviceStartedAt: { type: Date },
   serviceEndsAt: { type: Date },
-    // Cooking-hours completion: set once the session end time passes while
-    // the booking is active. Drives the "cooking hours complete" alarm.
     hoursCompleted: { type: Boolean, default: false },
     hoursCompletedAt: { type: Date },
     guests: {
@@ -92,22 +77,15 @@ const bookingSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
-    // Final payable (post-discount). Everything downstream — payment
-    // verification, gateway orders, refunds — keys off this number.
     amount: {
       type: Number,
       default: 0,
     },
-    // Launch price breakdown snapshot (recomputed server-side at creation).
     slabPrice: { type: Number, default: 0 },
     couponCode: { type: String, default: "", trim: true, uppercase: true },
     discount: { type: Number, default: 0 },
-    // Platform 15% of the final amount; the cook earns the rest (85%).
     commission: { type: Number, default: 0 },
     cookPayout: { type: Number, default: 0 },
-    // Immutable payout snapshot for the Cook Partner earnings system (§2).
-    // Written once when the booking becomes payout-eligible; never recomputed
-    // from today's pricing config. Legacy bookings predate this subdoc.
     payoutInfo: {
       regularPrice: { type: Number, default: 0 },
       discountAmount: { type: Number, default: 0 },
@@ -123,26 +101,12 @@ const bookingSchema = new mongoose.Schema(
       payoutEligibleAt: { type: Date },
       payoutProcessedAt: { type: Date },
       payoutHoldReason: { type: String, default: "", trim: true, maxlength: 300 },
-      // Cycle + verification flags (§3): held bookings rejoin a later cycle.
       payoutCycleRef: { type: String, default: "", trim: true },
       disputed: { type: Boolean, default: false },
       underVerification: { type: Boolean, default: false },
     },
-    // Idempotency key for booking creation (client-generated UUID per
-    // attempt). Unique + sparse so retries with the same key return the
-    // existing hold instead of double-booking; bookings without a key are
-    // unaffected.
     clientKey: { type: String, default: "", trim: true },
-    // Self-serve reschedule counter (the customer cap + admin exemption live
-    // in bookingController). Historical rows keep whatever they had; new
-    // bookings start at 0.
     rescheduleCount: { type: Number, default: 0, min: 0 },
-    // Structured reschedule audit trail — one entry per move, written in the
-    // same update as the statusHistory note. Date fields are the stored
-    // IST-midnight Date instants (same shape as `date`); `by` is
-    // "customer" | "cook" | "admin". Cook-swap moves (v2) also record
-    // fromCook/toCook (+ denormalized names for history display) and the
-    // optional customer reason (≤200 chars, never sensitive PII).
     reschedules: [
       {
         fromDate: Date,
@@ -160,16 +124,8 @@ const bookingSchema = new mongoose.Schema(
         reason: { type: String, default: "", trim: true, maxlength: 200 },
       },
     ],
-    // Coupon release idempotency: set once the held coupon is freed, so
-    // concurrent cancel/expire paths cannot double-decrement usedCount.
     couponReleased: { type: Boolean, default: false },
-    // Who ended the booking ("customer" | "cook" | "admin" | ""), recorded so
-    // cook-side reliability can be tracked instead of only the status flip.
     cancelledBy: { type: String, default: "" },
-    // Immutable cancellation/refund snapshot (§12): written once when a
-    // cancellation is confirmed, never recalculated on future policy changes.
-    // payment.refund* remains the money-movement state; this is the policy
-    // decision record (category, percentages, breakdown, workflow status).
     cancellationInfo: {
       cancelledBy: { type: String, default: "", trim: true },
       cancelledAt: { type: Date },
@@ -215,8 +171,6 @@ const bookingSchema = new mongoose.Schema(
       refundProcessedAt: { type: Date },
       adminNote: { type: String, default: "", trim: true, maxlength: 500 },
     },
-    // Customer no-show record (§8): marked by cook/admin only — a customer
-    // can never mark their own booking as no-show (§29).
     noShow: {
       marked: { type: Boolean, default: false },
       markedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
@@ -224,9 +178,6 @@ const bookingSchema = new mongoose.Schema(
       markedAt: { type: Date },
       reason: { type: String, default: "", trim: true, maxlength: 500 },
     },
-    // Payout ledger for the cook's 85%: "pending" until an admin settles it
-    // (reference = UPI/bank transfer id). Without this the cook's money had
-    // nowhere to live — commission was recorded but never disbursed.
     payout: {
       status: {
         type: String,
@@ -235,17 +186,8 @@ const bookingSchema = new mongoose.Schema(
       },
       settledAt: { type: Date },
       reference: { type: String, default: "", trim: true },
-      // Normalized duplicate-detection key for `reference`: lowercased with
-      // collapsed whitespace, set at settlement time. Bank/UPI references
-      // are case-insensitive in practice, so "ABC123" and "abc123" must
-      // collide here even though `reference` keeps the exact typed text for
-      // audit fidelity. Unique index `uniq_payout_reference_key` makes the
-      // concurrent same-reference race fail closed at the database level.
       referenceKey: { type: String, default: "", trim: true },
       amount: { type: Number, default: 0 },
-      // Frozen recipient snapshot taken at settlement: later edits to the
-      // cook's payout details can never rewrite who a settled payout
-      // claims to have paid. Read history/statements from here first.
       recipient: {
         method: { type: String, default: "", trim: true },
         upiId: { type: String, default: "", trim: true },
@@ -254,15 +196,10 @@ const bookingSchema = new mongoose.Schema(
         accountLast4: { type: String, default: "", trim: true },
         ifsc: { type: String, default: "", trim: true },
       },
-      // Admin who recorded the settlement — accountability for offline money.
       settledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     },
-    // Prepaid fee via Razorpay — collected BEFORE booking is created.
     payment: {
       razorpayOrderId: { type: String, default: "" },
-      // Every gateway order ever minted for this booking (createOrder may be
-      // retried). The webhook matches against both the latest id and this
-      // history so an overwritten order can never orphan captured money.
       razorpayOrderIds: { type: [String], default: [] },
       razorpayPaymentId: { type: String, default: "" },
       razorpaySignature: { type: String, default: "" },
@@ -273,15 +210,6 @@ const bookingSchema = new mongoose.Schema(
       },
       paidAmount: { type: Number, default: 0 },
       paidAt: { type: Date },
-      // Refund tracking for paid bookings that end without service. Money is
-      // never moved automatically — a cancel/reject/expiry queues "pending"
-      // for an admin to approve or reject in the Payouts tab. `refundStatus`:
-      // "none" (default) → "pending" (awaiting admin decision) →
-      // "processing" (claimed by exactly one approver; concurrent approves
-      // lose here instead of double-charging the gateway) → "processed"
-      // (money returned), or "failed" (gateway rejected — contact support),
-      // or "manual" (gateway unconfigured — settled outside Razorpay), or
-      // "rejected" (admin declined the refund).
       refundId: { type: String, default: "" },
       refundStatus: {
         type: String,
@@ -290,39 +218,16 @@ const bookingSchema = new mongoose.Schema(
       },
       refundAmount: { type: Number, default: 0 },
       refundedAt: { type: Date },
-      // Manual-settlement audit: the exact transfer reference typed by the
-      // admin plus its canonical duplicate-detection key (whitespace removed,
-      // lowercased). One bank/UPI transfer must never settle two refunds —
-      // enforced by the unique index `uniq_refund_reference_key` (see also
-      // utils/payoutIndexes.js, which guarantees it at boot).
       refundReference: { type: String, default: "", trim: true },
       refundReferenceKey: { type: String, default: "", trim: true },
-      // Customer post-service refund request (no-show / not completed). The
-      // customer never chooses an amount — refundAmount is always computed
-      // server-side (capped at maxRefundable). requestedBy is "customer" for
-      // self-serve requests ("system"/"admin" for queued cancels etc.).
-      // adminNote carries the decline reason (or partial-approval note) shown
-      // back to the customer on the booking page.
       refundReason: { type: String, default: "", trim: true, maxlength: 120 },
       refundCustomerNote: { type: String, default: "", trim: true, maxlength: 500 },
       refundRequestedAt: { type: Date },
       refundRequestedBy: { type: String, default: "", trim: true },
       refundAdminNote: { type: String, default: "", trim: true, maxlength: 500 },
-      // True for dev-gated test checkouts (no real money). Lets test
-      // payments be told apart from real gateway payments later.
       testMode: { type: Boolean, default: false },
-      // True when paid via webhook reconciliation (no checkout signature
-      // exists). A real boolean beats a sentinel signature string, which a
-      // future `if (payment.razorpaySignature)` check would misread as proof
-      // of a verified checkout triple.
       webhookReconciled: { type: Boolean, default: false },
     },
-    // 5-minute confirmation windows:
-    // - requestExpiresAt: the cook must accept within 5 minutes of the
-    //   request, otherwise it auto-expires and the customer is sent back to
-    //   find another cook.
-    // - paymentExpiresAt: once accepted, the customer must pay within 5
-    //   minutes, otherwise the booking auto-cancels and frees the slot.
     requestExpiresAt: { type: Date },
     paymentExpiresAt: { type: Date },
     status: {
@@ -354,26 +259,16 @@ const bookingSchema = new mongoose.Schema(
 bookingSchema.index({ customer: 1, status: 1 });
 bookingSchema.index({ "cancellationInfo.refundStatus": 1, updatedAt: -1 });
 bookingSchema.index({ "payoutInfo.payoutStatus": 1, cook: 1 });
-// "My bookings" sorted by recency + admin analytics paid-revenue scan.
 bookingSchema.index({ customer: 1, createdAt: -1 });
 bookingSchema.index({ "payment.status": 1 });
 bookingSchema.index({ cook: 1, status: 1 });
 bookingSchema.index({ cook: 1, date: 1, startTime: 1, endTime: 1 });
-// Hot read paths: "today's bookings" scans and status-sorted dashboards.
 bookingSchema.index({ date: 1, status: 1 });
 bookingSchema.index({ status: 1, createdAt: -1 });
-// Find-Cook broadcast: unassigned live requests + ignore filtering.
 bookingSchema.index({ status: 1, requestExpiresAt: 1 });
 bookingSchema.index({ status: 1, cook: 1, requestExpiresAt: 1 });
-// Payment-gated cook schedule (Today/Tomorrow): cook + IST day + paid +
-// schedule-eligible status, served by getCookSchedule.
 bookingSchema.index({ cook: 1, date: 1, "payment.status": 1, status: 1 });
 
-// A (orderId, paymentId, signature) triple is valid for exactly ONE booking.
-// Unique on the payment id — sparse partial index so unpaid/test bookings
-// (empty or missing ids) never collide — blocks replaying one captured
-// payment onto multiple bookings, which the confirm endpoint otherwise can't
-// detect (it only re-verifies the HMAC and the order amount).
 bookingSchema.index(
   { "payment.razorpayPaymentId": 1 },
   {
@@ -384,8 +279,6 @@ bookingSchema.index(
     name: "uniq_payment_razorpayPaymentId",
   }
 );
-// Webhook lookup by gateway order id (exact + history). Sparse so unpaid
-// bookings never enter the index.
 bookingSchema.index(
   { "payment.razorpayOrderId": 1 },
   {
@@ -393,9 +286,6 @@ bookingSchema.index(
     name: "idx_payment_razorpayOrderId",
   }
 );
-// Idempotency-key lookup for booking-creation retries. Unique + partial so
-// only non-empty keys are constrained. (No `sparse`: MongoDB rejects
-// sparse+partial combinations — partial alone already excludes the rest.)
 bookingSchema.index(
   { clientKey: 1 },
   {
@@ -404,9 +294,6 @@ bookingSchema.index(
     name: "uniq_booking_clientKey",
   }
 );
-// Offline payout references are admin-typed: the same reference settling two
-// bookings is one transfer recorded twice (or a double-click). Unique +
-// partial so empty references never collide (no `sparse`: see above).
 bookingSchema.index(
   { "payout.reference": 1 },
   {
@@ -415,9 +302,6 @@ bookingSchema.index(
     name: "uniq_payout_reference",
   }
 );
-// Case-insensitive twin of the above over the normalized key: without it,
-// "ABC123" and "abc123" (same bank transfer typed twice) would both commit.
-// Empty keys never collide.
 bookingSchema.index(
   { "payout.referenceKey": 1 },
   {
@@ -426,9 +310,6 @@ bookingSchema.index(
     name: "uniq_payout_reference_key",
   }
 );
-// Refund counterpart of the payout-reference guarantees: the same offline
-// transfer reference can never be recorded as a manual refund twice (case-
-// and whitespace-insensitive). Empty keys never collide.
 bookingSchema.index(
   { "payment.refundReferenceKey": 1 },
   {

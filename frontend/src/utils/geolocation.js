@@ -1,17 +1,4 @@
-// Shared browser-geolocation helper with GPS retry + user-friendly errors.
-//
-// Why this exists: a single getCurrentPosition call with a short timeout
-// fails silently in the common cases — cold GPS fixes take longer than the
-// timeout, plain-HTTP pages (non-localhost) are blocked by the browser, and
-// permission/timeout/unavailable all need different guidance.
-//
-// Accuracy handling: resolves with { lat, lng, accuracy, timestamp } where
-// `accuracy` is the GPS fix radius in metres reported by the browser.
-// Callers MUST surface `accuracy` ("±14 m") and warn when it is poor (>100 m)
-// instead of silently trusting a stale/cached network fix.
 
-// Good enough to treat the pin as the venue (<50 m), usable with caution
-// (<150 m), poor above that.
 export const ACCURACY_GOOD_M = 50;
 export const ACCURACY_OK_M = 150;
 
@@ -33,11 +20,6 @@ const singleShot = (options) =>
     navigator.geolocation.getCurrentPosition(resolve, reject, options);
   });
 
-// Watch GPS briefly and keep the most accurate fix (lowest accuracy number).
-// Resolves early once a GOOD fix arrives, otherwise resolves with the best
-// fix seen when `watchMs` elapses. Rejects only if no fix at all arrives.
-// Stale fixes (older than `maxAgeMs`) are ignored so a cached network pin
-// from hours ago can never win over a fresh, slightly coarser fix.
 const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M, maxAgeMs = 120000 } = {}) =>
   new Promise((resolve, reject) => {
     let best = null;
@@ -51,15 +33,12 @@ const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M, maxAgeMs =
       try {
         if (watchId != null) navigator.geolocation.clearWatch(watchId);
       } catch {
-        // ignore
       }
       if (result) resolve(result);
       else reject(error || lastError || new Error("No position fix received"));
     };
 
     const onFix = (pos) => {
-      // Drop stale cached fixes — some devices hand watchPosition a fix
-      // timestamped minutes/hours ago on the first callback.
       if (Number.isFinite(pos.timestamp) && Date.now() - pos.timestamp > maxAgeMs) return;
       const candidate = {
         lat: pos.coords.latitude,
@@ -70,7 +49,6 @@ const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M, maxAgeMs =
       if (!best || (candidate.accuracy ?? Infinity) < (best.accuracy ?? Infinity)) {
         best = candidate;
       }
-      // Good enough — stop early instead of waiting out the full window.
       if ((candidate.accuracy ?? Infinity) <= goodEnoughM) {
         finish(best, null);
       }
@@ -78,7 +56,6 @@ const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M, maxAgeMs =
 
     const onError = (err) => {
       lastError = err;
-      // Permission denial can never succeed — fail fast.
       if (err?.code === 1) finish(null, err);
     };
 
@@ -99,10 +76,6 @@ const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M, maxAgeMs =
     }, watchMs);
   });
 
-// Reverse-geocode a GPS pin into address parts for auto-filling venue forms.
-// Returns { city, area, state, street, suburb, postcode } ("" when unknown).
-// Never throws — callers always keep the pin and ask the user to type what's
-// missing. Uses BigDataCloud (fast, keyless) + Nominatim (street-level detail).
 export const reverseGeocode = async (lat, lng) => {
   const out = {
     city: "",
@@ -111,8 +84,6 @@ export const reverseGeocode = async (lat, lng) => {
     street: "",
     suburb: "",
     postcode: "",
-    // Exact-address parts (house number, full display name). Empty when the
-    // providers return only area-level data — callers fall back gracefully.
     houseNumber: "",
     displayName: "",
   };
@@ -170,8 +141,6 @@ export const reverseGeocode = async (lat, lng) => {
   return out;
 };
 
-// Build a short human-readable header label such as "Kothrud, Pune" or
-// "Pune, Maharashtra". Prefers area + city, falls back to city + state.
 export const formatLocationLabel = ({ area, city, state } = {}) => {
   const a = (area || "").trim();
   const c = (city || "").trim();
@@ -181,9 +150,6 @@ export const formatLocationLabel = ({ area, city, state } = {}) => {
   return c || a || s || "";
 };
 
-// Forward-geocode a typed place ("Kothrud, Pune") into selectable options.
-// Returns [{ label, city, state, lat, lng }]. Never throws — returns [] when
-// the lookup fails or finds nothing.
 export const searchLocations = async (query, limit = 5) => {
   const q = (query || "").trim();
   if (q.length < 2) return [];
@@ -216,20 +182,7 @@ export const searchLocations = async (query, limit = 5) => {
   }
 };
 
-// Approximate city from the network IP — no browser permission needed, so it
-// can run on page open as a non-blocking hint until the user shares precise
-// GPS or picks a place manually. Uses ipwho.is (primary) + geojs.io (backup).
-// Both are keyless, HTTPS, and send `Access-Control-Allow-Origin: *`, unlike
-// the previous providers (BigDataCloud ip-geolocation-full needs an API key
-// and answers 403 without one; ipapi.co answers 403/CORS-less when its free
-// quota is exceeded) — both of which spammed the console with 403 / CORS /
-// ERR_FAILED errors on the live site.
-// Returns { city, state, country, label } or null. Never throws.
-// NOTE: providers are tried sequentially (not Promise.all) so a failing
-// provider can't leave a dangling fetch that logs network errors after we
-// already resolved.
 export const fetchIpLocation = async () => {
-  // Primary: https://ipwho.is/ -> { city, region, country, success }
   try {
     const r = await fetch("https://ipwho.is/");
     if (r.ok) {
@@ -242,9 +195,7 @@ export const fetchIpLocation = async () => {
       }
     }
   } catch {
-    // fall through to the backup provider
   }
-  // Backup: https://get.geojs.io/v1/ip/geo.json -> { city, region, country }
   try {
     const r2 = await fetch("https://get.geojs.io/v1/ip/geo.json");
     if (!r2.ok) return null;
@@ -259,11 +210,6 @@ export const fetchIpLocation = async () => {
   }
 };
 
-// Resolves with { lat, lng, accuracy, timestamp }. Uses a fresh (maximumAge: 0)
-// high-accuracy watch to pick the best fix, then falls back to single-shot
-// attempts. Rejects with an Error whose message is safe to show to the user.
-// Worst case is bounded (~7s watch + highAccuracyTimeout + 10s low-power ≈
-// 29s with defaults) so the UI never spins for a minute on GPS-less desktops.
 export const getCurrentPositionRobust = ({ highAccuracyTimeout = 12000 } = {}) =>
   new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
@@ -272,9 +218,6 @@ export const getCurrentPositionRobust = ({ highAccuracyTimeout = 12000 } = {}) =
       );
       return;
     }
-    // Browsers block geolocation on insecure (plain http://) pages except
-    // localhost — detect it early so the user gets an explanation instead of
-    // a silent failure.
     if (typeof window !== "undefined" && window.isSecureContext === false) {
       reject(
         new Error(
@@ -310,7 +253,6 @@ export const getCurrentPositionRobust = ({ highAccuracyTimeout = 12000 } = {}) =
     };
 
     (async () => {
-      // 1) Best-of-watch: fresh high-accuracy fixes for a few seconds.
       try {
         const best = await bestOfWatch({ watchMs: 7000 });
         if (best && Number.isFinite(best.lat) && Number.isFinite(best.lng)) {
@@ -318,9 +260,7 @@ export const getCurrentPositionRobust = ({ highAccuracyTimeout = 12000 } = {}) =
           return;
         }
       } catch {
-        // fall through to single-shot attempts
       }
-      // 2) Fresh high-accuracy single shot (never accept a cached fix here).
       try {
         const pos = await singleShot({
           enableHighAccuracy: true,
@@ -334,7 +274,6 @@ export const getCurrentPositionRobust = ({ highAccuracyTimeout = 12000 } = {}) =
           reject(describe(err, "first"));
           return;
         }
-        // 3) One shorter low-power attempt before giving up.
         try {
           const pos2 = await singleShot({
             enableHighAccuracy: false,

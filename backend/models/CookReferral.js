@@ -1,5 +1,3 @@
-// Cook-to-cook referral (§11/§12/§13).
-// ₹250 payable only after the referred cook completes 10 verified bookings.
 const mongoose = require("mongoose");
 
 const cookReferralSchema = new mongoose.Schema(
@@ -24,7 +22,6 @@ const cookReferralSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// One referral per referred cook — no duplicate claims, no re-claims (§15).
 cookReferralSchema.index({ referredCook: 1 }, { unique: true, name: "uniq_referral_referred" });
 cookReferralSchema.index({ referrer: 1, createdAt: -1 });
 cookReferralSchema.index({ referralCode: 1 });

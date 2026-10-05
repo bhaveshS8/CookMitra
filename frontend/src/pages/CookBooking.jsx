@@ -34,19 +34,10 @@ import { saveBookingDraft, loadBookingDraft, clearBookingDraft } from "../utils/
 
 import LoginPromptModal from "../components/LoginPromptModal";
 
-// Direct cook booking: the customer books a cook for a home-cooking
-// session. No service picker — every cook offers home cooking at the same
-// flat launch price. Kept as a constant default for the API payload
-// (backend `serviceType` is still required).
 const DEFAULT_SERVICE_TYPE = "cook_for_me";
 
-// One-tap hour presets — the most common booking lengths. Exact values
-// (0.5 steps, 1–12) can still be typed in the input below the chips.
 const DURATION_QUICK = [1, 2, 3, 4];
 
-// Service day: bookable slots run 08:00–20:00 for every cook (mirrors the
-// backend slot engine in backend/utils/slots.js — defense in depth so an
-// out-of-hours slot can never be displayed even if the API ever returns one).
 const SERVICE_START_MIN = 8 * 60;
 const SERVICE_END_MIN = 20 * 60;
 
@@ -56,7 +47,6 @@ const toMinutes = (t) => {
   return Number(m[1]) * 60 + Number(m[2]);
 };
 
-// "8:00 AM – 11:00 AM" style label for a "HH:MM" slot.
 const fmtTime = (t) => {
   const m = toMinutes(t);
   if (m == null) return t;
@@ -74,10 +64,6 @@ const isSlotInServiceDay = (slot) => {
   return s != null && e != null && s >= SERVICE_START_MIN && e <= SERVICE_END_MIN;
 };
 
-// Slots starting at or before "now" are hidden when the selected date is
-// today — a customer can never pick a time that already passed, so the first
-// visible slot is always the NEXT one after the current time. `now` is
-// injectable so the step-2 list can re-filter on a live tick.
 const isSlotInPast = (dateStr, startTime, now = new Date()) => {
   if (dateStr !== localTodayStr()) return false;
   const s = toMinutes(startTime);
@@ -85,7 +71,6 @@ const isSlotInPast = (dateStr, startTime, now = new Date()) => {
   return s <= now.getHours() * 60 + now.getMinutes();
 };
 
-// Day-part for grouping time slots (Morning / Afternoon / Evening).
 const slotPart = (startTime) => {
   const m = toMinutes(startTime);
   if (m == null) return "Slots";
@@ -94,8 +79,6 @@ const slotPart = (startTime) => {
   return "Evening";
 };
 
-// Compact chip label ("9 AM" / "9:30 AM"). The full "9:00 AM – 12:00 PM"
-// range stays in the aria-label so screen readers still announce exact times.
 const fmtTimeCompact = (t) => {
   const m = toMinutes(t);
   if (m == null) return t;
@@ -107,8 +90,6 @@ const fmtTimeCompact = (t) => {
   return `${h}${mm ? ":" + String(mm).padStart(2, "0") : ""} ${ap}`;
 };
 
-// Presentation-only "Recommended" highlight: the start with the most cooks
-// free (earliest wins ties). Nothing is pre-selected for the customer.
 const pickRecommendedSlot = (options) => {
   if (!options || options.length === 0) return null;
   return options.reduce((best, o) => {
@@ -119,7 +100,6 @@ const pickRecommendedSlot = (options) => {
   });
 };
 
-// Friendly date label for summaries ("Today" / "Tomorrow" / 2026-09-12).
 const dateLabel = (dateStr) => {
   if (!dateStr) return "Pick a date";
   if (dateStr === localTodayStr()) return "Today";
@@ -127,7 +107,6 @@ const dateLabel = (dateStr) => {
   return dateStr;
 };
 
-// Numbered section heading — the form reads as 4 short steps.
 const SecTitle = ({ icon, children }) => (
   <h3 className="ondemand-section-title">
     {icon}
@@ -144,12 +123,10 @@ const CookBooking = () => {
 
   const [step, setStep] = useState(1);
 
-  // Every step change opens at the top of the page.
   useEffect(() => {
     const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
   }, [step]);
-  // Start each step at the top of the page.
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   }, [step]);
@@ -169,22 +146,14 @@ const CookBooking = () => {
   const [matches, setMatches] = useState([]);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
-  // Find-Cook submit lock: disables the CTA the instant it is tapped so a
-  // double-click can never fire two creates (the idempotency key below is
-  // the server-side backstop for retries/refreshes).
   const [findingCook, setFindingCook] = useState(false);
   const [locMsg, setLocMsg] = useState("");
   const [coords, setCoords] = useState(null);
   const [copied, setCopied] = useState(false);
   const [savedLocations, setSavedLocations] = useState([]);
-  // True once the saved-locations fetch settles (either outcome) — lets the
-  // autofill effects know a past booking can no longer claim the fields.
   const [savedLoaded, setSavedLoaded] = useState(false);
   const [savedIdx, setSavedIdx] = useState("");
   const autoFilled = useRef(false);
-  // Set when the customer explicitly picks a previous place from the saved
-  // dropdown — that choice owns the map pin (its own saved pin, or none), so
-  // the detected-location effect must never override it afterwards.
   const explicitPlacePick = useRef(false);
   const venueErrorRef = useRef(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -192,23 +161,11 @@ const CookBooking = () => {
     requestAnimationFrame(() =>
       venueErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
     );
-  // Step 2 (time slots): one entry per distinct start–end time with the
-  // number of cooks free at it. Step 3 (cook) shows cooks free at the slot
-  // the customer picked in step 2.
   const [slotOptions, setSlotOptions] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [coupon, setCoupon] = useState(null);
-  // Coupon code carried across the login wall / dead-request retry —
-  // re-validated live by CouponApply on mount, never trusted blindly.
   const [couponRestore, setCouponRestore] = useState(null);
-  // Shorter session lengths the server confirmed free when the requested
-  // hours fit nowhere — rendered as one-tap retry chips.
   const [slotSuggestions, setSlotSuggestions] = useState([]);
-  // Live "from now" view of the step-2 slots. Every free start is shown (no
-  // collapse), and on a same-day booking the earliest chip is always the next
-  // slot after the current time. A 30s tick — armed only while today is
-  // selected — keeps the list honest if the page is left open, dropping any
-  // start that has slipped into the past.
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
     if (form.date !== localTodayStr()) return undefined;
@@ -231,41 +188,19 @@ const CookBooking = () => {
     return slotOptions.filter((o) => !isSlotInPast(form.date, o.startTime, now));
   }, [slotOptions, form.date, nowTick]);
 
-  // Start with the most cooks free — flagged "Recommended" in step 2.
   const recommendedSlot = useMemo(() => pickRecommendedSlot(visibleSlotOptions), [visibleSlotOptions]);
-  // Cooks offering the chosen service (0 = none exist, vs slots just full).
   const [totalCooksFound, setTotalCooksFound] = useState(null);
 
-  // Header-detected place (GPS / IP / manual): the detected pin is attached
-  // to the booking whenever the fix carries real coordinates — it reaches the
-  // cook as a Google Maps link (payload.location) even when the address
-  // fields were filled from the profile address or a previous booking. The
-  // saved-places dropdown is the only override: an explicit pick carries its
-  // own pin (or clears the pin when that saved entry has none). Address
-  // fields are pre-filled only when still empty — typed or previously-saved
-  // input always wins, and a stale (>12 h) stored fix never fills them.
   useEffect(() => {
     const hasFix =
       Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng);
-    // Reverse-geocoding can fail while the GPS fix itself is valid — the pin
-    // must still go through (coordinates are all the cook's navigation needs).
     if (!hasFix && !siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
-    // Pin first: a detected fix with real coordinates is attached for the
-    // cook's navigation even while profile/saved address sources settle.
     if (hasFix && !explicitPlacePick.current) {
       setCoords((c) => c || { lat: siteLocation.lat, lng: siteLocation.lng });
     }
     if (!siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
-    // Saved pins older than 12 h are not reused as today's venue: the header
-    // pill still shows them, but the form waits for a fresh detect or for the
-    // customer to type the address (last week's address is usually wrong).
-    // Fresh fixes carry a `timestamp`/`savedAt` of just now, so they pass.
     const stamp = Number(siteLocation?.savedAt || siteLocation?.timestamp || 0);
     if (stamp && Date.now() - stamp > 12 * 60 * 60 * 1000) return;
-    // Address fields are owned by the profile address, else by the most
-    // recent saved booking (previous effect). Detection only fills what is
-    // left: guests right away, customers once both sources had their chance
-    // and neither exists.
     if (autoFilled.current) return;
     if (user?.role === "customer") {
       const profileAddr = String(user?.address || "").trim();
@@ -274,9 +209,6 @@ const CookBooking = () => {
     autoFilled.current = true;
     setForm((f) => {
       if (f.flatNo || f.society || f.landmark || f.city) return f;
-      // Door-level line (house + street) fills "Flat / House no." when the fix
-      // really carried a house number — a bare road/area name belongs in the
-      // society/landmark fields, never in the flat field.
       const exact = siteLocation.hasHouseNumber ? (siteLocation.exactLine || "").trim() : "";
       return {
         ...f,
@@ -288,20 +220,14 @@ const CookBooking = () => {
     });
   }, [siteLocation?.city, siteLocation?.area, siteLocation?.state, siteLocation?.street, siteLocation?.exactLine, siteLocation?.hasHouseNumber, siteLocation?.timestamp, siteLocation?.savedAt, siteLocation?.lat, siteLocation?.lng, user?.role, user?.address, savedLoaded, savedLocations]);
 
-  /* ── Profile address (locked summary card + Edit button) ── */
   const profileAddress = String(user?.address || "").trim();
   const [addrEditing, setAddrEditing] = useState(false);
-  // Summary shown while locked: the composed form address (profile/saved/
-  // detected fill), falling back to the raw profile string.
   const addrSummary =
     [form.flatNo, form.society, form.landmark ? `Near ${form.landmark}` : "", form.city]
       .map((p) => String(p || "").trim())
       .filter(Boolean)
       .join(", ") || profileAddress;
 
-  // The stored user (localStorage from an older login) can lack the address
-  // key — refresh it from /auth/me so the profile address can claim priority
-  // and the locked summary can be decided.
   const dispatch = useDispatch();
   useEffect(() => {
     if (user?.role !== "customer" || user?.address !== undefined) return;
@@ -312,7 +238,6 @@ const CookBooking = () => {
     return () => { cancelled = true; };
   }, [user?.role, user?.address, dispatch]);
 
-  // Previous locations of this customer for one-tap reuse (customers only).
   useEffect(() => {
     if (user?.role !== "customer") { setSavedLoaded(true); return; }
     let cancelled = false;
@@ -333,10 +258,6 @@ const CookBooking = () => {
     if (!saved) return;
     explicitPlacePick.current = true;
     const d = saved.addressDetails || {};
-    // Explicit pick always replaces the auto-filled address block (header
-    // detection or a previously applied entry) — the saved entry is
-    // authoritative. Entries without structured details fall back to parsing
-    // their address string.
     const parts = String(saved.address || "").split(",").map((p) => p.trim()).filter(Boolean);
     const src = Object.keys(d).length > 0
       ? d
@@ -357,15 +278,11 @@ const CookBooking = () => {
       setCoords({ lat: saved.location.lat, lng: saved.location.lng });
       setLocMsg("Previous location applied with its saved map pin");
     } else {
-      // Drop any stale pin from the auto-detected location — it would
-      // point at the wrong place for this address.
       setCoords(null);
       setLocMsg("Previous location applied — verify the address below for precise navigation");
     }
   };
 
-  // Auto-fill priority: profile address > most recent previous booking
-  // (an explicit pick from the dropdown above always wins once made).
   useEffect(() => {
     if (autoFilled.current || user?.role !== "customer") return;
     const fill = (src) =>
@@ -381,12 +298,7 @@ const CookBooking = () => {
       });
     const profileAddr = String(user?.address || "").trim();
     if (profileAddr) {
-      // The profile address is top priority and never waits for the saved-
-      // locations fetch: while it waited, the detected-location effect could
-      // claim the fields first and the profile address would never fill.
       autoFilled.current = true;
-      // Split "Flat 402, Sunshine Society, Baner, Pune" into the form fields,
-      // same heuristic as applySavedLocation for unstructured addresses.
       const parts = profileAddr.split(",").map((p) => p.trim()).filter(Boolean);
       fill(
         parts.length === 1
@@ -397,9 +309,6 @@ const CookBooking = () => {
       );
       return;
     }
-    // No profile address: wait for /auth/me (address key) and the saved list
-    // before letting the detected-location effect take the fields, so a past
-    // booking can still outrank detection.
     if (user?.address === undefined || !savedLoaded) return;
     if (savedLocations.length === 0) return;
     autoFilled.current = true;
@@ -416,15 +325,10 @@ const CookBooking = () => {
 
   const serviceLabel = "Home cooking session";
 
-  // Launch slab pricing (server recomputes it — display + preview only).
   const slab = slabPriceForDuration(Number(form.durationHours));
   const couponDiscount = slab != null && coupon ? Math.min(coupon.discount, slab) : 0;
   const finalPayable = slab != null ? Math.max(0, slab - couponDiscount) : 0;
 
-  // Returning from login with an unfinished booking: restore the filled
-  // form + pin, re-check live availability, and land where they left off —
-  // step 3 when the picked slot is still free, else step 2 with fresh
-  // slots. Runs once; stale drafts (>2h) are dropped silently.
   const resumedDraft = useRef(false);
   useEffect(() => {
     if (resumedDraft.current || !user) return;
@@ -496,7 +400,6 @@ const CookBooking = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm({ ...form, [name]: value });
-    // Clear this field's error as soon as the user fixes it.
     if (fieldErrors[name]) {
       setFieldErrors((prev) => {
         const next = { ...prev };
@@ -506,8 +409,6 @@ const CookBooking = () => {
     }
   };
 
-  // Stepper helper for duration / guests: snaps to `step`, clamps to
-  // [min, max]. Empty or invalid input restarts from min so −/+ always work.
   const adjustNumber = (name, delta, { min, max, step }) => {
     setForm((f) => {
       const cur = Number(f[name]);
@@ -523,9 +424,6 @@ const CookBooking = () => {
       .map((d) => d.trim())
       .filter(Boolean);
 
-  // Step 1 → 2 validates only the plan (date / hours / guests drive
-  // availability). Venue + menu are validated at booking time on step 3,
-  // so nobody types an address for a dead date.
   const validatePlan = (durationOverride) => {
     if (!form.date) return "Please choose a date for your session";
     if (form.date < localTodayStr()) return "That date already passed — please pick today or a future date";
@@ -539,8 +437,6 @@ const CookBooking = () => {
     return "";
   };
 
-  // Per-field venue errors: one message per invalid input so each error
-  // renders directly below its field. Empty object = valid.
   const validateVenue = () => {
     const errs = {};
     if (!form.flatNo.trim()) errs.flatNo = "Please enter your flat / house number";
@@ -552,8 +448,6 @@ const CookBooking = () => {
   };
   const [fieldErrors, setFieldErrors] = useState({});
   const fieldRefs = useRef({});
-  // Show the first invalid field: expand the collapsed address editor when
-  // the locked profile summary is showing, then scroll to and focus it.
   const focusFirstFieldError = (errs) => {
     const order = ["flatNo", "society", "city", "customDishes"];
     const first = order.find((k) => errs[k]);
@@ -595,9 +489,6 @@ const CookBooking = () => {
 
   const buildSelectedItems = () => parseDishes();
 
-  // Distinct start–end times across cooks with a free-cook count each,
-  // sorted earliest first. Backend already sizes slots to the selected
-  // hours; this only aggregates them for step 2.
   const aggregateSlots = (cooksWithSlots) => {
     const map = new Map();
     cooksWithSlots.forEach((c) => {
@@ -614,10 +505,6 @@ const CookBooking = () => {
     );
   };
 
-  // Shared slot search — ONE batched request (GET /availability/search).
-  // Same slot math, server-side, so a search spike costs ~3 DB round trips
-  // instead of ~3 per cook. Falls back to the fan-out only if the batched
-  // endpoint is unreachable (stale backend).
   const runSlotSearch = async ({ date, durationHours }) => {
     try {
       const r = await API.get("/availability/search", {
@@ -646,7 +533,6 @@ const CookBooking = () => {
     }
   };
 
-  // Legacy per-cook fan-out — fallback only (see runSlotSearch above).
   const runSlotSearchLegacy = async ({ date, durationHours }) => {
     const cooksRes = await API.get("/cooks");
     const rawCooks = cooksRes.data;
@@ -655,9 +541,6 @@ const CookBooking = () => {
     let failedCooks = 0;
     const withSlots = await Promise.all(
       cooks.map(async (cook) => {
-        // Cooks list populates `user` as an object, but be tolerant of
-        // string refs or a bare profile id so one shape change can't wipe
-        // every slot result to [].
         const cookId =
           cook?.user?._id ||
           (typeof cook?.user === "string" ? cook.user : null) ||
@@ -667,9 +550,6 @@ const CookBooking = () => {
           return { ...cook, slots: [] };
         }
         try {
-          // Start-time options sized to the entered service hours.
-          // suggest=1 asks the server to also name shorter sessions that
-          // DO fit, so an empty result becomes a one-tap retry.
           const slotsRes = await API.get(
             `/availability/${cookId}?date=${encodeURIComponent(date)}&durationHours=${encodeURIComponent(durationHours)}&suggest=1`
           );
@@ -687,8 +567,6 @@ const CookBooking = () => {
         }
       })
     );
-    // Service-day + past-time guard (backend enforces the same, this keeps
-    // the UI honest even with a stale cache or clock skew).
     const usable = withSlots.map((c) => ({
       ...c,
       slots: (c.slots || []).filter(
@@ -705,8 +583,6 @@ const CookBooking = () => {
     };
   };
 
-  // Step 1 → 2: validate the plan, then search. `durationOverride` lets a
-  // suggestion chip retry with shorter hours without waiting for state.
   const handleSeeSlots = async (e, durationOverride) => {
     e?.preventDefault?.();
     const err = validatePlan(durationOverride);
@@ -721,9 +597,6 @@ const CookBooking = () => {
         date: form.date,
         durationHours: effDuration,
       });
-      // Every per-cook request failed (backend down / network) — that's a
-      // load error, not "no slots". Stay on step 1 with an error instead of
-      // landing on an empty step 2 with a misleading toast.
       if (totalCooks > 0 && failedCooks >= totalCooks) {
         throw new Error("Could not load time slots. Try again.");
       }
@@ -751,21 +624,14 @@ const CookBooking = () => {
     }
   };
 
-  // Retry after a dead request (no cook accepted in time): the waiting
-  // screen navigates here with the dead booking's plan + slot. Restore the
-  // form, re-check live availability, and land straight on step 3 (the
-  // summary) so the customer starts a fresh Find-Cook search for the same
-  // slot without re-typing anything. Runs once per navigation state.
   const retryHandled = useRef(false);
   useEffect(() => {
     const retry = location.state?.retryFromBooking;
     if (!retry || retryHandled.current) return;
     retryHandled.current = true;
-    // Clear the navigation state so back/forward doesn't re-apply it.
     try {
       window.history.replaceState({}, "");
     } catch {
-      // ignore
     }
     if (!retry.form?.date || !retry.selectedSlot) {
       return;
@@ -810,25 +676,18 @@ const CookBooking = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // One-tap retry from a suggestion chip: adopt the shorter hours, then
-  // re-run the search immediately with the adopted value.
   const retryWithDuration = (h) => {
     const v = String(h);
     setForm((f) => ({ ...f, durationHours: v }));
     handleSeeSlots(null, v);
   };
 
-  // Step 2 → 3: a time slot must be picked before the summary is shown.
   const handleContinueToSummary = async () => {
     if (!selectedSlot) {
       setFormError("Please pick a time slot first");
       return;
     }
     setFormError("");
-    // Re-verify the picked slot is still free before showing cooks: a slot
-    // listed in step 2 can fill up while the customer is picking (another
-    // customer books the same hours). Drop cooks busy during the exact
-    // [startTime, endTime] so step 3 shows only cooks free for those hours.
     setSearching(true);
     try {
       const verify = await API.get("/cooks", {
@@ -860,17 +719,12 @@ const CookBooking = () => {
         return;
       }
     } catch {
-      // Verification is best-effort: on network failure keep the step-2 list
-      // (the server re-checks the exact window at booking creation).
     } finally {
       setSearching(false);
     }
     setStep(3);
   };
 
-  // Idempotency keys per booking attempt: retries (double-click, network
-  // retry, refresh) reuse the same key so the server returns the original
-  // hold instead of minting a duplicate. A new slot/plan gets a fresh key.
   const clientKeysRef = useRef(new Map());
   const clientKeyFor = (key) => {
     let k = clientKeysRef.current.get(key);
@@ -886,8 +740,6 @@ const CookBooking = () => {
     }
     return k;
   };
-  // Cooks free at the step-2 slot — counted for the summary ("N cooks
-  // free"), never shown as a pick list: Find-Cook assigns atomically.
   const cooksForSlot = selectedSlot
     ? matches
         .map((c) => ({
@@ -901,14 +753,9 @@ const CookBooking = () => {
         .filter((c) => c.slot)
     : [];
 
-  // Find-Cook: create ONE broadcast request (no cook id is ever sent — the
-  // server ignores any cook/cookId and creates cook = null, status =
-  // requested). The first cook to accept atomically wins the booking.
   const handleFindCook = async () => {
     if (findingCook) return;
     if (!user) {
-      // Remember the unfinished booking across the login wall — form,
-      // picked slot, pin and coupon code all come back after sign-in.
       saveBookingDraft({ kind: "on-demand", form, selectedSlot, coords, couponCode: coupon?.code || "" });
       setShowLoginModal(true);
       return;
@@ -926,14 +773,8 @@ const CookBooking = () => {
     }
     setFieldErrors({});
     setFormError("");
-    // Double-click protection: the button disables immediately; the
-    // idempotency key below makes server-side retries safe too.
     setFindingCook(true);
     try {
-      // No online payment — create the broadcast booking request directly,
-      // then wait for a cook on the live waiting screen. Priced from the
-      // launch slab (the server recomputes + enforces it — amount/cook
-      // sent here are never trusted).
       const hours = Number(form.durationHours);
       if (!Number.isInteger(hours) || hours < 1 || hours > 4 || slab == null) {
         setFormError("Please choose 1, 2, 3 or 4 hours");
@@ -964,21 +805,13 @@ const CookBooking = () => {
         couponCode: coupon?.code || "",
       };
       if (coords) payload.location = coords;
-      // One key per plan+slot: retries (double-click, network retry, back
-      // button) reuse it so the server returns the original hold instead
-      // of minting a duplicate booking.
       payload.clientKey = clientKeyFor(`${form.date}_${selectedSlot.startTime}_${selectedSlot.endTime}`);
       const res = await API.post("/bookings", payload);
-      // Idempotent retry: the server returns the original hold with
-      // alreadyExists instead of a duplicate — treat it as success.
       clearBookingDraft();
       showToast("Finding a cook for you — we're contacting available cooks now.", "success");
-      // Live waiting screen while cooks decide (5-minute window).
       navigate(`/bookings/${res.data?._id}/wait`);
     } catch (err) {
       const msg = err.response?.data?.message || err.message || "Booking failed";
-      // Nobody free anymore (or the slot just filled): send the customer
-      // back to live slots instead of stranding them on a dead summary.
       if (err.response?.status === 409) {
         setFormError(`${msg} Please pick another time.`);
       } else {
@@ -1041,7 +874,6 @@ const CookBooking = () => {
         })}
       </ol>
 
-      {/* Back navigation (steps 2-3) — button only, no chips or recap here */}
       {step > 1 && (
         <div className="od-gobar">
           <button
@@ -1230,8 +1062,6 @@ const CookBooking = () => {
                         <span> · {g.slots.length} slot{g.slots.length > 1 ? "s" : ""}</span>
                       </p>
                       <div className="slot-list slot-list-pick">
-                        {/* Every free start is shown, earliest first — no collapse,
-                            so all slots from the current time onward are visible. */}
                         {g.slots.map((o) => {
                           const active = isSelected(o);
                           const recommended =
@@ -1303,9 +1133,6 @@ const CookBooking = () => {
                   <label htmlFor="od-saved-select">
                     <History size={15} /> Use previous location
                   </label>
-                  {/* Clipping frame: same box as every other input (100% of the
-                      group, border-box). The closed select can never push past
-                      it — extra address text is hidden inside this frame. */}
                   <div className="od-saved-wrap">
                   <select
                     id="od-saved-select"
@@ -1318,9 +1145,6 @@ const CookBooking = () => {
                     <option value="">Select from your past bookings...</option>
                     {savedLocations.map((s, i) => {
                       const suffix = s.timesUsed > 1 ? ` (used ${s.timesUsed}x)` : "";
-                      // Cap the visible label so a very long address can never
-                      // stretch the closed select past the input width; the
-                      // full address stays available via title + applied fields.
                       const label = s.address.length > 48 ? `${s.address.slice(0, 48)}…${suffix}` : `${s.address}${suffix}`;
                       return (
                         <option key={i} value={i} title={`${s.address}${suffix}`}>
@@ -1523,9 +1347,6 @@ const CookBooking = () => {
 
             {formError && <div ref={venueErrorRef} className="error-message">{formError}</div>}
           </div>
-          {/* Final booking summary — the customer confirms the plan, then
-              Find Cook broadcasts ONE request. No cook list: the server
-              assigns the first cook to accept atomically. */}
           <div className="ondemand-form-card od-summary-card">
             <SecTitle icon={<CalendarCheck size={15} />}>Review your booking</SecTitle>
             <p className="od-review-sub">Check the details — one tap finds your cook. No payment now.</p>

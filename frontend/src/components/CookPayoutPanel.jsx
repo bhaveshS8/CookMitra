@@ -5,9 +5,6 @@ import { useShowToast } from "../store/hooks";
 import { formatCurrency, formatDate } from "../utils/constants";
 import { Wallet, IndianRupee, Save, Clock3, CheckCircle2 } from "lucide-react";
 
-// Cook-facing payouts: where the 85% should be sent (UPI id / bank last-4)
-// and a live statement of what has been settled vs is still pending. The
-// actual transfer happens offline; this panel keeps both sides honest.
 const CookPayoutPanel = () => {
   const showToast = useShowToast();
   const { data, loading, refetch } = useFetch("/payouts/statement/me");
@@ -31,8 +28,6 @@ const CookPayoutPanel = () => {
       showToast("Choose UPI or bank transfer first", "error");
       return;
     }
-    // Client-side mirror of the server format rules (the server re-validates;
-    // this just fails fast with a clear message).
     if (f.method === "upi" && !/^[\w.-]{2,256}@[a-zA-Z]{2,64}$/.test(f.upiId.trim())) {
       showToast("Enter a valid UPI id (name@bank)", "error");
       return;

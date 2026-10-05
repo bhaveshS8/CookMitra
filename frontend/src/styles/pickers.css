@@ -1,8 +1,4 @@
-/* ==========================================================================
-   Forms — pickers, segmented controls, custom checkbox, geo helpers
-   ========================================================================== */
 
-/* Segmented role control (register) */
 .role-segmented-control {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -32,9 +28,6 @@
   box-shadow: var(--shadow-sm);
 }
 
-/* Service-type picker (booking widget) — grid tiles with an icon chip,
-   stacked label + description, and a fixed radio slot on the right so
-   selecting never shifts the layout. */
 .service-pick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
 .service-pick-card {
   display: grid;
@@ -101,7 +94,6 @@
 .service-pick-card.selected > strong { color: var(--primary-700); }
 .service-pick-card.selected > span:not(.service-pick-icon):not(.service-pick-check) { color: var(--primary-700); opacity: 0.75; }
 .service-pick-card.selected .service-pick-icon { color: #fff; background: var(--primary); border-color: var(--primary); }
-/* Fixed radio slot — hollow ring idle, filled badge when selected */
 .service-pick-check {
   grid-column: 3;
   grid-row: 1 / 3;
@@ -122,8 +114,6 @@
   border-color: var(--accent-emerald);
   color: #fff;
 }
-/* Admin "Add Cook" modal reuses these classes with label-only chips —
-   keep them compact instead of the tall booking tiles above. */
 .add-cook-modal .service-pick-card {
   display: inline-flex;
   align-items: center;
@@ -140,8 +130,6 @@
 }
 .add-cook-modal .service-pick-check { grid-column: auto; grid-row: auto; }
 
-/* Time-slot chips — ONLY available slots are rendered (booked / held /
-   unavailable windows never appear, so they cannot be picked). */
 .slot-chip {
   display: inline-flex;
   align-items: center;
@@ -159,8 +147,6 @@
 }
 .slot-chip:hover { border-color: var(--primary); color: var(--primary-700); background: var(--primary-light); }
 .slot-chip:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
-/* Clearly-visible selected state: solid brand fill + white text + check icon
-   (rendered by the component) + ring + lift, unmistakable at a glance. */
 .slot-chip.selected {
   border-color: var(--primary);
   border-width: 2px;
@@ -173,8 +159,6 @@
 
 .slots-chips-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 115px), 1fr)); gap: 0.55rem; }
 
-/* Step-2 time-slot picker (Book-a-Cook flow): one card per distinct slot
-   with the free-cook count. Wraps to a grid; selected uses .selected above. */
 .slot-list-pick {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
@@ -190,7 +174,6 @@
 }
 .slot-chip.selected .slot-chip-count { opacity: 0.95; }
 
-/* Custom checkbox (login remember) */
 .login-remember {
   display: inline-flex;
   align-items: center;
@@ -252,7 +235,6 @@
 }
 .login-link-btn:hover { color: var(--primary-700); text-decoration: underline; }
 
-/* Maps link input group (copy link) */
 .maps-link-group {
   display: flex;
   gap: 0.5rem;
@@ -268,11 +250,6 @@
   white-space: nowrap;
 }
 
-/* ==========================================================================
-   Custom calendar (CustomCalendar.jsx) — modern popup month grid.
-   Field pill + floating card with brand selected day, today ring,
-   greyed past dates. Used by both booking forms.
-   ========================================================================== */
 .ccal { position: relative; display: inline-flex; min-width: 0; }
 .ccal-field {
   display: inline-flex;
@@ -309,7 +286,6 @@
 .ccal-field-chev { color: var(--slate-400); flex-shrink: 0; transform: rotate(90deg); transition: transform 0.18s ease; }
 .ccal-field-chev.open { transform: rotate(-90deg); color: var(--primary); }
 
-/* Click-away layer */
 .ccal-overlay {
   position: fixed;
   inset: 0;
@@ -318,8 +294,6 @@
   cursor: default;
 }
 
-/* Popup card — above the back-to-top FAB (70) so an open calendar is
-   never covered by it; transient toasts (1200) may still overlay. */
 .ccal-pop {
   position: absolute;
   top: calc(100% + 8px);
@@ -357,8 +331,6 @@
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
 }
-/* Hover states only on devices that can actually hover — on touch, tapping a
-   day otherwise leaves a sticky scaled/orange artifact after the tap. */
 @media (hover: hover) and (pointer: fine) {
   .ccal-nav:hover:not(:disabled) { border-color: var(--primary); background: var(--primary-light); color: var(--primary-700); }
   .ccal-day:hover:not(:disabled) { background: var(--primary-light); border-color: #fed7aa; color: var(--primary-700); transform: scale(1.06); }
@@ -445,7 +417,6 @@
   .ccal-day:hover:not(:disabled) { transform: none; }
   .ccal-field:hover { transform: none; }
 }
-/* ---- 320px floor: calendar stays inside the viewport ---------------- */
 @media (max-width: 320px) {
   .ccal-pop { padding: 0.7rem 0.62rem 0.62rem; }
   .ccal-day, .ccal-blank { min-height: 32px; font-size: 0.78rem; }

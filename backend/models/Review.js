@@ -35,7 +35,6 @@ const reviewSchema = new mongoose.Schema(
 );
 
 reviewSchema.index({ cook: 1 });
-// "My reviews" filters by customer — needs its own index.
 reviewSchema.index({ customer: 1 });
 
 module.exports = mongoose.model("Review", reviewSchema);

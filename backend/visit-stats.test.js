@@ -1,15 +1,3 @@
-// visit-stats.test.js — Site Visits hardening regression suite.
-// Run:  node visit-stats.test.js  — exits non-zero on any failure.
-//
-// Part 1: pure helper tests (utils/visits.js) — no DB.
-// Part 2: REAL route tests (routes/stats.js handlers) against in-memory fake
-//   models that faithfully emulate Mongo semantics: compound-unique keys,
-//   duplicate-key (E11000) races under concurrency, $inc upserts. The fakes
-//   force interleavings (async gap between check and write) so concurrent
-//   duplicate pings genuinely race — proving the handler's idempotency.
-// Part 3: auth/authorize enforcement for GET /visits (real middleware).
-// Part 4: static frontend safety invariants (no dangerouslySetInnerHTML in
-//   analytics rendering, sid sent by the ping, terminology).
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 process.env.NODE_ENV = process.env.NODE_ENV || "test";
 
@@ -33,18 +21,15 @@ const check = (name, ok, detail) => {
 const VID = "Abc123XY-_9";
 const SID = "sess01-_AB";
 
-// ── Part 1: helpers ─────────────────────────────────────────────
 const testHelpers = () => {
   console.log("\n═══ VISIT HELPERS ═══");
   const today = istDayString();
   check("istDayString returns YYYY-MM-DD", /^\d{4}-\d{2}-\d{2}$/.test(today), today);
   check("istDayString uses IST, not UTC", istDayString(new Date("2026-09-17T19:00:00.000Z")) === "2026-09-18");
-  // Exact IST midnight boundary: 18:29:59Z is still Sep 30 IST, 18:30:00Z is Oct 1.
   check("IST boundary 18:29:59Z -> Sep 30", istDayString(new Date("2026-09-30T18:29:59.000Z")) === "2026-09-30");
   check("IST boundary 18:30:00Z -> Oct 1", istDayString(new Date("2026-09-30T18:30:00.000Z")) === "2026-10-01");
   check("IST year boundary", istDayString(new Date("2025-12-31T18:30:00.000Z")) === "2026-01-01");
 
-  // Zero-fill range helper (frozen clocks).
   const realNow = Date.now;
   Date.now = () => new Date("2026-09-30T19:00:00.000Z").getTime(); // Oct 1 00:30 IST
   check("istDayRange month boundary", JSON.stringify(istDayRange(3)) === JSON.stringify(["2026-09-29", "2026-09-30", "2026-10-01"]), istDayRange(3).join(","));
@@ -53,21 +38,16 @@ const testHelpers = () => {
   Date.now = () => new Date("2024-03-01T01:00:00.000Z").getTime(); // Mar 1 06:30 IST (leap year)
   check("istDayRange leap day", JSON.stringify(istDayRange(2)) === JSON.stringify(["2024-02-29", "2024-03-01"]));
   Date.now = () => new Date("2026-09-29T05:00:00.000Z").getTime();
-  // NOTE: istDayString() with no args reads the REAL clock (new Date()),
-  // while istDayRange() reads Date.now() — compare against the frozen clock
-  // explicitly so the freeze doesn't leak into the assertion.
   check("istDayRange empty -> 30 days ending today", istDayRange().length === 30 && istDayRange()[29] === istDayString(new Date(Date.now())));
   check("istDayRange clamps huge", istDayRange(999999).length === 365);
   check("istDayRange clamps zero", istDayRange(0).length === 30);
   Date.now = realNow;
 
-  // days param contract.
   check("days default", parseDaysParam(undefined) === 30 && parseDaysParam("") === 30 && parseDaysParam("abc") === 30);
   check("days valid", parseDaysParam("7") === 7 && parseDaysParam(90) === 90);
   check("days clamps", parseDaysParam(0) === 1 && parseDaysParam(-5) === 1 && parseDaysParam(999999) === 365 && parseDaysParam("1") === 1);
   check("days object injection -> default", parseDaysParam({ $gt: "" }) === 30 && parseDaysParam(["7"]) === 7);
 
-  // Bots.
   check("bot UA ignored", isBot("Mozilla/5.0 (compatible; Googlebot/2.1)") === true);
   check("crawler UA ignored", isBot("ahrefsbot/7.0") === true);
   check("spider UA ignored", isBot("SomeSpider/1.0") === true);
@@ -82,7 +62,6 @@ const testHelpers = () => {
   check("real Safari counted", isBot("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1") === false);
   check("missing UA counted (not a bot)", isBot(undefined) === false && isBot("") === false);
 
-  // vid/sid validation.
   check("valid input passes", (() => { const g = normalizeVisitInput({ vid: VID, sid: SID, path: "/cook-on-demand" }); return g.vid === VID && g.sid === SID && g.path === "/cook-on-demand"; })());
   check("missing vid rejected", normalizeVisitInput({ sid: SID, path: "/" }).error !== undefined);
   check("missing sid rejected", normalizeVisitInput({ vid: VID, path: "/" }).error !== undefined);
@@ -94,7 +73,6 @@ const testHelpers = () => {
   check("object sid rejected", normalizeVisitInput({ vid: VID, sid: { $ne: null } }).error !== undefined);
   check("non-object body rejected", normalizeVisitInput("abc").error !== undefined && normalizeVisitInput(null).error !== undefined);
 
-  // Path normalization.
   check("query string stripped", normalizeVisitInput({ vid: VID, sid: SID, path: "/?a=1" }).path === "/");
   check("hash stripped", normalizeVisitInput({ vid: VID, sid: SID, path: "/#offers" }).path === "/");
   check("non-slash path defaults to /", normalizeVisitInput({ vid: VID, sid: SID, path: "https://evil.com" }).path === "/");
@@ -111,7 +89,6 @@ const testHelpers = () => {
     return shapes.size === 1 && shapes.has("/bookings/:id");
   })());
 
-  // City sanitization.
   const withCity = normalizeVisitInput({ vid: VID, sid: SID, path: "/", city: "Pune", state: "Maharashtra", country: "India" });
   check("city/state/country pass through", withCity.city === "Pune" && withCity.state === "Maharashtra" && withCity.country === "India");
   const noCity = normalizeVisitInput({ vid: VID, sid: SID, path: "/" });
@@ -124,14 +101,9 @@ const testHelpers = () => {
   check("unicode letters kept", normalizeVisitInput({ vid: VID, sid: SID, path: "/", city: "Pune" }).city === "Pune");
 };
 
-// ── Part 2: fake models with faithful Mongo semantics ───────────────
 const tick = () => new Promise((r) => setImmediate(r));
 const dupKeyErr = () => { const e = new Error("E11000 duplicate key"); e.code = 11000; return e; };
 
-// Fake collection emulating: upsert-by-unique-key, $inc/$set/$setOnInsert,
-// and the unique-index race — two concurrent inserts for the same key make
-// the loser throw E11000 (async gap between check and write forces the
-// interleaving, like a distributed race).
 const fakeCollection = (keyOf) => {
   const docs = new Map();
   const api = {
@@ -273,7 +245,6 @@ const testRoutes = async () => {
   console.log("\n═══ VISIT ROUTES (real handlers, fake DB) ═══");
   installFakes();
 
-  // First ping counts everything.
   let r = await postVisit({ vid: VID, sid: SID, path: "/cook-on-demand", city: "Pune", state: "Maharashtra", country: "India" }, UA);
   check("first ping 200 ok", r.statusCode === 200 && r.body?.ok === true && !r.body?.deduped, `s=${r.statusCode}`);
   check("DailyStat visits=1 uniques=1", fakes.DailyStat.docs.size === 1 && [...fakes.DailyStat.docs.values()][0].visits === 1);
@@ -282,21 +253,17 @@ const testRoutes = async () => {
   check("PageStat row created", fakes.PageStat.docs.size === 1);
   check("CityStat row created", fakes.CityStat.docs.size === 1);
 
-  // Identical replay: idempotent, counters untouched.
   r = await postVisit({ vid: VID, sid: SID, path: "/cook-on-demand", city: "Pune", state: "Maharashtra", country: "India" }, UA);
   const d0 = [...fakes.DailyStat.docs.values()][0];
   check("replay deduped (no recount)", r.statusCode === 200 && r.body?.deduped === true && d0.visits === 1 && d0.uniques === 1, JSON.stringify(r.body));
 
-  // Same browser, new tab (new sid): counts as a new visit, NOT a new unique.
   r = await postVisit({ vid: VID, sid: "sess02-xxxx", path: "/", city: "Pune", state: "Maharashtra", country: "India" }, UA);
   check("new session counts visit, keeps unique", r.body?.ok === true && !r.body?.deduped && d0.visits === 2 && d0.uniques === 1, `v=${d0.visits} u=${d0.uniques}`);
 
-  // New visitor: counts visit + unique.
   r = await postVisit({ vid: "NewGuy99-_1", sid: "sess09-zzzz", path: "/", city: "", state: "", country: "" }, UA);
   check("new visitor counts visit+unique", d0.visits === 3 && d0.uniques === 2, `v=${d0.visits} u=${d0.uniques}`);
   check("no city row for empty city", fakes.CityStat.docs.size === 1);
 
-  // Concurrent identical pings: exactly one counts.
   const before = { v: d0.visits, u: d0.uniques, s: fakes.VisitSession.docs.size };
   const results = await Promise.all(
     Array.from({ length: 10 }, () => postVisit({ vid: "Racer01-_x", sid: "race-sid-01", path: "/", city: "Pune", state: "", country: "" }, UA))
@@ -305,12 +272,10 @@ const testRoutes = async () => {
   check("10 concurrent duplicates -> 1 counted", counted === 1 && d0.visits === before.v + 1, `counted=${counted} visits=${d0.visits}`);
   check("concurrent uniques correct", d0.uniques === before.u + 1, `uniques=${d0.uniques}`);
 
-  // Concurrent distinct sessions: all count.
   const v2 = d0.visits;
   await Promise.all(Array.from({ length: 5 }, (_, i) => postVisit({ vid: `Conc${i}ab-_q`, sid: `csess${i}ab-_q`, path: "/" }, UA)));
   check("5 concurrent distinct sessions all count", d0.visits === v2 + 5, `visits=${d0.visits}`);
 
-  // Validation rejections (no writes).
   const sizes = () => fakes.VisitSession.docs.size + fakes.DailyVisitor.docs.size;
   const s0 = sizes();
   for (const [name, body, code] of [
@@ -326,7 +291,6 @@ const testRoutes = async () => {
   check("rejections wrote nothing", sizes() === s0);
   check("bot wrote nothing", ![...fakes.VisitSession.docs.keys()].some((k) => k.includes("BotVid")));
 
-  // Path abuse: distinct junk paths each get a bounded row; ids fold.
   await postVisit({ vid: "PathAb1-_aa", sid: "ps1ab-_aa1", path: "/a" }, UA);
   await postVisit({ vid: "PathAb2-_aa", sid: "ps2ab-_aa2", path: "/b" }, UA);
   await postVisit({ vid: "PathAb3-_aa", sid: "ps3ab-_aa3", path: "/bookings/68c9a1b2c3d4e5f60718293a" }, UA);
@@ -335,7 +299,6 @@ const testRoutes = async () => {
   check("arbitrary paths stored (bounded rows)", paths.includes("/a") && paths.includes("/b"));
   check("booking ids fold to one :id row", paths.filter((p) => p === "/bookings/:id").length === 1, paths.join(","));
 
-  // City poisoning: junk sanitized, visit still counts.
   const v3 = d0.visits;
   r = await postVisit({ vid: "CityAb1-_aa", sid: "cs1ab-_aa1", path: "/", city: "FakeCity<script>", state: "X".repeat(200), country: "Nowhere" }, UA);
   check("malicious city still counts visit", r.body?.ok === true && d0.visits === v3 + 1);
@@ -343,14 +306,12 @@ const testRoutes = async () => {
   check("no script/control payload stored", !cities.some((c) => /[<>]/.test(c)), cities.join("|"));
   check("overlong state capped at 80", [...fakes.CityStat.docs.values()].every((d) => d.state.length <= 80));
 
-  // Partial failure: CityStat down -> 500, no stack leak, no crash.
   fakes.CityStat.failures.add("updateOne");
   r = await postVisit({ vid: "Fail01-_aa1", sid: "fs1ab-_aa11", path: "/", city: "Pune", state: "", country: "" }, UA).catch((e) => ({ statusCode: 500, body: { message: e.message } }));
   check("city-write failure surfaces 500", r.statusCode === 500, `s=${r.statusCode}`);
   check("error body has message, no stack", r.body && typeof r.body.message === "string" && !r.body.stack, JSON.stringify(r.body).slice(0, 80));
   fakes.CityStat.failures.clear();
 
-  // Uniques-increment failure -> 500 (bounded, logged divergence).
   const realDSUpdate = require("./models/DailyStat").updateOne;
   let calls = 0;
   require("./models/DailyStat").updateOne = async (...a) => {
@@ -362,14 +323,12 @@ const testRoutes = async () => {
   check("uniques-increment failure surfaces 500", r.statusCode === 500, `s=${r.statusCode}`);
   require("./models/DailyStat").updateOne = (...a) => fakes.DailyStat.updateOne(...a);
 
-  // Invariants over the fake day.
   const day = [...fakes.DailyStat.docs.values()][0];
   check("INVARIANT uniques <= visits", day.uniques <= day.visits, `${day.uniques}<=${day.visits}`);
   check("INVARIANT one DailyVisitor per (day,vid)", new Set([...fakes.DailyVisitor.docs.keys()]).size === fakes.DailyVisitor.docs.size);
   check("INVARIANT visits >= 0, uniques >= 0", day.visits >= 0 && day.uniques >= 0);
 };
 
-// ── Part 3: GET /visits + auth ─────────────────────────────────
 const getVisits = (query = {}, user) => new Promise((resolve, reject) => {
   const layer = statsRouter().stack.find((l) => l.route && l.route.path === "/visits" && l.route.methods.get);
   const handler = layer.route.stack[layer.route.stack.length - 1].handle;
@@ -382,7 +341,6 @@ const getVisits = (query = {}, user) => new Promise((resolve, reject) => {
 
 const testGetAndAuth = async () => {
   console.log("\n═══ GET /visits + AUTH ═══");
-  // Seed two active days; the rest of the 7-day window must zero-fill.
   const range = istDayRange(7);
   const d1 = range[1], d2 = range[4];
   fakes.DailyStat.docs.set(d1, { day: d1, visits: 5, uniques: 4 });
@@ -408,18 +366,15 @@ const testGetAndAuth = async () => {
   check("INVARIANT top cities <= total visits", citySum <= tot.visits, `${citySum}<=${tot.visits}`);
   check("meta documents IST + uniques definition", r.body.meta?.timezone === "Asia/Kolkata" && /visitor-day/.test(r.body.meta?.uniquesDefinition || ""));
 
-  // Completely empty range.
   fakes.DailyStat.docs.clear(); fakes.PageStat.docs.clear(); fakes.CityStat.docs.clear();
   const e = await getVisits({ days: "7" }, { id: "a", role: "admin" });
   check("empty range: 7 zero rows, totals 0", e.body.days.length === 7 && e.body.totals.visits === 0 && e.body.totals.uniques === 0);
 
-  // days contract at HTTP layer.
   const bad = await getVisits({ days: "abc" }, { id: "a", role: "admin" });
   check("days=abc -> default 30 rows", bad.body.days.length === 30, `n=${bad.body.days.length}`);
   const big = await getVisits({ days: "999999" }, { id: "a", role: "admin" });
   check("days huge -> clamped 365", big.body.days.length === 365, `n=${big.body.days.length}`);
 
-  // Auth enforcement (real middleware).
   const { auth, authorize } = require("./middleware/auth");
   const User = require("./models/User");
   const runAuth = (headers, account) => new Promise((resolve) => {
@@ -449,13 +404,11 @@ const testGetAndAuth = async () => {
   check("cook GET forbidden", a.statusCode === 403, `s=${a.statusCode}`);
   a = await runAuthorize("admin");
   check("admin GET allowed", a.next === true);
-  // Route wiring: exact layers auth + authorize + handler.
   const layer = statsRouter().stack.find((l) => l.route && l.route.path === "/visits" && l.route.methods.get);
   check("GET /visits has auth+authorize+handler", layer.route.stack.length === 3, `${layer.route.stack.length} layers`);
   const postLayer = statsRouter().stack.find((l) => l.route && l.route.path === "/visit" && l.route.methods.post);
   check("POST /visit stays public (single handler)", postLayer.route.stack.length === 1, `${postLayer.route.stack.length} layers`);
 
-  // Model index contracts (unique + TTL) without a DB.
   const idx = (m) => m.schema.indexes().map((x) => JSON.stringify([x[0], x[1]]));
   const dv = idx(require("./models/DailyVisitor")).join(" ");
   check("DailyVisitor (day,vid) unique", /"day":1.*"vid":1.*"unique":true/.test(dv), dv);
@@ -471,7 +424,6 @@ const testGetAndAuth = async () => {
   check("DailyStat day unique", /"day":1.*"unique":true/.test(ds));
 };
 
-// ── Part 4: static frontend invariants ──────────────────────────
 const testFrontendStatics = () => {
   console.log("\n═══ FRONTEND STATICS ═══");
   const read = (p) => fs.readFileSync(path.join(__dirname, "..", "frontend", "src", p), "utf8");

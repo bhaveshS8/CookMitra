@@ -1,4 +1,3 @@
-// Admin console routes for cook incentives / leads / referrals / payouts.
 const express = require("express");
 
 const router = express.Router();

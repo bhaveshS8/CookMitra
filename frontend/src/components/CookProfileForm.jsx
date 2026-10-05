@@ -4,19 +4,8 @@ import { useShowToast } from "../store/hooks";
 import CookDocUploads from "./CookDocUploads";
 import { ChefHat, AlertCircle } from "lucide-react";
 
-// Direct booking: every cook offers home cooking at the same flat launch
-// price, so there is no service picker. The backend still stores
-// `serviceTypes` — new/updated profiles save the default value below.
 const DEFAULT_SERVICE_TYPES = ["cook_for_me"];
 
-// Single source of truth for the cook profile form, shared by the Cook Setup
-// page and the cook dashboard's profile tab (they previously duplicated each
-// other and had already diverged — the dashboard copy silently dropped the
-// home address and additional documents fields).
-// Props:
-//   createTitle / manageTitle — headings for first-time vs existing profiles
-//   showStatus — show the admin verification badge (setup page)
-//   onSaved(profile, isUpdate) — optional callback after a successful save
 const CookProfileForm = ({
   createTitle = "Create Cook Profile",
   manageTitle = "Manage Cook Profile",
@@ -120,7 +109,6 @@ const CookProfileForm = ({
         isUpdate ? "Chef profile updated successfully!" : "Profile submitted for admin approval!",
         "success"
       );
-      // Tell the navbar to reload the (possibly new) profile photo.
       window.dispatchEvent(new Event("cook-photo-updated"));
       onSaved?.(res.data, isUpdate);
     } catch (err) {

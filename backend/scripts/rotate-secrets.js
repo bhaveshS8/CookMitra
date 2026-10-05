@@ -1,15 +1,3 @@
-// JWT secret rotation helper (run by the OPERATOR, never in CI).
-//
-//   node backend/scripts/rotate-secrets.js --write <path-to-.env>
-//
-// Generates a fresh 96-hex-char JWT_SECRET with crypto randomness and writes
-// it into the target .env, preserving every other line. The secret value is
-// NEVER printed to stdout/logs. Without --write this is a dry run that changes
-// nothing (exit 2).
-//
-// After rotating: restart the API on every instance (old tokens stop verifying
-// immediately), then purge the compromised secret from git history — see
-// docs/SECRET_ROTATION.md.
 "use strict";
 
 const fs = require("fs");

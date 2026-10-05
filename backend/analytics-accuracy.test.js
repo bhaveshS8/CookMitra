@@ -1,20 +1,4 @@
-// analytics-accuracy.test.js — Admin Analytics correctness regression suite.
-// Run:  node backend/analytics-accuracy.test.js  — exits non-zero on failure.
-//
-// Covers (stubbed, no DB):
-//  1. utils/analytics pure rules: status classification, paid/refunded sums,
-//     city normalization, IST month keys, date-filter validation.
-//  2. GET /api/analytics/bookings handler with a stubbed Booking.aggregate:
-//     fixture bookings (all 9 statuses + unknown-side cases) feed an
-//     INDEPENDENT test-side facet builder (plain JS loops — never the route's
-//     own math); the test then asserts the exact expected KPIs and the
-//     reconciliation equations (status totals, gross-refunds=net,
-//     platform+cook=net, hours, monthly trend).
-//  3. Refund edge cases: pending/failed refunds move no money; partial refund
-//     reduces net; test-mode payments excluded from every financial metric.
 //  4. Security: route is auth+authorize("admin"); unauthenticated,
-//     customer, cook, suspended/deleted/tokenVersion-mismatch callers are
-//     rejected by the real auth middleware; invalid/expired JWT rejected.
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 process.env.NODE_ENV = process.env.NODE_ENV || "test";
 
@@ -33,7 +17,6 @@ const check = (n, ok, d) => {
 };
 const eq = (a, b) => a === b;
 
-// ── 1. pure rules ─────────────────────────────────────────────
 console.log("═══ analytics utils: classification ═══");
 check("all 9 lifecycle statuses known", A.KNOWN_STATUSES.length === 9);
 for (const s of ["requested", "accepted", "confirmed", "in_progress", "completed", "cancelled", "expired", "rejected", "unattended"]) {
@@ -68,11 +51,8 @@ console.log("\n═══ analytics utils: city + IST month ═══");
 check("normalize Pune variants", A.normalizeCity("Pune") === "pune" && A.normalizeCity(" pune ") === "pune" && A.normalizeCity("PUNE") === "pune" && A.normalizeCity(" Pune") === "pune");
 check("normalize null -> empty", A.normalizeCity(null) === "" && A.normalizeCity(undefined) === "");
 check("display city title-cases", A.displayCity("pune") === "Pune");
-// 2026-09-30 23:59 IST = 2026-09-30 18:29Z -> still September IST.
 check("IST month boundary late Sep", A.monthKeyIST(new Date("2026-09-30T18:29:00Z")) === "2026-09");
-// 2026-10-01 00:00 IST = 2026-09-30 18:30Z -> October IST (UTC day is still Sep!).
 check("IST month boundary Oct 00:00", A.monthKeyIST(new Date("2026-09-30T18:30:00Z")) === "2026-10");
-// 2026-01-01 00:00 IST = 2025-12-31 18:30Z -> January (year boundary).
 check("IST year boundary", A.monthKeyIST(new Date("2025-12-31T18:30:00Z")) === "2026-01");
 check("invalid date -> null", A.monthKeyIST(new Date("nope")) === null);
 check("enumerate months fills gaps", eq(A.enumerateMonths("2026-09", "2026-11").join(","), "2026-09,2026-10,2026-11"));
@@ -98,11 +78,8 @@ check("5yr cap enforced", threw === 400);
 const okRange = A.validateAnalyticsQuery({ from: "2026-09-01", to: "2026-09-30", dateField: "service" });
 check("valid range parses", okRange && okRange.dateField === "service" && okRange.from instanceof Date);
 
-// ── 2. handler with independent fixture math ─────────────────
 console.log("\n═══ analytics handler: fixture correctness ═══");
 
-// Fixture set (hand-designed; expected values computed BELOW by independent
-// loops + hard-coded literals — never by calling the route's code).
 const OID = (n) => `0000000000000000000000${String(n).padStart(2, "0")}`.slice(-24);
 const FIXTURES = [
   { _id: "f01", status: "completed", durationHours: 2, amount: 349, commission: 87, cookPayout: 262, discount: 0, date: new Date("2026-09-15T00:00:00Z"), payment: { status: "paid", paidAmount: 349, refundStatus: "none", testMode: false }, payout: { status: "settled", amount: 262 }, addressDetails: { city: "Pune" }, cook: OID(11), customer: OID(21) },
@@ -120,7 +97,6 @@ const FIXTURES = [
   { _id: "f13", status: "completed", durationHours: 2, amount: 349, commission: 87, cookPayout: 262, discount: 0, date: new Date("2026-09-22T00:00:00Z"), payment: { status: "paid", paidAmount: 349, refundStatus: "none", testMode: false }, payout: { status: "pending", amount: 0 }, addressDetails: { city: "Pune" }, cook: OID(11), customer: OID(21) },
 ];
 
-// INDEPENDENT expected math (plain loops; hard-coded cross-checks inline).
 const realPaid = FIXTURES.filter((b) => b.payment.status === "paid" && b.payment.testMode !== true);
 const EXP = {
   total: 13,
@@ -150,8 +126,6 @@ check("hard-coded net", EXP.net === 2693, `got ${EXP.net}`);
 check("hard-coded platform", EXP.platform === 673, `got ${EXP.platform}`);
 check("hard-coded cook", EXP.cook === 2020, `got ${EXP.cook}`);
 
-// Test-side facet builder — mirrors Mongo semantics ($facet groups) with
-// plain JS so the route's aggregation is verified, not re-executed.
 const settledRefunds = ["processed", "manual"];
 function buildTestFacet(rows) {
   const statusMap = new Map();
@@ -293,7 +267,6 @@ async function runHandler(query = {}) {
   check("scheduledHours", svc.scheduledHours === EXP.schedHours, `got ${svc.scheduledHours}`);
   check("completedHours", svc.completedHours === EXP.compHours, `got ${svc.completedHours}`);
 
-  // Reconciliation equations (the acceptance core).
   const sumStatuses =
     bk.byStatus.requested + bk.byStatus.accepted + bk.byStatus.confirmed +
     bk.byStatus.in_progress + bk.byStatus.completed + bk.byStatus.cancelled +
@@ -314,12 +287,10 @@ async function runHandler(query = {}) {
   check("meta states service-date dimension", /service date/i.test(body.meta?.dateDimensionMeaning || ""));
   check("no NaN in financials", Object.values(fin).every((v) => typeof v !== "number" || Number.isFinite(v)));
 
-  // Legacy aliases kept for the old UI.
   check("legacy revenue alias == net", body.totals.revenue === fin.netCollected);
   check("legacy commission alias == platform", body.totals.commission === fin.platformEarnings);
   check("legacy cookPayouts alias == cook net", body.totals.cookPayouts === fin.cookEarnings);
 
-  // Date-filter validation at the HTTP layer.
   Booking.aggregate = async () => [buildTestFacet([])];
   const bad1 = await runHandler({ from: "2026-10-01", to: "2026-09-01" });
   check("from>to -> 400", bad1.statusCode === 400, `got ${bad1.statusCode}`);
@@ -336,7 +307,6 @@ async function runHandler(query = {}) {
   check("route has 3 layers (auth, authorize, handler)", layer.route.stack.length === 3, mwNames.join(","));
   const runAuth = (headers, account) =>
     new Promise((resolve) => {
-      // Mirror the real mongoose chain: findById().select().lean().
       User.findById = () => ({ select: () => ({ lean: async () => account }) });
       const h = {};
       for (const [k, v] of Object.entries(headers || {})) h[String(k).toLowerCase()] = v;
@@ -372,7 +342,6 @@ async function runHandler(query = {}) {
   r = await runAuth(mkAuth(adminToken), { _id: "a1", role: "admin", status: "active", tokenVersion: 0 });
   check("admin -> allowed", r.next === true && r.req.user.role === "admin");
 
-  // authorize("admin") — the analytics route's second layer.
   const { authorize } = require("./middleware/auth");
   const runAuthorize = (role) =>
     new Promise((resolve) => {

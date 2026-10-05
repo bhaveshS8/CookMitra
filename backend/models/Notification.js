@@ -58,17 +58,11 @@ const notificationSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
-    // Booking this update is about (when there is one). The app turns it into
-    // a tap-through link — a notification a user cannot act on is a dead end
-    // ("pay within 5 minutes" with nowhere to go).
     booking: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Booking",
       default: null,
     },
-    // Optional explicit destination for non-booking notifications (e.g. a
-    // cook's profile-review outcome). Always an in-app path, never absolute
-    // (an absolute URL here would navigate the tapper off-site).
     link: {
       type: String,
       default: "",

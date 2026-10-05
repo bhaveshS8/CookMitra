@@ -14,11 +14,6 @@ const {
   intervalsOverlap,
 } = require("../utils/slots");
 
-// Fields a cook may set on their own profile. Everything else
-// (approvalStatus, rating, user) is admin-managed and must NOT be writable
-// via the generic create/update handlers — otherwise a cook could
-// self-approve, inflate their rating, or reassign the profile's owner.
-// (Unknown keys like a legacy `liveLocation` are dropped by the whitelist.)
 const COOK_EDITABLE_FIELDS = [
   "bio",
   "skills",
@@ -32,12 +27,7 @@ const COOK_EDITABLE_FIELDS = [
   "aadharCardUrl",
   "panCardUrl",
   "photoUrl",
-  // Working hours + blocked dates the cook publishes (schedule-aware slot
-  // engine reads these). updatedAt is set server-side below, never trusted
-  // from the body.
   "schedule",
-  // Where the cook's 85% is paid — UPI id / bank details. Only the last 4
-  // digits of an account are ever stored.
   "payoutDetails",
 ];
 
@@ -49,11 +39,6 @@ const pickCookEditable = (obj) => {
   return out;
 };
 
-// Document URLs in the private pipeline are always relative /uploads paths
-// whose filename embeds the OWNER cook's user id. A cook must not be able to
-// claim another cook's file (or an arbitrary path) by writing a foreign URL
-// into their own profile — every /uploads/ doc URL saved must belong to them.
-// Returns an error message string, or null when all URLs check out.
 const DOC_URL_FIELDS = ["aadharCardUrl", "panCardUrl", "photoUrl"];
 const assertDocUrlsOwned = (body, ownerUserId) => {
   const { ownerIdOf } = require("../utils/storage");
@@ -69,8 +54,6 @@ const assertDocUrlsOwned = (body, ownerUserId) => {
         return "Document does not belong to this cook — upload it first";
       }
     } else if (!/^https:\/\/[^/]+\/.+/.test(v)) {
-      // Absolute URLs (Google avatars, CDN) must be plain https links —
-      // never data:/javascript:/relative escapes that reach odd parsers.
       return `${key} must be an uploaded document or an https link`;
     }
   }
@@ -86,13 +69,7 @@ exports.getCooks = async (req, res, next) => {
       filter.approvalStatus = "approved";
     }
 
-    // Every cook offers ALL service types: the serviceType query param is
-    // accepted for URL compatibility but no longer filters the list —
-    // customers pick a service and see every approved cook, since all cooks
-    // can perform any service. (The value never reaches Mongoose, so the old
-    // ?serviceType[$ne]=x injection concern is moot.)
     void serviceType;
-    // Escape user input before $regex (no ReDoS / pattern injection) + cap.
     if (serviceArea) {
       const esc = String(serviceArea)
         .slice(0, 60)
@@ -100,10 +77,6 @@ exports.getCooks = async (req, res, next) => {
       filter.serviceArea = { $regex: esc, $options: "i" };
     }
 
-    // Name search pushed into Mongo (not in-memory over every cook): match
-    // via the populated user through an aggregation-friendly two-step —
-    // first resolve matching user ids (indexed name prefix), then filter.
-    // Capped to 200 ids so a one-letter query can't fan out unbounded.
     const searchText = String(search || "").trim().slice(0, 60);
     if (searchText && !isAdmin) {
       const escName = searchText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -112,42 +85,26 @@ exports.getCooks = async (req, res, next) => {
         .limit(200)
         .lean();
       const ids = matchedUsers.map((u) => u._id);
-      // Specialties live on the profile — $or user-match OR specialty-match.
       filter.$or = [
         { user: { $in: ids } },
         { specialties: { $regex: escName, $options: "i" } },
       ];
     }
 
-    // Contact PII: guests see discovery fields only; signed-in users see
-    // the same (cook phones are shared post-accept via booking payloads —
-    // nothing in discovery UI consumes them); admins see email too.
     const userFields = !req.user
       ? "name status"
       : isAdmin
         ? "name email phone status"
         : "name status";
-    // Server-side paging FIRST (bounded in Mongo): without ?page=&limit= the
-    // legacy full-array path applies (HARD_CAP 500). With params we skip/limit
-    // at the DB so 1000-user browsing never loads the whole collection.
     const pg = paginationParams(req);
-    // .lean(): read-only list — skips Mongoose hydration for ~2-3x faster
-    // list responses (populate still resolves, returned as plain objects).
     let cookQuery = CookProfile.find(filter).populate("user", userFields).sort({ createdAt: -1 }).lean();
     if (pg.has) {
       cookQuery = cookQuery.skip(pg.skip).limit(pg.limit);
     } else {
-      // Legacy array response: cap the DB read at the same HARD_CAP the
-      // response applies, so an un-paged call can never stream the whole
-      // collection into memory under load.
       cookQuery = cookQuery.limit(HARD_CAP);
     }
     let cooks = await cookQuery;
 
-    // Hide cooks whose account was blocked or deleted by an admin so they
-    // can no longer be discovered or booked by customers. Admins still see
-    // everything so they can manage the accounts. Also hide cooks who have
-    // toggled themselves "unavailable" (auto-reset the next day).
     if (!req.user || String(req.user.role).toUpperCase() !== "ADMIN") {
       const flags = await Promise.all(
         cooks.map(async (cook) => {
@@ -158,8 +115,6 @@ exports.getCooks = async (req, res, next) => {
       cooks = cooks.filter((_, i) => flags[i]);
     }
 
-    // Admin free-text search (name/specialty) still needs the in-memory pass —
-    // the DB-level filter above already handled the public case.
     if (searchText && isAdmin) {
       const searchLower = searchText.toLowerCase();
       cooks = cooks.filter(
@@ -169,16 +124,7 @@ exports.getCooks = async (req, res, next) => {
       );
     }
 
-    // Availability filter: hide cooks with nothing bookable on the date.
-    // date alone -> at least one open window; date + durationHours -> at
-    // least one free start option after subtracting existing bookings;
-    // date + startTime + endTime -> that exact window must be free (so a cook
-    // busy 10:00-13:00 never shows for a 10:00-13:00 search).
-    // BATCHED: one availability lookup + one bookings lookup for the whole
-    // page (not 2 queries per cook), then pure in-memory math per cook.
     if (date) {
-      // Local-midnight parse like the slot engine — new Date("YYYY-MM-DD")
-      // is UTC midnight and validates/wraps to the wrong local day.
       const parsedDate = parseDay(date);
       if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
         return res.status(400).json({ message: "Invalid date" });
@@ -191,7 +137,6 @@ exports.getCooks = async (req, res, next) => {
           return res.status(400).json({ message: "durationHours must be between 0.5 and 12" });
         }
       }
-      // Exact-window mode: validate the requested interval up front.
       let exactStart = null;
       let exactEnd = null;
       if (exactStartRaw != null || exactEndRaw != null) {
@@ -209,8 +154,6 @@ exports.getCooks = async (req, res, next) => {
         dur = (exactEnd - exactStart) / 60;
       }
       const checks = (() => {
-        // Windows are universal (08:00-20:00) — compute once, reuse per cook.
-        // Bookings differ per cook but one $in query beats N round trips.
         const windowsPromise = getDayWindows(null, date);
         const cookIds = cooks.map((c) => c.user?._id || c.user);
         const { start, end } = require("../utils/slots").dayBounds(date);
@@ -237,8 +180,6 @@ exports.getCooks = async (req, res, next) => {
             const id = String(cook.user?._id || cook.user);
             const bookings = byCook.get(id) || [];
             if (exactStart != null) {
-              // The exact [startTime, endTime] must sit inside one open window
-              // and overlap no existing booking.
               const inside = windows.some((w) => {
                 const ws = timeToMinutes(w.startTime);
                 const we = timeToMinutes(w.endTime);
@@ -258,14 +199,10 @@ exports.getCooks = async (req, res, next) => {
           }
         });
       });
-      // Await ONCE (the promise is shared, awaiting per-item would re-wrap it).
       const checkResults = await checks;
       cooks = cooks.filter((_, i) => checkResults[i]);
     }
 
-    // Post-filter paging response: when ?page=&limit= was used the DB already
-    // bounded the page; total counts the filtered page-set (documented inline).
-    // Without params the legacy full-array path applies (HARD_CAP 500).
     if (pg.has) {
       return sendList(res, cooks, pg, cooks.length);
     }
@@ -278,11 +215,7 @@ exports.getCooks = async (req, res, next) => {
 exports.getCook = async (req, res, next) => {
   try {
     const isAdmin = Boolean(req.user) && String(req.user.role).toUpperCase() === "ADMIN";
-    // Guests and signed-in non-admins see discovery fields only (no contact
-    // PII); see getCooks. Phones arrive post-accept via booking payloads.
     const userFields = !req.user ? "name status" : isAdmin ? "name email phone" : "name";
-    // Accept either a CookProfile id (/cooks/:id pages) or a User id
-    // (e.g. dashboard "View Cook Profile" links over populated cooks).
     let cook = null;
     try {
       cook = await CookProfile.findById(req.params.id).populate(
@@ -301,8 +234,6 @@ exports.getCook = async (req, res, next) => {
     if (!cook) {
       return res.status(404).json({ message: "Cook profile not found" });
     }
-    // Unapproved / suspended cooks are invisible to the public (the listing
-    // filters them too) — the admin dossier endpoint covers admin access.
     if (!isAdmin && (cook.approvalStatus !== "approved" || cook.user?.status === "suspended")) {
       return res.status(404).json({ message: "Cook profile not found" });
     }
@@ -312,9 +243,6 @@ exports.getCook = async (req, res, next) => {
   }
 };
 
-// Admin-only: full cook dossier — profile + contact/address/documents,
-// every booking (customer + service address + hours), and earnings/hours
-// summary (total + per service). Accepts a CookProfile id or a User id.
 exports.getCookAdminOverview = async (req, res, next) => {
   try {
     let profile = null;
@@ -341,7 +269,6 @@ exports.getCookAdminOverview = async (req, res, next) => {
       .populate("customer", "name email phone")
       .sort({ createdAt: -1 });
 
-    // Customer ratings for each service (one per booking max) + full list.
     let reviews = [];
     let reviewByBookingId = {};
     try {
@@ -362,9 +289,6 @@ exports.getCookAdminOverview = async (req, res, next) => {
     }
     const bookingsWithReviews = bookings.map((b) => {
       const obj = b.toObject ? b.toObject() : b;
-      // Never expose service-start OTP secrets through the admin overview —
-      // admins manage the profile, they never need the customer OTP. StartedAt
-      // /EndsAt evidence fields are kept (operational, not secret).
       delete obj.serviceOtp;
       delete obj.serviceOtpGeneratedAt;
       delete obj.serviceOtpAttempts;
@@ -372,11 +296,6 @@ exports.getCookAdminOverview = async (req, res, next) => {
       return { ...obj, review: reviewByBookingId[b._id.toString()] || null };
     });
 
-    // Earnings count ONLY real captured payments (status "paid" with a
-    // received gateway payment id). Pending amounts never count — and neither
-    // does test-mode/dev money, which carries a synthetic pay_test_* id and
-    // must not inflate the admin earnings picture (payout queue already
-    // excludes testMode the same way).
     const earnedOf = (b) =>
       b?.payment?.status === "paid" &&
       b?.payment?.razorpayPaymentId &&
@@ -427,19 +346,13 @@ exports.createCookProfile = async (req, res, next) => {
     if (docErr) {
       return res.status(400).json({ message: docErr });
     }
-    // Keep legacy `bio` and renamed `skills` in sync — old clients send only
-    // bio, the new form sends skills.
     if (body.skills != null && body.bio == null) body.bio = body.skills;
     if (body.bio != null && body.skills == null) body.skills = body.bio;
     const profile = await CookProfile.create({
       user: req.user.id,
-      // New profiles always start "pending" until an admin approves them —
-      // approvalStatus can never come from the request body.
       approvalStatus: "pending",
       ...body,
     });
-    // Mint the cook's referral identity + enrollment anchor (§12, §6).
-    // Best-effort: profile creation never fails on referral bookkeeping.
     try {
       const { generateReferralCode } = require("../utils/cookEarnings");
       const CookReferral = require("../models/CookReferral");
@@ -460,10 +373,8 @@ exports.createCookProfile = async (req, res, next) => {
         const { ensureIncentives } = require("../utils/cookEarningsService");
         await ensureIncentives(req.user.id);
       } catch {
-        // non-fatal
       }
     } catch {
-      // non-fatal
     }
     res.status(201).json(profile);
   } catch (error) {
@@ -488,8 +399,6 @@ exports.getMyProfile = async (req, res, next) => {
 
 exports.updateCookProfile = async (req, res, next) => {
   try {
-    // Whitelist-only: admin-managed fields (approvalStatus, rating, user) can
-    // never be written through the generic profile editor.
     const body = pickCookEditable(req.body);
     const docErr = assertDocUrlsOwned(body, req.user.id);
     if (docErr) {
@@ -497,9 +406,6 @@ exports.updateCookProfile = async (req, res, next) => {
     }
     if (body.skills != null && body.bio == null) body.bio = body.skills;
     if (body.bio != null && body.skills == null) body.skills = body.bio;
-    // Server-stamped audit times — a client cannot forge these. Guard the
-    // type first: assigning a property on a non-object schedule (string,
-    // number) would throw a TypeError and 500 instead of a clean 400.
     if (body.schedule !== undefined) {
       if (typeof body.schedule !== "object" || body.schedule === null || Array.isArray(body.schedule)) {
         return res.status(400).json({ message: "Schedule must be an object" });
@@ -507,8 +413,6 @@ exports.updateCookProfile = async (req, res, next) => {
       body.schedule.updatedAt = new Date();
     }
     if (body.payoutDetails !== undefined) {
-      // Payout destinations are money-critical: format-validated, normalized
-      // and history-trailed server-side (the cook form only hints at formats).
       const { validatePayoutDetails } = require("../utils/finance");
       const { ok, reasons, normalized } = validatePayoutDetails(body.payoutDetails);
       if (!ok) {
@@ -524,9 +428,6 @@ exports.updateCookProfile = async (req, res, next) => {
     if (!profile) {
       return res.status(404).json({ message: "Cook profile not found" });
     }
-    // Advisory change trail (best-effort): a destination swapped right before
-    // settlement stays auditable. Settlements additionally freeze their own
-    // copy on the booking, so history here is defense in depth.
     if (body.payoutDetails !== undefined) {
       try {
         const d = profile.payoutDetails || {};
@@ -552,7 +453,6 @@ exports.updateCookProfile = async (req, res, next) => {
           }
         );
       } catch {
-        // non-fatal: the save above already succeeded
       }
     }
     res.json(profile);
@@ -595,16 +495,12 @@ exports.getAvailableSlots = async (req, res, next) => {
     const { parseDay } = require("../utils/slots");
     const { date } = req.query;
 
-    // Accept either a CookProfile id (/cooks/:id pages) or a User id, consistent
-    // with getCook / getCookReviews / getCookAdminOverview. Availability.cook
-    // stores the user id, so a bare profile id would otherwise match nothing.
     let cookId = req.params.id;
     let profile = null;
     try {
       profile = await CookProfile.findById(cookId).select("user availabilityStatus unavailableDate approvalStatus");
       if (profile?.user) cookId = profile.user.toString();
     } catch {
-      // not a profile id — fall through and use the param as a user id
     }
     if (!profile) {
       profile = await CookProfile.findOne({ user: cookId }).select(
@@ -612,14 +508,10 @@ exports.getAvailableSlots = async (req, res, next) => {
       );
     }
 
-    // A cook who has toggled "unavailable" exposes no bookable slots until they
-    // become available again on their own OR the next day begins.
     if (profile && !(await resolveCookAvailability(profile))) {
       return res.json([]);
     }
 
-    // Mirror getCook: unapproved / suspended cooks expose no public slots.
-    // The cook themself and admins still see the raw list.
     const viewerAdmin = req.user && String(req.user.role).toUpperCase() === "ADMIN";
     const viewerSelf = req.user?.id != null && String(req.user.id) === String(cookId);
     if (profile && !viewerAdmin && !viewerSelf) {
@@ -637,7 +529,6 @@ exports.getAvailableSlots = async (req, res, next) => {
 
     const filter = { cook: cookId, status: "available" };
     if (date) {
-      // IST business-day range (F-08) — matches how slots are stored.
       const bounds = dayBounds(date);
       if (!bounds) {
         return res.status(400).json({ message: "Invalid date" });
@@ -652,10 +543,6 @@ exports.getAvailableSlots = async (req, res, next) => {
   }
 };
 
-// Cook uploads ID verification files (Aadhaar / PAN / photo).
-// Expects multipart/form-data with fields: aadhar, pan, photo (each max 1).
-// Returns relative URLs { aadharCardUrl, panCardUrl, photoUrl } which the
-// client then saves via POST / PUT cook profile.
 exports.uploadCookDocs = async (req, res, next) => {
   try {
     const urls = {};
@@ -677,9 +564,6 @@ exports.uploadCookDocs = async (req, res, next) => {
   }
 };
 
-// Cook toggles themselves between "available" and "unavailable". While
-// unavailable they are hidden from all booking until they toggle back OR the
-// next day begins (auto reset handled by resolveCookAvailability on read).
 exports.toggleAvailability = async (req, res, next) => {
   try {
     const { status } = req.body || {};
@@ -691,8 +575,6 @@ exports.toggleAvailability = async (req, res, next) => {
       { user: req.user.id },
       {
         availabilityStatus: status,
-        // Record the local day we went unavailable so the next-day auto reset
-        // has an expiry to compare against.
         unavailableDate: status === "unavailable" ? localDayString() : "",
       },
       { new: true }
@@ -706,11 +588,6 @@ exports.toggleAvailability = async (req, res, next) => {
   }
 };
 
-// Admin uploads verification docs ON BEHALF of a cook (e.g. files received
-// over email/WhatsApp). Same multipart fields as the cook self-upload
-// (aadhar, pan, photo — at least one), but the files are attached straight
-// onto the cook's profile here instead of being returned as URLs, and the
-// cook is notified. :id may be a CookProfile id OR the cook's User id.
 exports.adminUploadCookDocs = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -718,7 +595,6 @@ exports.adminUploadCookDocs = async (req, res, next) => {
       return res.status(400).json({ message: "Invalid cook id" });
     }
 
-    // Resolve the profile: accept a CookProfile id or the cook's User id.
     let profile = await CookProfile.findById(id);
     if (!profile) {
       const cookUser = await User.findOne({ _id: id, role: "COOK" });
@@ -730,11 +606,6 @@ exports.adminUploadCookDocs = async (req, res, next) => {
       return res.status(404).json({ message: "Cook profile not found" });
     }
 
-    // F-02 fix: multer names every file after the UPLOADER (req.user.id —
-    // here the admin). Re-own each file to the cook BEFORE attaching, so the
-    // filename owner segment, the static gate, and the signed-URL gate all see
-    // the cook. On any failure the just-uploaded files are removed and the
-    // request fails instead of attaching wrong-owner documents.
     const uploaded = [
       ...(req.files?.aadhar || []),
       ...(req.files?.pan || []),
@@ -771,7 +642,6 @@ exports.adminUploadCookDocs = async (req, res, next) => {
         try {
           fs.unlinkSync(path.join(uploadDir, f.filename));
         } catch {
-          // best-effort cleanup
         }
       }
       return res.status(500).json({ message: "Could not store the uploaded documents. Please try again." });
@@ -780,11 +650,9 @@ exports.adminUploadCookDocs = async (req, res, next) => {
       return res.status(400).json({ message: "No files uploaded" });
     }
 
-    // Attach only the fields actually uploaded — never wipe the others.
     Object.assign(profile, urls);
     await profile.save();
 
-    // Let the cook know their documents were added by support.
     try {
       await Notification.create({
         user: profile.user,
@@ -792,7 +660,6 @@ exports.adminUploadCookDocs = async (req, res, next) => {
         message: "An admin added your verification documents. Please check your profile.",
       });
     } catch {
-      // A failed notification must not fail the upload.
     }
 
     res.json(profile);

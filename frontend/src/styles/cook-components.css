@@ -1,12 +1,4 @@
-/* ==========================================================================
-   Cook workspace design system — tokens, buttons, page head, hero support,
-   stats, tabs, cards, notices, empty states, forms, doc uploads, reviews,
-   modal. Warm festive-orange × deep slate, built on base.css tokens.
-   The hero banner itself lives in cook-pages.css; this file holds everything
-   around it so cook pages share one card/button/tab language.
-   ========================================================================== */
 
-/* ---- 1. Tokens (cook-scoped aliases over base tokens) ---- */
 :root {
   --cook-card-bg: var(--bg-card);
   --cook-card-border: var(--border-subtle);
@@ -25,8 +17,6 @@
   --cook-radius-sm: var(--radius-md);
 }
 
-/* ---- 2. Buttons ---- */
-/* Text-only action link (used for "Review profile →", "See all reviews →"). */
 .cook-link-btn {
   background: none;
   border: 0;
@@ -43,7 +33,6 @@
 .cook-link-btn:hover { color: var(--cook-brand-deep); text-decoration: underline; }
 .cook-link-btn:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
 
-/* Cook primary/secondary button shortcuts over the global .btn system. */
 .cook-btn {
   display: inline-flex;
   align-items: center;
@@ -69,7 +58,6 @@
 .cook-btn-ghost:hover { border-color: var(--cook-brand); color: var(--cook-brand); box-shadow: var(--shadow-md); }
 .cook-btn-sm { min-height: 40px; padding: 0.42rem 0.8rem; font-size: 0.84rem; border-radius: 10px; }
 
-/* Availability pill (hero + dashboard). Dot is a span, not inline styles. */
 .cook-avail {
   display: inline-flex;
   align-items: center;
@@ -93,7 +81,6 @@
 .cook-avail-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; flex-shrink: 0; }
 .cook-avail:disabled .cook-avail-dot { opacity: 0.5; }
 
-/* ---- 3. Page head (title + sub + actions row) ---- */
 .cook-page-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
 .cook-page-head-title { display: flex; align-items: center; gap: 0.6rem; }
 .cook-page-head-title h1 { margin: 0; font-size: 1.7rem; }
@@ -101,17 +88,14 @@
 .cook-page-sub { margin: 0.25rem 0 0; color: var(--cook-ink-soft); font-size: 0.92rem; }
 .cook-page-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; align-items: center; }
 
-/* ---- 4. Hero support (banner itself: cook-pages.css .cook-modern-hero) ---- */
 .cook-dash { animation: riseIn 0.3s ease; }
 .cook-hero { margin-bottom: 1.25rem; }
 .cook-hero-title { color: #fff; font-size: 1.5rem; margin: 0 0 0.3rem; }
 .cook-hero-sub { color: rgba(255, 255, 255, 0.82); margin: 0; font-size: 0.92rem; }
 .cook-hero-badges { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.65rem; }
 .cook-hero-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; align-items: center; }
-/* Wrapper keeping Profile + Reviews buttons in a row at all breakpoints */
 .cook-hero-btn-row { display: inline-flex; gap: 0.5rem; flex-wrap: nowrap; }
 
-/* ---- 5. Stats (clickable shortcut cards) ---- */
 .cook-stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 215px), 1fr));
@@ -137,8 +121,6 @@
 }
 .cook-stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .cook-stat-card:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
-/* Read-only stat (e.g. "Earned"): shows a figure only — no pointer cursor and
-   no hover lift, because it is not a navigable shortcut. */
 .cook-stat-card.cook-stat-static { cursor: default; }
 .cook-stat-card.cook-stat-static:hover { transform: none; box-shadow: var(--shadow-sm); }
 .cook-stat-icon {
@@ -159,11 +141,9 @@
 .cook-stat-num { font-size: 1.55rem; font-weight: 800; color: var(--slate-900); line-height: 1.1; }
 .cook-stat-num.small-amount { font-size: 1.25rem; }
 .cook-stat-label { font-size: 0.82rem; color: var(--cook-ink-faint); font-weight: 600; }
-/* Back-compat: dashboard stat buttons rode on .dashboard-stat-card. */
 .cook-stat-btn { font: inherit; text-align: left; cursor: pointer; width: 100%; color: inherit; text-decoration: none; }
 .cook-stat-btn:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
 
-/* ---- 6. Tabs ---- */
 .cook-tabs {
   display: flex;
   align-items: center;
@@ -209,7 +189,6 @@
   font-weight: 800;
 }
 .cook-tab.active .cook-tab-count { background: rgba(255, 255, 255, 0.25); color: #fff; }
-/* Back-compat alias used across cook pages. */
 .tab-count-pill {
   display: inline-flex;
   align-items: center;
@@ -225,7 +204,6 @@
 }
 .tab-btn.active .tab-count-pill { background: rgba(255, 255, 255, 0.25); color: #fff; }
 
-/* ---- 7. Cards + booking rows ---- */
 .cook-card {
   background: var(--cook-card-bg);
   border: 1px solid var(--cook-card-border);
@@ -254,7 +232,6 @@
 }
 .cook-amount { margin: 0 0 0.7rem; font-weight: 800; font-size: 1.02rem; color: var(--slate-900); }
 
-/* Customer identity row inside a booking card. */
 .cook-customer-row { display: flex; align-items: center; gap: 0.7rem; min-width: 0; }
 .cook-customer-row h3 {
   margin: 0;
@@ -264,8 +241,6 @@
   white-space: nowrap;
 }
 .cook-customer-meta { min-width: 0; }
-/* WHEN chip — booking date + time highlighted so a cook spots it at a
-   glance (soft brand wash, bold ink, brand-coloured icon). */
 .cook-when {
   margin: 0.45rem 0 0;
   display: inline-flex;
@@ -283,8 +258,6 @@
   padding: 0.32rem 0.65rem;
 }
 .cook-when svg { flex-shrink: 0; color: var(--primary); }
-/* WHERE chip — customer address highlighted in a neutral strip so it reads
-   as the venue, with word-wrap for long addresses. */
 .cook-addr {
   margin: 0.4rem 0 0;
   font-size: 0.83rem;
@@ -300,8 +273,6 @@
   overflow-wrap: anywhere;
 }
 .cook-addr svg { flex-shrink: 0; margin-top: 2px; color: var(--primary); }
-/* One-tap Google Maps link on a booking card: GPS pin when the customer
-   pinned the venue, address search otherwise (mapsNavigateUrl). */
 .cook-addr-directions {
   display: inline-flex;
   align-items: center;
@@ -320,9 +291,6 @@
 .cook-addr-directions:hover { background: rgba(232, 89, 12, 0.08); border-color: var(--primary); }
 .cook-addr-directions svg { flex-shrink: 0; }
 
-/* TODAY / TOMORROW badge — special tag for imminent bookings so the cook
-   can spot them without reading the date. Green for today, amber for
-   tomorrow (same palette as the paid/unpaid pills). */
 .cook-day-tag {
   display: inline-flex;
   align-items: center;
@@ -347,11 +315,8 @@
   color: #92400e;
   border-color: rgba(180, 83, 9, 0.28);
 }
-/* On the booking-details page the badge sits inside the bd-hero-facts chip
-   row — kill the card-only top margin so it aligns with the other chips. */
 .bd-fact-chip.cook-day-tag { margin: 0; }
 
-/* Amount + paid pill row. */
 .cook-money { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; margin: 0.75rem 0 0; padding: 0.55rem 0.75rem; background: var(--slate-50); border: 1px dashed var(--slate-200); border-radius: 14px; }
 .cook-money-amount { font-weight: 800; font-size: 1.05rem; color: var(--slate-900); font-variant-numeric: tabular-nums; }
 .cook-pay-pill {
@@ -369,7 +334,6 @@
 .cook-pay-pill.paid { background: var(--accent-emerald-light); color: #065f46; }
 .cook-pay-pill.unpaid { background: var(--accent-amber-light); color: #92400e; }
 
-/* Status pill for cook booking states. */
 .cook-status {
   display: inline-flex;
   align-items: center;
@@ -390,7 +354,6 @@
 .cook-status.declined { background: var(--accent-rose-light); color: #9f1239; }
 .cook-status.cancelled { background: var(--slate-100); color: var(--slate-600); }
 
-/* Customer avatar circle. */
 .cook-avatar {
   width: 42px;
   height: 42px;
@@ -407,7 +370,6 @@
   border: 1px solid rgba(232, 89, 12, 0.18);
 }
 
-/* ---- 8. Notices + banners ---- */
 .cook-notice {
   display: flex;
   align-items: center;
@@ -438,7 +400,6 @@
 }
 .cook-hours-done svg { color: #b45309; flex-shrink: 0; }
 
-/* ---- 9. Empty states ---- */
 .cook-empty {
   text-align: center;
   padding: 2.25rem 1.25rem;
@@ -461,7 +422,6 @@
 .cook-empty h3 { margin: 0 0 0.3rem; color: var(--slate-800); }
 .cook-empty p { margin: 0 auto; font-size: 0.88rem; max-width: 44ch; }
 
-/* ---- 10. Forms (profile / setup) ---- */
 .cook-form-card {
   background: var(--cook-card-bg);
   border: 1px solid var(--cook-card-border);
@@ -484,7 +444,6 @@
 .cook-verify-label { font-size: 0.9rem; color: var(--slate-500); margin-right: 0.5rem; }
 .cook-form-submit { margin-top: 1.5rem; }
 
-/* Setup intro card (CookSetup page head). */
 .cook-back-row { margin-bottom: 1rem; }
 .cook-intro-badge { margin-bottom: 0.5rem; }
 .cook-setup-intro-card {
@@ -511,7 +470,6 @@
   padding: 0.32rem 0.75rem;
 }
 
-/* Service toggle tiles. */
 .cook-svc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
 .cook-svc {
   border: 1.5px solid var(--slate-200);
@@ -534,10 +492,8 @@
 .cook-svc:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
 .cook-svc.selected { border-color: var(--cook-brand); background: var(--cook-brand-wash); color: var(--primary-700); }
 
-/* Doc rows inside the profile form. */
 .cook-doc-grid { display: grid; grid-template-columns: 1fr 2fr auto; gap: 0.5rem; margin-bottom: 0.5rem; align-items: center; }
 
-/* ---- 11. Doc uploads (Aadhaar / PAN / photo) ---- */
 .cook-doc-card {
   border: 1.5px dashed var(--slate-300);
   border-radius: var(--cook-radius-sm);
@@ -558,7 +514,6 @@
 .cook-doc-group-label { display: block; margin-bottom: 0.75rem; font-weight: 700; font-size: 0.88rem; color: var(--slate-700); }
 .cook-file-btn { cursor: pointer; }
 
-/* ---- 12. Reviews ---- */
 .cook-review-summary {
   display: flex;
   align-items: center;
@@ -606,10 +561,8 @@
 .cook-rating-hero .stat-metric-number { font-size: 1.75rem; }
 .cook-review-stars { margin-bottom: 0.5rem; }
 
-/* Recent-reviews teaser keeps cook-pages.css rows; head title reset lives here. */
 .cook-recent-head h3 { margin: 0; }
 
-/* ---- 13. Modal + credentials ---- */
 .cook-modal-card {
   position: relative;
   width: 100%;
@@ -646,11 +599,8 @@
   padding: 0.5rem 0.7rem;
 }
 
-/* ---- 14. Loading / syncing indicators ---- */
 .cook-loading-text { color: var(--cook-ink-faint); font-weight: 600; }
 
-/* Subtle background-sync pill: floats top-right of the bookings area,
-   never shifts layout, disappears as soon as the poll resolves. */
 .cook-syncing-pill {
   display: inline-flex;
   align-items: center;
@@ -679,7 +629,6 @@
   50%       { opacity: 0.4; transform: scale(0.75); }
 }
 
-/* ---- 15. Responsive + reduced motion ---- */
 @media (max-width: 640px) {
   .cook-2col, .cook-svc-grid, .cook-doc-grid { grid-template-columns: 1fr; }
   .cook-form-card { padding: 1.1rem; }
@@ -687,11 +636,9 @@
   .cook-customer-row h3 { white-space: normal; }
   .cook-page-head-title h1 { font-size: 1.4rem; }
 
-  /* Hero: hide avatar and verification/rating badges on mobile */
   .cook-hero-avatar-hide-mobile { display: none; }
   .cook-hero-badges-hide-mobile { display: none; }
 
-  /* Profile + Reviews buttons always sit side-by-side in a row on mobile */
   .cook-hero-btn-row {
     display: flex;
     flex-direction: row;
@@ -703,7 +650,6 @@
     justify-content: center;
   }
 
-  /* Stats grid: only show the Earned card on mobile */
   .cook-stat-mob-hide { display: none; }
   .cook-stats-grid {
     grid-template-columns: 1fr;
@@ -716,7 +662,6 @@
   .cook-btn:hover, .cook-avail:hover, .cook-stat-card:hover, .cook-card:hover, .cook-svc:hover { transform: none; }
   .cook-syncing-dot { animation: none; }
 }
-/* ---- Small phones: cook dashboard cards ----------------------------- */
 @media (max-width: 375px) {
   .cook-stat-card { padding: 0.8rem 0.85rem; gap: 0.6rem; }
   .cook-stat-num { font-size: 1.22rem; }

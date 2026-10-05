@@ -1,13 +1,3 @@
-// Password-reset delivery hook.
-//
-// There is no email provider wired in this codebase yet, so this module tries
-// SMTP when explicitly configured (SMTP_HOST/PORT/USER/PASS/FROM) and reports
-// whether the token actually left the server. Callers decide what to do when
-// delivery is unavailable:
-// - non-production: return the raw token in the API response (dev testing);
-// - production without SMTP: generic message only (configure SMTP to go live).
-// When SMTP_* is configured but nodemailer isn't installed, delivery is
-// skipped with a clear log line — install nodemailer + set the vars to enable.
 
 const canDeliver = () => Boolean(process.env.SMTP_HOST && process.env.SMTP_USER);
 

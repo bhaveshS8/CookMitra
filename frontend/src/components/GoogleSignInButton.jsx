@@ -17,8 +17,6 @@ const getDashboardPath = (user) => {
   return "/";
 };
 
-// Reusable Google button for both Login (existing users) and Register
-// (new users created with `role`). Handles token exchange + navigation.
 const GoogleSignInButton = ({
   role = "customer",
   text = "signin_with",
@@ -30,15 +28,8 @@ const GoogleSignInButton = ({
   const showToast = useShowToast();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  // GSI only accepts fixed pixel widths (200–400), so a hardcoded width can
-  // never match the form on every screen — instead measure the wrapper and
-  // pass the closest valid width, making the official button exactly fill
-  // the login/signup card from 320px phones up to desktop.
   const wrapRef = useRef(null);
   const [btnWidth, setBtnWidth] = useState(320);
-  // Shimmer placeholder until Google's iframe mounts, so the button area
-  // never looks broken/empty on slow networks (no layout shift either —
-  // the skeleton matches the official button's 40px height).
   const [gsiReady, setGsiReady] = useState(false);
   useEffect(() => {
     const el = wrapRef.current;
@@ -120,7 +111,6 @@ const GoogleSignInButton = ({
       if (user?.role === "cook") {
         track(AnalyticsEvents.COOK_SIGNUP_COMPLETE, { method: "google" });
       }
-      // Interrupted booking? Customers go straight back to it.
       const resumeTo = user?.role === "customer" ? safeNextPath(next) : null;
       navigate(resumeTo || getDashboardPath(user));
     } catch (err) {

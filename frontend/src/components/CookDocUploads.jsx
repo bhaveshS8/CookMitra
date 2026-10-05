@@ -4,11 +4,6 @@ import { useSignedDocUrl } from "../utils/docUrls";
 import { useShowToast } from "../store/hooks";
 import { Upload, FileCheck, X, Camera } from "lucide-react";
 
-// Backend serves uploaded files under /uploads; API base ends with /api.
-// Falls back to same-origin so single-service deployments need no build env.
-// Mirrors api/axios resolveBaseURL: a baked localhost URL is discarded when
-// served from a real host, otherwise uploaded photos point at the visitor's
-// own machine and 404 in production.
 const resolveApiOrigin = () => {
   const configured = process.env.REACT_APP_API_URL || "";
   if (typeof window !== "undefined" && configured) {
@@ -37,11 +32,6 @@ const API_ORIGIN = resolveApiOrigin();
 
 export const resolveFileUrl = (url) => {
   if (!url) return "";
-  // S-13: absolute URLs reach <img src> verbatim, so only safe schemes/hosts
-  // pass through — blob: (local upload previews) and plain https: links
-  // (Google avatars, CDN). data:/javascript:/http: never render: http would
-  // be mixed content on the https site, and data: SVGs are a stored-XSS
-  // vector. Unknown schemes return "" so callers fall back to initials.
   if (/^blob:/i.test(url)) return url;
   if (/^https:\/\//i.test(url)) {
     try {
@@ -54,19 +44,9 @@ export const resolveFileUrl = (url) => {
   }
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) return "";
   const full = `${API_ORIGIN}${url.startsWith("/") ? url : `/${url}`}`;
-  // Private identity docs (aadhar_*/pan_*) are served ONLY via short-lived
-  // signed URLs from POST /api/docs/signed-url (see utils/docUrls). The
-  // legacy ?token=<session JWT> pattern is removed (P0-2): session JWTs
-  // leak via history/logs/Referer. This sync helper now returns the BARE
-  // path for private docs (never a credential); render paths use the
-  // useSignedDocUrl() hook from utils/docUrls to mint a view URL via
-  // Authorization header.
-  // Public profile photos (photo_*) stay bare so they remain cacheable.
   return full;
 };
 
-// Owner preview link for a private doc: mints a short-lived signed view URL
-// via Authorization header and renders nothing credential-bearing until ready.
 const PrivateDocLink = ({ storedPath, label }) => {
   const { url, loading, error } = useSignedDocUrl(storedPath);
   if (!storedPath) return null;
@@ -85,17 +65,9 @@ const FIELD_TO_KEY = {
   photo: "photoUrl",
 };
 
-// Must match backend/middleware/upload.js multer fileSize limit — the server
-// is the real enforcer, but checking here first gives an instant error
-// instead of a wasted upload round-trip.
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const OVERSIZE_MSG = "File too large — each file must be 2MB or less";
 
-// Reusable Aadhaar (required) / PAN (required) / profile photo (optional)
-// upload section for cook profile forms. Uploads immediately via
-// POST /cooks/upload-docs and reports URLs through onChange(urlKey, url).
-// Props: aadharCardUrl, panCardUrl, photoUrl, onChange, onError (optional),
-// requireDocs (default true — set false to skip required markers/validation hints).
 const CookDocUploads = ({
   aadharCardUrl = "",
   panCardUrl = "",
@@ -168,7 +140,6 @@ const CookDocUploads = ({
         {requireDocs && <span className="cook-required">(Aadhaar & PAN required)</span>}
       </label>
 
-      {/* Aadhaar Card */}
       <div className="cook-doc-card">
         <div className="cook-doc-head">
           <strong>
@@ -196,7 +167,6 @@ const CookDocUploads = ({
         )}
       </div>
 
-      {/* PAN Card */}
       <div className="cook-doc-card">
         <div className="cook-doc-head">
           <strong>
@@ -224,7 +194,6 @@ const CookDocUploads = ({
         )}
       </div>
 
-      {/* Profile Photo (optional) */}
       <div className="cook-doc-card">
         <div className="cook-doc-head">
           <strong>

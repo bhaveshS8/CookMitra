@@ -19,7 +19,6 @@ const {
   adminAddAdmin,
 } = require("../controllers/authController");
 
-// Shared validators so login + register enforce the same authentication rules.
 const emailRule = body("email")
   .trim()
   .notEmpty()
@@ -36,9 +35,6 @@ const passwordRule = (field = "password") =>
 const phoneOrMobileRule = [
   body("phone").optional().trim(),
   body("mobile").optional().trim(),
-  // Registration mobiles must be exactly 10 digits (Indian mobile starting
-  // 6-9). An optional +91 / 91 / 0 prefix is tolerated and stripped to the
-  // 10-digit core so "+91 98765 43210" still passes.
   body("phone")
     .optional()
     .custom((v) => {
@@ -79,7 +75,6 @@ router.post(
       .isLength({ min: 2, max: 80 })
       .withMessage("Name must be 2–80 characters"),
     emailRule,
-    // Spec §17 calls it `mobile`; legacy clients send `phone` — accept either.
     ...phoneOrMobileRule,
     passwordRule("password"),
     body("role")
@@ -97,7 +92,6 @@ router.post(
   [
     emailRule,
     body("password").notEmpty().withMessage("Password is required"),
-    // rememberMe only controls token lifetime, never auth logic.
     body("rememberMe")
       .optional()
       .custom((v) => typeof v === "boolean" || v === "true" || v === "false")
@@ -107,7 +101,6 @@ router.post(
   login
 );
 
-// Password reset (public, throttled + enumeration-safe in-controller).
 router.post(
   "/forgot-password",
   [body("email").isEmail().withMessage("Valid email is required")],
@@ -182,7 +175,6 @@ router.put(
 );
 router.get("/users", auth, authorize("admin"), getAllUsers);
 
-// Admin: create a cook account (+ approved profile) directly.
 router.post(
   "/cooks",
   auth,
@@ -206,8 +198,6 @@ router.post(
   adminAddCook
 );
 
-// Admin: register a new admin account (admin-gated — the public /register
-// route only accepts customer/cook, so this is the sole way to add admins).
 router.post(
   "/admins",
   auth,
@@ -229,7 +219,6 @@ router.post(
   adminAddAdmin
 );
 
-// Admin account management: block/unblock and delete customer/cook accounts.
 router.patch(
   "/users/:id/status",
   auth,

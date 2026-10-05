@@ -13,27 +13,10 @@ import {
   XCircle,
 } from "lucide-react";
 
-// Admin settlement console: nothing moves money automatically — cooks are
-// paid and customers refunded only by an explicit admin decision here.
-// `view` splits the console across two admin tabs: "payouts" lists only cook
-// payouts, "refunds" lists only customer refunds (awaiting decision +
-// manual follow-ups). Sections: pending cook payouts (Mark paid / Reject),
-// refunds awaiting a decision (Approve / Reject), and failed-refund follow-ups.
-//
-// Safety properties (server enforces all of these; the UI only reflects):
-// - lists are paged with explicit totals — never a silent truncation;
-// - rows the server flags ineligible show their blockers with Mark paid
-//   disabled (clicking through would only 400);
-// - settling requires typing the external transfer reference AND ticking an
-//   explicit "transfer completed externally to THESE details" confirmation.
-//   The recorded recipient is the cook's profile snapshot at settle time.
 const PAGE_LIMIT = 25;
 
 const emptyPage = { rows: [], total: 0, page: 1, totalPages: 1 };
 
-// Paged list with explicit totals (avoids the silent 500-row backstop of
-// unpaged responses). Same component drives queue + refunds; page resets
-// when the URL (tab) changes.
 const usePagedList = (url) => {
   const [state, setState] = useState(emptyPage);
   const [loading, setLoading] = useState(Boolean(url));
@@ -51,13 +34,11 @@ const usePagedList = (url) => {
     try {
       abortRef.current?.abort?.();
     } catch {
-      // ignore
     }
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
     try {
-      // Tolerate a pre-existing query string (?status=…) in the tab URL.
       const res = await API.get(`${url}${url.includes("?") ? "&" : "?"}page=${p}&limit=${PAGE_LIMIT}`, { signal: controller.signal });
       const payload = res.data || {};
       const rows = Array.isArray(payload) ? payload : payload.data || [];
@@ -85,7 +66,6 @@ const usePagedList = (url) => {
       try {
         abortRef.current?.abort?.();
       } catch {
-        // ignore
       }
     };
   }, [fetchPage]);
@@ -127,11 +107,7 @@ const Pager = ({ page, totalPages, total, onPage, label }) => {
 const AdminPayoutsPanel = ({ view = "payouts" }) => {
   const isRefunds = view === "refunds";
   const showToast = useShowToast();
-  // Refund list filter: "" = actionable rows only (the safe default); the
-  // processed/rejected options are the historical view support asks for.
   const [statusFilter, setStatusFilter] = useState("");
-  // Each tab fetches ONLY what it displays: cook-payout queue on the Payouts
-  // tab, refund requests on the Refunds tab. Never the other list.
   const { rows: queueRows, total: queueTotal, totalPages: queuePages, page: queuePage, loading, error, gotoPage: gotoQueuePage, refetch } =
     usePagedList(isRefunds ? null : "/payouts/queue");
   const refundsUrl = isRefunds ? `/payouts/refunds${statusFilter ? `?status=${statusFilter}` : ""}` : null;
@@ -141,17 +117,9 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
   const [reference, setReference] = useState("");
   const [transferConfirmed, setTransferConfirmed] = useState(false);
   const [saving, setSaving] = useState(false);
-  // The full booking (not just its id): the approve dialog needs the payout
-  // state to require the clawback decision, and shows the exact amount.
   const [pendingApprove, setPendingApprove] = useState(null);
-  // { kind: "refund" | "payout", id } — reason is typed into the dialog.
   const [pendingReject, setPendingReject] = useState(null);
 
-  // Refunds split by decision state: "pending" needs approve/reject,
-  // "processing" is a crashed approval that must be reconciled with the
-  // gateway, and "failed"/"manual" need follow-up settlement. Split applies
-  // to the loaded page; the header states the queue total so nothing is
-  // hidden, and the status filter reaches the historical states.
   const pendingRefunds = (refundRows || []).filter((b) => b.payment?.refundStatus === "pending");
   const processingRefunds = (refundRows || []).filter((b) => b.payment?.refundStatus === "processing");
   const followupRefunds = (refundRows || []).filter((b) =>
@@ -183,8 +151,6 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
       setTransferConfirmed(false);
       refetch();
     } catch (err) {
-      // 409 = another admin already settled this (or reused the reference):
-      // refresh so the queue shows the true state instead of a stale row.
       if (err.response?.status === 409) {
         showToast("Already handled — refreshing the queue to show the current state.", "info");
         setRefFor(null);
@@ -223,15 +189,11 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
     const bookingId = booking?._id;
     if (!bookingId || saving) return;
     setPendingApprove(null);
-    // Partial approval: whole rupees only (the backend re-parses strictly and
-    // caps at the refundable total); blank means a full refund.
     const raw = String(amountInput ?? "").trim();
     if (raw !== "" && !/^\d+$/.test(raw)) {
       showToast("Approved amount must be whole rupees — leave blank for a full refund.", "error");
       return;
     }
-    // A settled cook payout makes this a clawback decision: the console must
-    // record it explicitly, exactly like the server demands.
     const needsClawback = booking?.payout?.status === "settled";
     if (needsClawback && !clawbackConfirmed) {
       showToast("Tick the clawback confirmation first — the cook was already paid.", "error");
@@ -258,9 +220,6 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
     }
   };
 
-  // A refund stuck mid-approval can only be resolved by asking the gateway
-  // what actually exists — never by guessing. Adopts an existing refund or
-  // returns the row to the decision queue; a 503 leaves everything untouched.
   const reconcileRefund = async (bookingId) => {
     if (saving) return;
     setSaving(true);
@@ -316,7 +275,6 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
       await navigator.clipboard.writeText(text);
       showToast("Copied", "info");
     } catch {
-      // clipboard may be blocked — non-fatal
     }
   };
 
@@ -385,8 +343,6 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
           {queueRows.map((b) => {
             const cook = b.cook || {};
             const d = b.cookPayoutDetails;
-            // Server-computed gate: ineligible rows explain themselves and
-            // cannot be marked paid from here (the server re-validates).
             const blocked = b.payoutEligible === false;
             const blockers = Array.isArray(b.payoutBlockers) ? b.payoutBlockers : [];
             const dest = destinationNote(d);
@@ -505,7 +461,6 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
       )}
       {isRefunds && (
       <>
-      {/* Refunds awaiting a decision — approve returns the money, reject declines it */}
       <h3 style={{ margin: "1.75rem 0 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
         <Clock3 size={17} style={{ color: "#d97706" }} /> Refunds awaiting decision
       </h3>
@@ -561,8 +516,6 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
           ))}
         </div>
       )}
-      {/* Refunds stuck mid-approval — an interrupted approval must stay visible
-          and may only be resolved by asking the gateway what exists. */}
       <h3 style={{ margin: "1.75rem 0 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
         <AlertCircle size={17} style={{ color: "#b45309" }} /> Refunds stuck mid-approval
       </h3>
@@ -622,7 +575,6 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
           ))}
         </div>
       )}
-      {/* Refunds needing manual action */}
       <h3 style={{ margin: "1.75rem 0 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
         <AlertCircle size={17} style={{ color: "#d97706" }} /> Refunds needing manual action
       </h3>

@@ -41,14 +41,12 @@ const Login = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  // ?next=… is set when login interrupted a booking — customers return to it.
   const next = safeNextPath(searchParams.get("next"));
   const registerTo = next ? `/register?next=${encodeURIComponent(next)}` : "/register";
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
-    // Clear the field's error as soon as the user fixes it.
     setFieldErrors((prev) => (prev[name] ? { ...prev, [name]: "" } : prev));
     if (error) setError("");
   };
@@ -107,7 +105,6 @@ const Login = () => {
 
   return (
     <div className="login-split">
-      {/* ---- Professional showcase panel (mirrors register) ---- */}
       <aside className="login-showcase">
         <div className="login-showcase-glow login-showcase-glow-1" />
         <div className="login-showcase-glow login-showcase-glow-2" />
@@ -163,7 +160,6 @@ const Login = () => {
         </div>
       </aside>
 
-      {/* ---- Form panel (mirrors register card chrome) ---- */}
       <div className="login-form-side">
         <div className="login-card">
           <div className="login-card-header">

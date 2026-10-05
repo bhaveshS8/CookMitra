@@ -1,5 +1,3 @@
-// Cancellation/refund audit + workflow-status sync helpers (§26).
-// Best-effort by contract: audit rows must never break a money operation.
 
 const CancellationAudit = require("../models/CancellationAudit");
 const Booking = require("../models/Booking");
@@ -35,8 +33,6 @@ const logCancellationAudit = async ({
   }
 };
 
-// Mirror the money-movement outcome onto cancellationInfo.refundStatus
-// (targeted update — never touches payment.* or booking status).
 const syncCancellationRefundStatus = async (
   bookingId,
   { refundStatus, reference, processedAt, adminNote }

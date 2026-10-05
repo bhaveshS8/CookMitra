@@ -19,21 +19,14 @@ const {
   reconcileRefund,
 } = require("../controllers/payoutController");
 
-// Cook's own earnings statement ("me") — also admin-accessible via /:cookId.
 router.get("/statement/me", auth, authorize("cook"), getPayoutStatement);
 router.get("/statement/:cookId", auth, authorize("admin"), getPayoutStatement);
 
-// Admin consoles.
 router.get("/queue", auth, authorize("admin"), getPayoutQueue);
 router.get("/history", auth, authorize("admin"), getPayoutHistory);
 router.get("/refunds", auth, authorize("admin"), getRefundQueue);
-// Reconciliation: booking money truth vs ledger counts.
 router.get("/ledger/summary", auth, authorize("admin"), getLedgerSummary);
-// Backfill missing payout.settled / refund.approved ledger rows (idempotent — safe to repeat).
 router.post("/ledger/reconcile", auth, authorize("admin"), reconcileMissingPayoutLedger);
-// Ask the gateway what actually exists for a stuck (processing/failed)
-// refund: adopt an existing gateway refund or return the row to the queue.
-// Never guesses — a 503 leaves the state untouched.
 router.post("/refunds/:id/reconcile", auth, authorize("admin"), reconcileRefund);
 router.patch(
   "/:id/settle",
@@ -51,7 +44,6 @@ router.patch(
   validate,
   markRefundSettled
 );
-// Approve a queued refund (moves money) or reject it (no refund).
 router.patch("/refunds/:id/approve", auth, authorize("admin"), approveRefund);
 router.patch(
   "/refunds/:id/reject",
@@ -61,7 +53,6 @@ router.patch(
   validate,
   rejectRefund
 );
-// Reject a pending cook payout (cook is not paid for this booking).
 router.patch(
   "/:id/reject",
   auth,

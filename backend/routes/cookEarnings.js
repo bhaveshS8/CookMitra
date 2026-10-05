@@ -1,4 +1,3 @@
-// Cook-facing earnings routes (§19). All auth + authorize("cook").
 const express = require("express");
 
 const router = express.Router();

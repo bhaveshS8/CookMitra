@@ -5,11 +5,6 @@ const User = require("../models/User");
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Case-insensitive "is this email already registered?" lookup. New writes
-// are lowercased by the schema, but a legacy/mixed-case record must still
-// count as registered instead of slipping past into a duplicate account.
-// Collation is passed as a query option (not .collation()) so plain
-// findOne mocks in tests keep working.
 const findByEmailInsensitive = (email) =>
   User.findOne({ email }, null, { collation: { locale: "en", strength: 2 } });
 
@@ -26,36 +21,20 @@ const toUserPayload = (user) => ({
   authProvider: user.authProvider,
 });
 
-// Normalize any incoming role to the spec's UPPERCASE canonical form.
-// Unknown values fall back to CUSTOMER (public routes never create ADMIN).
 const normalizeRole = (v) => {
   const up = String(v || "").trim().toUpperCase();
   return ["CUSTOMER", "COOK", "ADMIN"].includes(up) ? up : "CUSTOMER";
 };
 
 const generateToken = (user, persistent = true) => {
-  // Admin sessions are capped at 12h even when "keep me signed in" is set:
-  // admins hold financial powers (refunds, payouts, user deletion), so a
-  // stolen admin token must expire in hours, not 30 days. No MFA exists yet
-  // (see docs), so the short lifetime is the backstop. Customers/cooks keep
-  // the existing 30d/1d contract.
   const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN";
   return jwt.sign(
-    // tv (token version): bumped on password reset so pre-reset tokens stop
-    // verifying immediately (see middleware/auth.js). Defaults to 0.
     { id: user._id, role: user.role, tv: Number(user.tokenVersion) || 0 },
     process.env.JWT_SECRET,
-    // "Keep me signed in" unchecked => short-lived 1-day session token;
-    // checked (default) => 30-day persistent token (12h cap for admins).
     { expiresIn: isAdmin ? "12h" : persistent === false ? "1d" : "30d" }
   );
 };
 
-// Per-account login throttle (Phase 9): 10 failed attempts per email inside
-// 15 minutes locks that email for 15 minutes (429). In-memory per process —
-// the shared IP bucket (authLimiter) remains the fleet-wide backstop.
-// Keyed by normalized email whether or not the account exists, so failures
-// cannot be used to enumerate accounts via timing/status differences.
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_FAILS = 10;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
@@ -94,11 +73,6 @@ const clearLoginFails = (email) => {
   loginFailures.delete(email);
 };
 
-// Issue the session JWT as a hardened httpOnly cookie in ADDITION to the
-// JSON body (P0-3 migration path). The cookie uses the __Host- prefix:
-// Secure (in production) + Path=/ + no Domain, SameSite=Lax. The JSON body
-// token is kept during migration for older clients; new clients prefer the
-// cookie (axios withCredentials) and never touch localStorage.
 const SESSION_COOKIE = "__Host-cm_session";
 const setSessionCookie = (res, token, persistent = true, maxAgeSec = null) => {
   try {
@@ -119,7 +93,6 @@ const setSessionCookie = (res, token, persistent = true, maxAgeSec = null) => {
       res.setHeader("Set-Cookie", parts.join("; "));
     }
   } catch {
-    // cookie issuance is defense-in-depth; never break login if it fails
   }
 };
 const clearSessionCookie = (res) => {
@@ -129,12 +102,9 @@ const clearSessionCookie = (res) => {
     if (isProd) parts.push("Secure");
     res.setHeader("Set-Cookie", parts.join("; "));
   } catch {
-    // ignore
   }
 };
 
-// Greet a brand-new website member with an in-app notification. Best-effort:
-// a notification failure must never block signup, so errors are swallowed.
 const sendWelcomeNotification = async (user) => {
   try {
     const Notification = require("../models/Notification");
@@ -148,12 +118,9 @@ const sendWelcomeNotification = async (user) => {
         : `Welcome to Cook Mitra, ${name}! Your account is ready — explore verified cooks and book your first service.`,
     });
   } catch {
-    // Intentionally ignored — signup succeeds even if notifications are down.
   }
 };
 
-// Normalize a registration mobile to its 10-digit core so "+91 98765 43210",
-// "919876543210" and "09876543210" all store as "9876543210".
 const normalizeMobileCore = (v) => {
   let digits = String(v || "").replace(/\D/g, "");
   if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
@@ -175,7 +142,6 @@ exports.register = async (req, res, next) => {
     if (!password || String(password).length < 8 || String(password).length > 128) {
       return res.status(400).json({ message: "Password must be 8–128 characters" });
     }
-    // Public signup can only create CUSTOMER or COOK (never ADMIN).
     let role = normalizeRole(req.body.role || "CUSTOMER");
     if (!["CUSTOMER", "COOK"].includes(role)) role = "CUSTOMER";
 
@@ -203,9 +169,6 @@ exports.register = async (req, res, next) => {
         role,
       });
     } catch (error) {
-      // Normalize email-case variants ("A@x.com" vs "a@x.com") to a 400
-      // instead of a 500 (schema has lowercase:true but the duplicate check
-      // above ran on the raw value).
       if (error?.code === 11000) {
         return res.status(400).json({
           message: "Email already exists, please enter another email",
@@ -220,10 +183,6 @@ exports.register = async (req, res, next) => {
 
     await sendWelcomeNotification(user);
 
-    // Referral capture (§12): a new COOK registering with ?ref=<code> links
-    // to the referrer server-side. Validated here — never from the client
-    // after registration. Self-referral, unknown codes and duplicate claims
-    // are refused silently (signup still succeeds; the referral just doesn't attach).
     if (String(role).toUpperCase() === "COOK") {
       const refCode = String(req.body.referralCode || req.body.ref || "").trim().toUpperCase();
       if (refCode) {
@@ -254,12 +213,10 @@ exports.register = async (req, res, next) => {
                   link: "/cook/earnings",
                 });
               } catch {
-                // non-fatal
               }
             }
           }
         } catch {
-          // non-fatal: referral never blocks signup
         }
       }
     }
@@ -278,10 +235,7 @@ exports.register = async (req, res, next) => {
 exports.login = async (req, res, next) => {
   try {
     const { password } = req.body;
-    // rememberMe=false => 1-day session token; anything else => 30-day token.
     const persistent = req.body.rememberMe !== false && req.body.rememberMe !== "false";
-    // Stored lowercase (schema lowercase:true) — normalize the lookup or
-    // "NEHA@x.com" can never sign in despite registering fine.
     const email = String(req.body.email || "").trim().toLowerCase();
     if (!email) {
       return res.status(400).json({ message: "Enter a valid email address" });
@@ -302,9 +256,6 @@ exports.login = async (req, res, next) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // Google-only accounts have no password — guide them to the right button.
-    // (Check googleId so legacy stubs/records without a selected password
-    // field are not misclassified.)
     if (!user.password && user.googleId) {
       return res.status(401).json({
         message: "This account uses Google sign-in. Please continue with Google.",
@@ -321,7 +272,6 @@ exports.login = async (req, res, next) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // Blocked accounts cannot sign in (even with valid credentials).
     if (user.status === "suspended") {
       return res.status(403).json({
         message:
@@ -330,9 +280,6 @@ exports.login = async (req, res, next) => {
     }
     clearLoginFails(email);
 
-    // Keep token payload and toUserPayload role identical (UPPERCASE) so
-    // authorize() and frontend role checks agree. Admin sessions are capped
-    // at 12h (see generateToken) — report the real lifetime.
     const token = generateToken(user, persistent);
     const me = toUserPayload(user);
     const isAdminSession = String(user.role || "").toUpperCase() === "ADMIN";
@@ -343,10 +290,6 @@ exports.login = async (req, res, next) => {
   }
 };
 
-// POST /api/auth/google — verify a Google Identity Services ID token,
-// then sign in or create the matching account and return our own JWT.
-// Works for both login and signup: new users are created with the
-// requested role (customer/cook), existing emails are linked.
 exports.googleAuth = async (req, res, next) => {
   try {
     const { idToken, role } = req.body;
@@ -379,18 +322,13 @@ exports.googleAuth = async (req, res, next) => {
     if (!googleId || !email) {
       return res.status(401).json({ message: "Google account did not return an email" });
     }
-    // Strict: a missing claim is treated as unverified, not as verified.
     if (emailVerified !== true) {
       return res.status(401).json({ message: "Google email is not verified" });
     }
 
-    // 1) Returning Google user.
     let user = await User.findOne({ googleId });
     let isNewGoogleUser = false;
     if (!user) {
-      // 2) Existing email/password account — link Google for future logins.
-      // Case-insensitive so a legacy mixed-case record links instead of
-      // spawning a second account for the same mailbox.
       user = await findByEmailInsensitive(email);
       if (user) {
         if (user.status === "suspended") {
@@ -404,8 +342,6 @@ exports.googleAuth = async (req, res, next) => {
         user.authProvider = user.password ? "local+google" : "google";
         await user.save();
       } else {
-        // 3) Brand-new user — role comes from the signup role selector,
-        // defaulting to customer. Never allow privilege escalation to admin.
         const safeRole = normalizeRole(role) === "COOK" ? "COOK" : "CUSTOMER";
         user = await User.create({
           name: String(name).slice(0, 80),
@@ -423,7 +359,6 @@ exports.googleAuth = async (req, res, next) => {
           "Your account has been blocked by an administrator. Please contact support.",
       });
     } else {
-      // Keep profile fresh on repeat logins.
       let changed = false;
       if (avatar && user.avatar !== avatar) {
         user.avatar = avatar;
@@ -438,7 +373,6 @@ exports.googleAuth = async (req, res, next) => {
 
     if (isNewGoogleUser) {
       await sendWelcomeNotification(user);
-      // Referral capture for Google-signup cooks (§12) — same rules as register.
       if (String(user.role).toUpperCase() === "COOK") {
         const refCode = String(req.body.referralCode || req.body.ref || "").trim().toUpperCase();
         if (refCode) {
@@ -457,7 +391,6 @@ exports.googleAuth = async (req, res, next) => {
               }
             }
           } catch {
-            // non-fatal
           }
         }
       }
@@ -472,9 +405,6 @@ exports.googleAuth = async (req, res, next) => {
   }
 };
 
-// In-memory throttle for forgot-password (per email+IP, 10 per 15 minutes).
-// Survives nothing (restart clears it) — it only dampens automated abuse;
-// the token itself is 256-bit and single-use with a 1-hour expiry.
 const forgotAttempts = new Map();
 const forgotAllowed = (key) => {
   const now = Date.now();
@@ -484,8 +414,6 @@ const forgotAllowed = (key) => {
   if (hits.length >= MAX) return false;
   hits.push(now);
   forgotAttempts.set(key, hits);
-  // Bound memory: evict keys whose windows fully expired (prevents slow
-  // unbounded Map growth across a long-lived process).
   if (forgotAttempts.size > 5000) {
     for (const [k, v] of forgotAttempts) {
       if (!v.length || now - v[v.length - 1] >= WINDOW_MS) forgotAttempts.delete(k);
@@ -495,13 +423,6 @@ const forgotAllowed = (key) => {
   return true;
 };
 
-// POST /api/auth/forgot-password — request a password-reset token.
-// Always responds 200 with a generic message (no account enumeration).
-// Delivery: SMTP email when configured (utils/mailer); otherwise the raw
-// token is returned ONLY when the server explicitly opts in via
-// ALLOW_DEV_TOKENS=true AND is not production (dev testing) — any other
-// environment answers generic, because "not production" alone would leak
-// reset tokens from staging/test deployments too.
 exports.forgotPassword = async (req, res, next) => {
   try {
     const email = String(req.body.email || "").trim().toLowerCase();
@@ -519,7 +440,6 @@ exports.forgotPassword = async (req, res, next) => {
         "If an account exists for this email, a password-reset link is on its way (valid 1 hour).",
     };
     const user = await User.findOne({ email });
-    // Unknown, suspended or deleted accounts get the same generic answer.
     if (!user || user.status === "suspended") {
       return res.json(generic);
     }
@@ -536,7 +456,6 @@ exports.forgotPassword = async (req, res, next) => {
       const result = await sendResetEmail({ to: user.email, name: user.name, token });
       if (result?.delivered) return res.json(generic);
     } catch {
-      // fall through to the dev/prod handling below
     }
     if (process.env.NODE_ENV === "production" || process.env.ALLOW_DEV_TOKENS !== "true") {
       if (process.env.NODE_ENV === "production") {
@@ -546,15 +465,12 @@ exports.forgotPassword = async (req, res, next) => {
       }
       return res.json(generic);
     }
-    // Explicit dev opt-in only: hand the token back so the flow is testable
-    // without SMTP. Never enabled on staging/test deployments.
     return res.json({ ...generic, resetToken: token, devOnly: true });
   } catch (error) {
     next(error);
   }
 };
 
-// POST /api/auth/reset-password — consume a reset token with a new password.
 exports.resetPassword = async (req, res, next) => {
   try {
     const token = String(req.body.token || "").trim();
@@ -581,10 +497,7 @@ exports.resetPassword = async (req, res, next) => {
     user.password = password; // pre-save hook hashes it
     user.resetPasswordToken = "";
     user.resetPasswordExpires = null;
-    // Phase 10: invalidate every previously issued session — tokens minted
-    // before this reset carry the old tv and stop verifying immediately.
     user.tokenVersion = (Number(user.tokenVersion) || 0) + 1;
-    // Google-only accounts gaining a password become dual-auth accounts.
     if (user.googleId) user.authProvider = "local+google";
     else user.authProvider = "local";
     await user.save();
@@ -606,9 +519,6 @@ exports.getMe = async (req, res, next) => {
   }
 };
 
-// POST /api/auth/logout — clear the httpOnly session cookie. Stateless JWTs
-// cannot be revoked server-side, but clearing the cookie ends the
-// cookie-based session immediately; Bearer clients discard their copy.
 exports.logout = async (req, res) => {
   clearSessionCookie(res);
   res.json({ message: "Signed out" });
@@ -641,8 +551,6 @@ exports.getAllUsers = async (req, res, next) => {
     const { paginationParams, applyPagination, sendList } = require("../utils/pagination");
     const pg = paginationParams(req);
     const users = await applyPagination(
-      // Phase 13: admins get operational fields only — never password-reset
-      // hashes/expiry, googleId, or other authentication internals.
       User.find()
         .select("-password -resetPasswordToken -resetPasswordExpires -googleId")
         .sort({ createdAt: -1 }),
@@ -654,9 +562,6 @@ exports.getAllUsers = async (req, res, next) => {
   }
 };
 
-// Admin: create a cook account (User + approved CookProfile) in one step.
-// The created cook can sign in with the given credentials and is immediately
-// bookable (no admin approval step needed).
 exports.adminAddCook = async (req, res, next) => {
   try {
     const {
@@ -687,8 +592,6 @@ exports.adminAddCook = async (req, res, next) => {
       throw error;
     }
 
-    // Build the cook profile. Everything is admin-provided, so start the cook
-    // as approved and immediately bookable.
     const profileData = {
       user: user._id,
       approvalStatus: "approved",
@@ -709,18 +612,13 @@ exports.adminAddCook = async (req, res, next) => {
     try {
       profile = await CookProfile.create(profileData);
     } catch (error) {
-      // Don't orphan a login-able cook account when the profile write fails.
       try {
         await User.deleteOne({ _id: user._id });
       } catch {
-        // non-fatal: surface the original error
       }
       throw error;
     }
 
-    // Welcome notification so the new cook knows their account is ready.
-    // Non-fatal: the account already exists — a notification outage must not
-    // 500 the request (the client would retry into "email exists" confusion).
     try {
       const Notification = require("../models/Notification");
       await Notification.create({
@@ -729,7 +627,6 @@ exports.adminAddCook = async (req, res, next) => {
         message: "Welcome to Cook Mitra! Your chef account is approved and ready for bookings.",
       });
     } catch {
-      // ignore
     }
 
     res.status(201).json({
@@ -747,11 +644,6 @@ exports.adminAddCook = async (req, res, next) => {
   }
 };
 
-// Admin: register a new admin account. Only an existing logged-in admin can
-// use this (route is auth + authorize("admin")) — the public /register and
-// Google flows can never create admins, so there is no privilege-escalation
-// path. Returns the created admin (no token: the creating admin stays signed
-// in as themselves; the new admin signs in via /login afterwards).
 exports.adminAddAdmin = async (req, res, next) => {
   try {
     const { name, phone, mobile, password } = req.body;
@@ -781,7 +673,6 @@ exports.adminAddAdmin = async (req, res, next) => {
         message: "Welcome to Cook Mitra! Your admin account is ready — sign in to open the Admin Control Panel.",
       });
     } catch {
-      // non-fatal: the account already exists
     }
 
     res.status(201).json({
@@ -798,8 +689,6 @@ exports.adminAddAdmin = async (req, res, next) => {
   }
 };
 
-// Shared guardrails for admin account management: admins can manage
-// customer and cook accounts, but never themselves or fellow admins.
 const assertManageableAccount = (req, res, target) => {
   if (String(target._id) === String(req.user.id)) {
     res.status(400).json({ message: "You cannot manage your own account" });
@@ -812,8 +701,6 @@ const assertManageableAccount = (req, res, target) => {
   return true;
 };
 
-// Admin: block (suspend) or unblock a customer/cook account. Blocked users
-// are rejected at login and their existing tokens stop working immediately.
 exports.adminSetUserStatus = async (req, res, next) => {
   try {
     const { status } = req.body;
@@ -854,14 +741,6 @@ exports.adminSetUserStatus = async (req, res, next) => {
   }
 };
 
-// Admin: permanently delete a customer/cook account.
-//
-// FINANCIAL SAFETY: accounts with booking history are NEVER hard-deleted —
-// bookings embed payment/refund/payout subdocuments and ledger rows,
-// reviews and notifications reference the account, so a cascade delete
-// would destroy auditable money history. Deletion is refused with 400 when
-// any booking exists; pass `{ anonymize: true }` to suspend + scrub PII
-// instead (refs stay intact, history stays auditable).
 exports.adminDeleteUser = async (req, res, next) => {
   try {
     const target = await User.findById(req.params.id);
@@ -890,8 +769,6 @@ exports.adminDeleteUser = async (req, res, next) => {
     }
 
     if (bookingCount > 0) {
-      // Soft path: suspend + scrub PII, keep every _id reference intact so
-      // bookings, ledger rows, reviews and notifications stay auditable.
       const tag = String(target._id).slice(-6);
       target.status = "suspended";
       target.name = "Deleted User";
@@ -899,10 +776,8 @@ exports.adminDeleteUser = async (req, res, next) => {
       target.phone = "";
       target.mobile = "";
       target.address = "";
-      // Invalidate all sessions (same mechanism as password reset).
       target.tokenVersion = Number(target.tokenVersion || 0) + 1;
       await target.save();
-      // Non-financial clutter tied to the account can still go.
       await Availability.deleteMany({ cook: target._id });
       return res.json({
         message: `Account anonymized and suspended — ${bookingCount} booking record(s) preserved for audit`,
@@ -911,8 +786,6 @@ exports.adminDeleteUser = async (req, res, next) => {
       });
     }
 
-    // No bookings: cascade-delete everything owned by or linked to this
-    // account so no orphaned records are left behind.
     await CookProfile.deleteMany({ user: target._id });
     await Availability.deleteMany({ cook: target._id });
     await Notification.deleteMany({ user: target._id });

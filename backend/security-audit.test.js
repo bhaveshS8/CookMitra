@@ -1,18 +1,5 @@
 // security-audit.test.js — regression tests for the P0/P1 audit fixes.
 // Run:  node backend/security-audit.test.js  — exits non-zero on any failure.
-//
-// Covers (stubbed, no DB):
-//  1. time utils: strict HH:MM, 30-min grid, real calendar dates, IST day.
-//  2. completeBooking: unpaid blocked, instant-complete blocked, idempotent.
-//  3. cancelBooking: idempotent cancelled, OTP-started cancel blocked,
-//     cook cancel bumps reliability count.
-//     (Manual arrival taps are disabled — presence is proven by the
-//     OTP-verified start, so no arrived/cancel interaction is tested.)
-//  4. markCookArrived: manual arrival disabled (410, no state change).
-//  5. rescheduleBooking: customer/admin only, no money moves, OTP stripped,
-//     and the old 410 tombstone is gone.
-//  6. payBooking: zero-amount without coupon rejected.
-//  7. createReview: unpaid bookings rejected.
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 process.env.NODE_ENV = process.env.NODE_ENV || "test";
 
@@ -68,7 +55,6 @@ async function main() {
   check("IST day string shape", /^\d{4}-\d{2}-\d{2}$/.test(istDayString()));
 
   console.log("\n═══ completeBooking ═══");
-  // Unpaid confirmed must not complete.
   {
     const d = doc({ status: "confirmed", payment: { status: "pending" }, serviceStartedAt: new Date() });
     Booking.findOne = async () => d;
@@ -76,7 +62,6 @@ async function main() {
     await bookingCtrl.completeBooking(cookReq(), r, next);
     check("unpaid complete blocked", r.statusCode === 400, `s=${r.statusCode}`);
   }
-  // Paid confirmed without OTP start and without legacy hours must not complete.
   {
     const d = doc({ status: "confirmed", payment: { status: "paid" } });
     delete d.serviceStartedAt;
@@ -86,7 +71,6 @@ async function main() {
     await bookingCtrl.completeBooking(cookReq(), r, next);
     check("instant complete blocked", r.statusCode === 400, `s=${r.statusCode}`);
   }
-  // Already completed is idempotent 200.
   {
     const d = doc({ status: "completed", payment: { status: "paid" }, serviceStartedAt: new Date() });
     Booking.findOne = async () => d;
@@ -94,7 +78,6 @@ async function main() {
     await bookingCtrl.completeBooking(cookReq(), r, next);
     check("completed idempotent", r.statusCode === 200 && r.body?.alreadyCompleted === true, `s=${r.statusCode}`);
   }
-  // Paid + OTP-started completes.
   {
     const d = doc({ status: "in_progress", payment: { status: "paid" }, serviceStartedAt: new Date() });
     Booking.findOne = async () => d;
@@ -109,7 +92,6 @@ async function main() {
   }
 
   console.log("\n═══ cancelBooking ═══");
-  // Already cancelled is idempotent 200.
   {
     const d = doc({ status: "cancelled" });
     Booking.findById = async () => d;
@@ -117,7 +99,6 @@ async function main() {
     await bookingCtrl.cancelBooking({ params: { id: "b1" }, user: { id: "cust1", role: "CUSTOMER" } }, r, next);
     check("cancelled idempotent", r.statusCode === 200 && r.body?.alreadyCancelled === true, `s=${r.statusCode}`);
   }
-  // OTP-started service can no longer self-serve cancel.
   {
     const future = new Date(Date.now() + 48 * 3600 * 1000);
     const d = doc({
@@ -132,7 +113,6 @@ async function main() {
     await bookingCtrl.cancelBooking({ params: { id: "b1" }, user: { id: "cust1", role: "CUSTOMER" } }, r, next);
     check("started service cancel blocked", r.statusCode === 400, `s=${r.statusCode}`);
   }
-  // Cook cancel bumps reliability count atomically.
   {
     const future = new Date(Date.now() + 48 * 3600 * 1000);
     const d = doc({ status: "accepted", payment: { status: "pending" }, date: future, startTime: "10:00" });
@@ -147,10 +127,7 @@ async function main() {
 
   console.log("\n═══ rescheduleBooking (customer/admin, no money moves) ═══");
   {
-    // The endpoint used to be a permanent 410 tombstone; it is now a real
     // feature (customer + admin, instant move). Security-relevant behaviour
-    // checked here: ownership, no cook self-service in v1, no 410 left, and a
-    // paid move that touches NO money field and never leaks the start OTP.
     const chainable = (v) => ({
       select: () => chainable(v),
       lean: () => chainable(v),
@@ -179,7 +156,6 @@ async function main() {
       CookProfile.findOne = () => chainable({ availabilityStatus: "available", approvalStatus: "approved" });
       Notification.create = async () => ({});
 
-      // A different customer cannot move someone else's booking.
       {
         const d = futureDoc();
         Booking.findById = async () => d;
@@ -196,7 +172,6 @@ async function main() {
           JSON.stringify({ s: d.startTime, n: d.rescheduleCount, h: d.statusHistory.length })
         );
       }
-      // The assigned cook cannot move it either (v1 policy: customer + admin).
       {
         const d = futureDoc();
         Booking.findById = async () => d;
@@ -208,7 +183,6 @@ async function main() {
         );
         check("cook cannot reschedule in v1", r.statusCode === 403, `s=${r.statusCode}`);
       }
-      // Missing booking -> 404, never the old 410 tombstone.
       {
         Booking.findById = async () => null;
         const r = makeRes();
@@ -219,7 +193,6 @@ async function main() {
         );
         check("missing booking -> 404 (tombstone gone)", r.statusCode === 404, `s=${r.statusCode}`);
       }
-      // A paid move: revenue untouched, coupon untouched, OTP never returned.
       {
         const d = futureDoc({ serviceOtp: "9876", couponCode: "WELCOME50" });
         const money = JSON.stringify(d.payment);

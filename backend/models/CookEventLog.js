@@ -1,4 +1,3 @@
-// Append-only audit trail for cook-earnings events (§15).
 const mongoose = require("mongoose");
 
 const cookEventLogSchema = new mongoose.Schema(

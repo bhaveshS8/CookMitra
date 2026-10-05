@@ -5,10 +5,6 @@ import { useSiteLocation } from "../store/hooks";
 import { requestPreciseLocation, clearLocation } from "../store/locationSlice";
 import { formatAccuracy, accuracyGrade } from "../utils/geolocation";
 
-// Header location pill + dropdown. Never blocks the page: GPS denial or a
-// failed lookup only shows an inline message while browsing keeps working.
-// Manual area search was removed from this dropdown — it is detect-only now
-// (searchLocations in utils/geolocation is still used by the booking flow).
 const LocationPicker = () => {
   const { location, status, error, isLocating } = useSiteLocation();
   const dispatch = useDispatch();
@@ -17,7 +13,6 @@ const LocationPicker = () => {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
 
-  // Close on outside click / Escape.
   useEffect(() => {
     if (!open) return;
     const onDown = (e) => {
@@ -49,13 +44,9 @@ const LocationPicker = () => {
             ? "Saved location"
             : "";
 
-  // Exact-fix hint: GPS radius tells the user whether the stored label is
-  // house-level (±50 m) or just area-level.
   const gpsGrade = location?.source === "gps" || Number.isFinite(location?.accuracy)
     ? accuracyGrade(location?.accuracy)
     : null;
-  // One amber line at a time: a real error (denied / saved pin kept) wins over
-  // the accuracy note so the same message is never shown twice.
   const accuracyHint = error
     ? ""
     : location?.accuracyNote ||

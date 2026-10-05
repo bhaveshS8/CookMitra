@@ -5,8 +5,6 @@ import { useSignedDocUrl, isPrivateDocPath } from "../utils/docUrls";
 
 export const isPdfUrl = (url) => /\.pdf(\?|#|$)/i.test(url || "");
 
-// Image thumbnail that degrades to a file icon when the stored file is
-// missing (e.g. uploads wiped) instead of showing a broken-image icon.
 const ThumbImg = ({ src, alt }) => {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [src]);
@@ -21,9 +19,6 @@ const ThumbImg = ({ src, alt }) => {
   return <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} />;
 };
 
-// Resolve one stored doc path to a viewable URL: public paths stay bare,
-// private docs (aadhar_*/pan_*) are minted via POST /api/docs/signed-url
-// (Authorization header — session JWTs never go in URLs, P0-2).
 const useViewUrl = (storedPath) => {
   const needsSigned = isPrivateDocPath(storedPath);
   const signed = useSignedDocUrl(needsSigned ? storedPath : "");
@@ -78,9 +73,6 @@ const LightboxBody = ({ doc }) => {
   );
 };
 
-// Inline verification-document viewer for admins.
-// docs: [{ label, url }] — image thumbs open in a lightbox, PDFs preview
-// in an embedded frame. Missing docs render as "Not uploaded".
 const AdminDocViewer = ({ docs }) => {
   const [active, setActive] = useState(null);
   const items = (docs || []).filter((d) => d?.url);
@@ -98,7 +90,6 @@ const AdminDocViewer = ({ docs }) => {
     };
   }, [active]);
 
-  // Restore focus to the thumbnail that opened the lightbox (a11y P1-11).
   useEffect(() => {
     if (active !== null) return undefined;
     const el = document.querySelector(".admin-doc-thumb:focus");

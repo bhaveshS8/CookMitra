@@ -42,14 +42,7 @@ const TYPE_META = {
   general: { label: "Update", icon: Bell, color: "var(--primary)" },
 };
 
-// Where a notification taps through to. Every actionable notification gets a
-// destination — "pay within 5 minutes" with nowhere to go is a dead end.
-// Explicit `link` wins (e.g. admin consoles), else the linked booking's
-// details page, else nothing.
 const targetFor = (n) => {
-  // Only same-origin relative paths are tappable — never absolute URLs,
-  // protocol-relative links, or schemes (backend validates too; this is the
-  // render-side backstop so a bad stored link can never navigate off-site).
   if (typeof n.link === "string" && /^\/(?!\/)/.test(n.link) && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(n.link)) {
     return n.link;
   }
@@ -108,15 +101,12 @@ const Notifications = () => {
 
   useEffect(() => {
     fetchNotifications();
-    // Calmed for scale: 30s -> 60s + hidden-tab pause (the Notification list is
-    // still refreshed immediately when the tab becomes visible again).
     const poll = async () => {
       if (document.hidden) return;
       try {
         const { data } = await API.get("/notifications");
         setNotifications(Array.isArray(data) ? data : []);
       } catch {
-        // keep stale list on background poll failure
       }
     };
     const id = setInterval(poll, 60000);
@@ -127,13 +117,10 @@ const Notifications = () => {
     };
   }, []);
 
-  // Tell the navbar badge to refresh immediately (it no longer polls on its
-  // own — the popup + explicit nudges drive it, with a slow safety poll).
   const nudgeBadge = () => {
     try {
       window.dispatchEvent(new CustomEvent("notifications-updated"));
     } catch {
-      // non-fatal
     }
   };
 
@@ -228,7 +215,6 @@ const Notifications = () => {
             const target = targetFor(n);
             const open = () => {
               if (!target) return;
-              // Opening the destination counts as reading it.
               if (!n.read) handleMarkRead(n._id);
               navigate(target);
             };

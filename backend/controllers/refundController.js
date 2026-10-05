@@ -1,14 +1,3 @@
-// Customer post-service refund requests (no-show / not completed).
-//
-// Flow (never automatic): scheduled end + 1h passes with the booking still
-// not completed → the customer becomes eligible → they file a request with a
-// reason → the request queues as payment.refundStatus "pending" (visible in
-// the existing admin refund queue, GET /payouts/refunds) → an admin approves
-// (full or partial) or rejects via the existing payoutController paths,
-// which move the money, audit the ledger and notify.
-//
-// The customer never chooses an amount: refundAmount is always computed
-// server-side via finance.maxRefundable (captured minus already returned).
 
 const Booking = require("../models/Booking");
 const User = require("../models/User");
@@ -16,10 +5,6 @@ const Notification = require("../models/Notification");
 const { sessionEndDate } = require("./bookingController");
 const { maxRefundable, recordLedger } = require("../utils/finance");
 
-// Server-side eligibility gate: exact timestamp comparison on the booking's
-// own service clock (OTP clock when the service started, else the static IST
-// schedule — sessionEndDate, the same helper completion/no-show logic uses).
-// The frontend never decides eligibility and no client timestamp is trusted.
 const REFUND_GRACE_MS = 60 * 60 * 1000;
 const REFUND_TERMINAL_STATUSES = ["completed", "cancelled", "rejected", "expired"];
 
@@ -52,9 +37,6 @@ const refundEligibility = (booking, now = Date.now()) => {
   };
 };
 
-// Public eligibility payload for the Booking Details page (drives the
-// Request Refund button + status copy; never trusted for decisions — the
-// POST below recomputes everything).
 const eligibilityPayload = (booking, now = Date.now()) => {
   const e = refundEligibility(booking, now);
   const pay = booking?.payment || {};
@@ -76,7 +58,6 @@ exports.REFUND_REASONS = REFUND_REASONS;
 exports.REFUND_GRACE_MS = REFUND_GRACE_MS;
 exports.refundEligibility = refundEligibility;
 
-// GET /bookings/:id/refund-eligibility — own customer or admin.
 exports.getRefundEligibility = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id);
@@ -94,10 +75,6 @@ exports.getRefundEligibility = async (req, res, next) => {
   }
 };
 
-// POST /bookings/:id/refund-request — own customer only (route authorizes
-// "customer"; ownership is re-checked here so one customer can never file on
-// another's booking). Body: { reason, note? } — amount/status/eligibility
-// keys are never read from the request.
 exports.requestRefund = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id);
@@ -118,7 +95,6 @@ exports.requestRefund = async (req, res, next) => {
     }
     const note = rawNote.trim().slice(0, 500);
 
-    // Revalidate EVERYTHING server-side (never the frontend's word).
     const now = Date.now();
     const check = refundEligibility(booking, now);
     if (!check.eligible) {
@@ -138,9 +114,6 @@ exports.requestRefund = async (req, res, next) => {
     }
 
     const amount = Math.round(Number(check.refundableAmount));
-    // Atomic claim: refundStatus none→pending plus the full guard set, so two
-    // tabs (or a completion racing us) admit exactly one winner. A lost race
-    // re-reads below instead of double-filing.
     let claimed = null;
     try {
       claimed = await Booking.findOneAndUpdate(
@@ -171,7 +144,6 @@ exports.requestRefund = async (req, res, next) => {
         { new: true }
       );
     } catch (e) {
-      // Duplicate-key style collision on a unique guard → treat as a lost race.
       claimed = null;
     }
     if (!claimed) {
@@ -205,8 +177,6 @@ exports.requestRefund = async (req, res, next) => {
       reason,
     });
 
-    // Notify the customer (confirmation) + every admin (review queue).
-    // Best-effort: the request itself already succeeded.
     try {
       await Notification.create({
         user: claimed.customer,
@@ -215,7 +185,6 @@ exports.requestRefund = async (req, res, next) => {
         message: `Your refund request for ₹${amount} has been submitted and is under admin review.`,
       });
     } catch {
-      // non-fatal
     }
     try {
       const admins = await User.find({ role: "ADMIN" }).select("_id").limit(50).lean();
@@ -233,7 +202,6 @@ exports.requestRefund = async (req, res, next) => {
         )
       );
     } catch {
-      // non-fatal
     }
 
     res.status(201).json(eligibilityPayload(claimed, Date.now()));

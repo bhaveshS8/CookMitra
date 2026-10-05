@@ -39,16 +39,11 @@ router.post(
   auth,
   authorize("customer"),
   [
-    // Find-Cook flow: the customer never sends a cook. A `cook`/`cookId`
-    // in the body is accepted by the validator but IGNORED by the
-    // controller (the booking is always created with cook = null).
     body("cook").optional().isMongoId().withMessage("Valid cook id is required"),
     body("cookId").optional().isMongoId().withMessage("Valid cook id is required"),
     body("serviceType")
       .isIn(["cook_for_me", "cook_with_me", "teach_me", "preparation_help"])
       .withMessage("Valid service type is required"),
-    // Date-only (YYYY-MM-DD): full datetimes are refused outright so a
-    // silently-dropped time/timezone component can never shift the day.
     body("date").matches(/^\d{4}-\d{2}-\d{2}$/).withMessage("Valid date (YYYY-MM-DD) is required"),
     body("startTime").notEmpty().withMessage("Start time is required"),
     body("endTime").notEmpty().withMessage("End time is required"),
@@ -82,8 +77,6 @@ router.post(
       .optional()
       .isFloat({ min: 0 })
       .withMessage("Amount must be a non-negative number"),
-    // Payment details are optional now (pay-on-booking removed): when absent
-    // the booking is created with payment.status "pending".
   ],
   validate,
   createBooking
@@ -92,22 +85,16 @@ router.post(
 router.get("/my", auth, authorize("customer"), getMyBookings);
 router.get("/my/locations", auth, authorize("customer"), getMyLocations);
 router.get("/cook", auth, authorize("cook"), getCookBookings);
-// Broadcast request feed (must sit before /:id so "requests" isn't a param).
 router.get("/cook/requests", auth, authorize("cook"), getCookRequests);
-// Payment-gated schedule for the cook's Today/Tomorrow tabs (paid only).
 router.get("/cook/schedule", auth, authorize("cook"), getCookSchedule);
 router.get("/:id/eligible-cooks", auth, authorize("admin", "cook"), getEligibleCooksForBooking);
 router.get("/:id", auth, getBookingById);
 router.get("/", auth, authorize("admin"), getAdminBookings);
 router.patch("/:id/accept", auth, authorize("cook", "admin"), acceptBooking);
-// Customer confirms payment within the 5-minute post-acceptance window.
 router.patch("/:id/pay", auth, authorize("customer"), payBooking);
 router.patch("/:id/reject", auth, authorize("cook", "admin"), rejectBooking);
 router.patch("/:id/complete", auth, authorize("cook", "admin"), completeBooking);
 router.patch("/:id/arrived", auth, authorize("cook", "admin"), markCookArrived);
-// OTP start is brute-force sensitive (4 digits + 10-try lockout): own
-// tighter bucket on top of the general limiter. Shared (MongoDB-backed) so
-// the budget holds across replicas — see utils/rateLimitStore.js.
 const otpLimiter = rateLimit({
   store: rateLimitStore("otp"),
   standardHeaders: false,
@@ -126,11 +113,7 @@ router.patch(
   startService
 );
 router.patch("/:id/cancel", auth, cancelBooking);
-// Backend-computed cancellation preview for the Cancel dialog (must sit
-// before nothing conflicting — GET with a distinct suffix, safe anywhere).
 router.get("/:id/cancellation-preview", auth, getCancellationPreview);
-// Customer no-show: cook (own booking) or admin only — customers can never
-// mark their own booking as no-show.
 router.post(
   "/:id/no-show",
   auth,
@@ -139,15 +122,7 @@ router.post(
   validate,
   markNoShow
 );
-// Customers may permanently remove bookings the cook never accepted
-// (requested / rejected / expired) or ones they already cancelled.
 router.delete("/:id", auth, authorize("customer"), deleteBooking);
-// Reschedule (+ v2 cook reassignment): free slots for the picker + the move
-// itself. v1 policy is customer + admin (cooks don't move bookings); the
-// controller enforces ownership, the 30-minute cutoff/lead, the reschedule
-// cap, cook eligibility, and the no-money-moves rule. Price, payment status
-// and rescheduleCount can never be set from the request — they are absent
-// from the validators below by design.
 router.get(
   "/:id/reschedule-options",
   auth,
@@ -172,9 +147,6 @@ router.patch(
   validate,
   rescheduleBooking
 );
-// Post-service refund requests: eligibility is computed server-side from the
-// booking's own service clock — the frontend never decides, and amount /
-// status / eligibility keys are never read from the request by design.
 router.get("/:id/refund-eligibility", auth, getRefundEligibility);
 router.post(
   "/:id/refund-request",

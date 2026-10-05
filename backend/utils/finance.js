@@ -1,18 +1,4 @@
-// Centralized financial validators — single source of truth for every
-// money-movement decision (payout settlement, refund approval, queue
-// membership). Controllers must call these instead of re-implementing
-// scattered status checks, so a rule change lands in exactly one place.
-//
-// Pure functions over booking-like objects (no DB access) — unit-testable.
-// Amounts are integer rupees throughout the domain (paise only at the
-// Razorpay boundary).
 
-// A booking may pay its cook ONLY when every condition below holds. Returns
-// { eligible, reasons[] } — callers refuse when eligible is false and MUST
-// surface the reasons (never a bare 400) so admins can reconcile.
-// NOTE: a missing payout subdoc (pre-payout ledgers rows) behaves as
-// "pending" — callers pin the state atomically at claim time, so legacy
-// rows settle through the same gate instead of sticking forever.
 const payoutEligibility = (booking) => {
   const reasons = [];
   if (!booking) return { eligible: false, reasons: ["Booking not found"] };
@@ -24,25 +10,16 @@ const payoutEligibility = (booking) => {
   if (!(Number(booking.cookPayout) > 0)) reasons.push("Cook share is not positive");
   if (booking.status !== "completed") reasons.push(`Booking is ${booking.status || "unknown"}, not completed`);
   if (booking.hoursCompleted !== true) reasons.push("Service hours are not marked complete");
-  // Service evidence: the OTP clock must have run and the cook must have
-  // arrived. Legacy auto-completions (24h backfill) only closed with paid
-  // or arrived evidence, but arrival is what proves the cook showed up —
-  // a paid no-show must never become a cook payout.
   if (!booking.serviceStartedAt) reasons.push("Service was never started (no OTP verification)");
   if (!booking.cookArrived) reasons.push("Cook arrival was never recorded");
   if (payout.status === "settled") reasons.push("Payout already settled");
   if (payout.status === "not_applicable") reasons.push("Payout declined — no cook share due");
   if (payout.status && payout.status !== "pending") reasons.push(`Payout is ${payout.status}, not pending`);
-  // Money must not travel both directions without reconciliation: any live
-  // or completed customer refund blocks the cook leg until resolved.
   const rs = pay.refundStatus || "none";
   if (!["none", "rejected"].includes(rs)) reasons.push(`Customer refund is ${rs} — resolve it first`);
   return { eligible: reasons.length === 0, reasons };
 };
 
-// Cumulative refunded total for the single-cycle refund model: money already
-// returned (gateway-processed or manually settled) can never be refunded
-// again. Returns integer rupees.
 const refundedTotal = (booking) => {
   const pay = booking?.payment || {};
   if (["processed", "manual"].includes(pay.refundStatus)) {
@@ -51,22 +28,17 @@ const refundedTotal = (booking) => {
   return 0;
 };
 
-// Maximum still refundable right now: captured minus already returned.
-// Never negative; never trusts a client-supplied figure.
 const maxRefundable = (booking) => {
   const paid = Math.max(0, Math.round(Number(booking?.payment?.paidAmount || booking?.amount || 0)));
   return Math.max(0, paid - refundedTotal(booking));
 };
 
-// Gate for approving a queued refund. Also reports the capped amount the
-// approval may move (never above maxRefundable).
 const refundApprovalCheck = (booking, { clawback = false } = {}) => {
   const reasons = [];
   if (!booking) return { ok: false, reasons: ["Booking not found"], amount: 0 };
   const pay = booking.payment || {};
   if (pay.refundStatus !== "pending") reasons.push("Only refunds awaiting approval can be approved");
   if (pay.testMode) {
-    // Test money needs no gateway move; approval just closes the record.
     return { ok: reasons.length === 0, reasons, amount: 0, testMode: true };
   }
   if (pay.status !== "paid") reasons.push("No captured payment to refund");
@@ -74,17 +46,12 @@ const refundApprovalCheck = (booking, { clawback = false } = {}) => {
   const cap = maxRefundable(booking);
   if (!(amount > 0)) reasons.push("Refund amount is not positive");
   if (amount > cap) reasons.push(`Refund of ₹${amount} exceeds the refundable ₹${cap}`);
-  // Double-spend guard: a settled cook share and a customer refund are the
-  // same money twice. Settled payouts need an explicit clawback decision.
   if (booking.payout?.status === "settled" && !clawback) {
     reasons.push("Cook payout already settled — approve only with an explicit clawback decision");
   }
   return { ok: reasons.length === 0, reasons, amount: Math.min(amount, cap) };
 };
 
-// Offline transfer references (UPI txn id / bank ref) are admin-typed, so
-// they are validated AND de-duplicated: the same reference settling two
-// payouts is either a double-click or one transfer recorded twice.
 const PAYOUT_REF_RE = /^[A-Za-z0-9][A-Za-z0-9._\-/ ]{2,118}[A-Za-z0-9]$/;
 const isValidPayoutReference = (ref) => {
   const s = String(ref || "").trim();
@@ -92,22 +59,12 @@ const isValidPayoutReference = (ref) => {
   return PAYOUT_REF_RE.test(s);
 };
 
-// Canonical duplicate-detection form: all whitespace removed, lowercased.
-// UPI transaction ids are numeric and bank UTR/RRN schemes carry no
-// significant spaces, so "ABC 123" and "abc123" are the same transfer typed
-// twice. The exact typed text is still stored in `payout.reference`.
 const normalizePayoutReference = (ref) => {
   const s = String(ref || "").replace(/\s+/g, "");
   if (!s) return "";
   return s.toLowerCase();
 };
 
-// Strict rupee-amount parser for admin money inputs (approve / settle).
-// Accepts ONLY whole positive rupees, as a JSON number or a bare digits-only
-// string. Everything else is refused: booleans (Number(true) === 1 would
-// silently approve a ₹1 refund), null, objects, "NaN"/"Infinity", zero,
-// negatives and decimals — a malformed body must never move money, and
-// silently rounding a decimal would create an amount the admin never typed.
 const parseRupeeAmount = (input, { label = "Amount" } = {}) => {
   const error = `${label} must be a positive whole number of rupees.`;
   let n;
@@ -118,10 +75,6 @@ const parseRupeeAmount = (input, { label = "Amount" } = {}) => {
   return { ok: true, value: n };
 };
 
-// Cook payout-destination validation (server-side; the cook form only hints).
-// Returns { ok, reasons[], normalized } — normalized upper-cases IFSC,
-// trims strings, and keeps ONLY known keys so unknown payload keys never
-// persist.
 const UPI_RE = /^[\w.\-]{2,256}@[a-zA-Z]{2,64}$/;
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const validatePayoutDetails = (input) => {
@@ -150,11 +103,6 @@ const validatePayoutDetails = (input) => {
   return { ok: reasons.length === 0, reasons, normalized: out };
 };
 
-// Append-only financial audit writer. Best-effort by contract: ledger rows
-// must never break a money operation, but every failure is logged loudly so
-// a silent audit gap is impossible to miss. Callers pass a stable
-// idempotencyKey per decision (e.g. `payout:<bookingId>`); a duplicate key
-// collides on the unique index and is swallowed as "already recorded".
 const recordLedger = async (entry) => {
   try {
     const LedgerEntry = require("../models/LedgerEntry");

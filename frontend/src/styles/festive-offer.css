@@ -1,12 +1,4 @@
-/* ==========================================================================
-   Festive offer billboard — conversion-first popup
-   Visual hierarchy: DISCOUNT → code → urgency → CTA. Everything above the
-   fold on mobile; food row is supporting proof, not the hero.
-   Desktop: everything fits in 88vh. Mobile: card scrolls internally so no
-   content is clipped on short viewports.
-   ========================================================================== */
 
-/* ---- Entry popup overlay ---- */
 .festive-overlay {
   position: fixed;
   inset: 0;
@@ -22,7 +14,6 @@
 }
 @keyframes festiveFade { from { opacity: 0; } to { opacity: 1; } }
 
-/* ---- Card: festive marigold band on top ---- */
 .festive-card {
   position: relative;
   width: min(96vw, 1040px);
@@ -43,23 +34,21 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* ---- Split-hero body ---- */
 .festive-body {
   position: relative;
   z-index: 3;
   display: grid;
-  grid-template-columns: 1.04fr 0.96fr;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-areas:
-    "main showcase"
-    "bottom bottom";
-  gap: 1.1rem 1.75rem;
+    "main"
+    "bottom";
+  gap: 1.1rem;
   align-items: center;
   overflow: hidden;
   padding: 1.6rem 2rem 1.35rem;
   scrollbar-width: none;
 }
 .festive-main { grid-area: main; min-width: 0; }
-.festive-showcase { grid-area: showcase; min-width: 0; }
 .festive-bottom-row {
   grid-area: bottom;
   display: grid;
@@ -70,7 +59,6 @@
   padding-top: 1rem;
 }
 
-/* Close button */
 .festive-close {
   position: absolute;
   top: 0.75rem;
@@ -99,7 +87,6 @@
   outline-offset: 2px;
 }
 
-/* Eyebrow badge — urgency pill, reads like a deadline */
 .festive-eyebrow {
   display: inline-flex;
   align-items: center;
@@ -116,7 +103,6 @@
   border-radius: 99px;
 }
 
-/* Title — the offer IS the headline (biggest type on the card) */
 .festive-title {
   margin: 0 0 0.55rem;
   font-size: 2.4rem;
@@ -128,7 +114,6 @@
 .festive-title-first { color: #1c1917; }
 .festive-title-gold { color: #c2410c; }
 
-/* Description — states the deal plainly + repeats the code */
 .festive-desc {
   margin: 0 0 0.9rem;
   font-size: 0.95rem;
@@ -147,7 +132,6 @@
   letter-spacing: 0.08em;
 }
 
-/* Offer + countdown side by side */
 .festive-offer-row {
   display: grid;
   grid-template-columns: 1.05fr 1fr;
@@ -155,7 +139,6 @@
   align-items: stretch;
 }
 
-/* Hero discount lockup — high-contrast offer block */
 .festive-mega {
   position: relative;
   display: flex;
@@ -192,7 +175,6 @@
 .festive-mega-stars { display: flex; gap: 3px; }
 .festive-mega-stars svg { width: 12px; height: 12px; fill: #ffd24d; color: #ffd24d; }
 
-/* Countdown — urgency block with marigold border */
 .festive-countdown {
   display: flex;
   flex-direction: column;
@@ -229,59 +211,6 @@ svg.festive-count-flame { width: 15px; height: 15px; }
 .festive-count-box strong { font-size: 0.95rem; color: #1c1917; line-height: 1.1; text-align: center; }
 .festive-count-box em { font-style: normal; font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.08em; color: #78716c; text-align: center; }
 
-/* Showcase — supporting proof: 3 signature dishes, trust line below */
-.festive-foods {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-items: start;
-  justify-items: center;
-  gap: 0.85rem;
-  margin: 0;
-  overflow: hidden;
-}
-.festive-food { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 0.35rem; min-width: 0; width: 100%; }
-.festive-food-ring {
-  position: relative;
-  /* Equal share of the row: the ring fills its (equal 1fr) grid cell,
-     capped so it never grows past a tidy circle on wide screens.
-     aspect-ratio keeps every container a perfect, identical square. */
-  width: 100%;
-  max-width: 132px;
-  height: auto;
-  aspect-ratio: 1 / 1;
-  border-radius: 50%;
-  padding: 3px;
-  background: #ffffff;
-  border: 1px solid #e7e5e4;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  transition: transform 0.2s ease;
-  cursor: pointer;
-}
-.festive-food-ring:hover { transform: scale(1.04); }
-.festive-food-ring img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 50%;
-  display: block;
-  background: #f5f5f4;
-}
-.festive-food-tag {
-  position: absolute;
-  bottom: -6px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 0.62rem;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  border-radius: 99px;
-  padding: 0.14rem 0.5rem;
-  white-space: nowrap;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-}
-.festive-food-tag.off { background: #15803d; color: #fff; }
-.festive-food-tag.hot { background: #db2777; color: #fff; }
-.festive-food figcaption { font-size: 0.74rem; font-weight: 600; color: #44403c; line-height: 1.25; text-align: center; word-break: break-word; max-width: 100%; }
 .festive-showcase-note {
   margin: 0.6rem 0 0;
   font-size: 0.76rem;
@@ -290,7 +219,6 @@ svg.festive-count-flame { width: 15px; height: 15px; }
   color: #57534e;
 }
 
-/* Coupon — dashed ticket with big tappable code */
 .festive-coupon {
   display: flex;
   align-items: center;
@@ -334,7 +262,6 @@ svg.festive-count-flame { width: 15px; height: 15px; }
 }
 .festive-copy-btn:hover { background: #44403c; transform: scale(1.03); }
 
-/* Actions — CTA is the loudest element */
 .festive-actions { display: flex; flex-direction: column; justify-content: center; align-items: stretch; gap: 0.3rem; min-width: 0; height: 100%; }
 .festive-cta {
   display: inline-flex;
@@ -373,7 +300,6 @@ svg.festive-count-flame { width: 15px; height: 15px; }
 .festive-never { font-size: 0.76rem; text-decoration: none; opacity: 0.8; }
 .festive-never:hover { opacity: 1; }
 
-/* ---- Tablet: stack, allow card scroll ---- */
 @media (max-width: 860px) {
   .festive-card {
     width: min(96vw, 640px);
@@ -387,7 +313,6 @@ svg.festive-count-flame { width: 15px; height: 15px; }
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       "main"
-      "showcase"
       "bottom";
     gap: 0.85rem;
     padding: 1.25rem 1.25rem 1rem;
@@ -396,13 +321,9 @@ svg.festive-count-flame { width: 15px; height: 15px; }
   .festive-main { display: flex; flex-direction: column; align-items: center; width: 100%; }
   .festive-desc { max-width: 52ch; }
   .festive-offer-row { width: 100%; }
-  .festive-showcase { width: 100%; }
-  /* Stacked full-width showcase: rings fill their (wider) cells equally */
-  .festive-food-ring { max-width: 148px; }
   .festive-bottom-row { width: 100%; }
 }
 
-/* ---- Phones: compact, scrollable card ---- */
 @media (max-width: 560px) {
   .festive-overlay {
     place-items: start center;
@@ -441,12 +362,6 @@ svg.festive-count-flame { width: 15px; height: 15px; }
   .festive-count-box strong { font-size: 0.82rem; }
   .festive-count-box em { font-size: 0.55rem; }
   .festive-count-label { font-size: 0.68rem; }
-  .festive-foods { gap: 0.6rem 0.35rem; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .festive-food { gap: 0.3rem; }
-  /* Phones: 3 equal columns — each ring fills its cell, identical sizes */
-  .festive-food-ring { padding: 2px; max-width: 116px; }
-  .festive-food figcaption { font-size: 0.66rem; }
-  .festive-food-tag { font-size: 0.55rem; padding: 0.1rem 0.35rem; bottom: -6px; }
   .festive-showcase-note { font-size: 0.7rem; margin-top: 0.45rem; }
   .festive-bottom-row { gap: 0.55rem; padding-top: 0.75rem; }
   .festive-coupon { padding: 0.5rem 0.55rem; gap: 0.45rem; border-radius: 12px; }
@@ -461,15 +376,10 @@ svg.festive-count-flame { width: 15px; height: 15px; }
   .festive-close { top: 0.5rem; right: 0.5rem; width: 34px; height: 34px; min-width: 34px; min-height: 34px; }
 }
 
-/* ---- Very small phones: 2 food columns so circles stay round & tappable ---- */
 @media (max-width: 380px) {
-  .festive-foods { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.65rem 0.5rem; }
-  .festive-food-ring { max-width: 128px; }
   .festive-count-label { white-space: normal; text-align: center; }
 }
 
-/* Short viewports — compress vertically on desktop so everything fits in 88vh.
-   Mobile keeps its own scrollable layout, so don't apply desktop compression. */
 @media (max-height: 720px) and (min-width: 861px) {
   .festive-body { padding: 1rem 1.6rem 0.85rem; gap: 0.7rem 1.25rem; }
   .festive-eyebrow { margin-bottom: 0.35rem; }
@@ -479,19 +389,31 @@ svg.festive-count-flame { width: 15px; height: 15px; }
   .mega-20 { font-size: 1.8rem; }
   .festive-countdown { padding: 0.4rem 0.55rem; }
   .festive-count-box { min-height: 0; }
-  .festive-food-ring { max-width: 104px; }
   .festive-showcase-note { margin-top: 0.35rem; }
   .festive-bottom-row { padding-top: 0.7rem; }
   .festive-cta { min-height: 48px; }
 }
 
-/* ---- Reduced motion ---- */
 @media (prefers-reduced-motion: reduce) {
   .festive-card { animation: none !important; }
 }
-/* ---- 320px floor: keep the food circles round + tappable ------------ */
 @media (max-width: 320px) {
-  .festive-foods { gap: 0.55rem 0.4rem; }
-  .festive-food-ring { max-width: 104px; }
   .festive-title { font-size: 1.35rem; }
 }
+
+.festive-card.festive-navratri { border-top-color: #a21caf; }
+.festive-card.festive-navratri .festive-eyebrow { background: #a21caf; border-color: #a21caf; }
+.festive-card.festive-navratri .festive-title-gold { color: #a21caf; }
+.festive-card.festive-navratri .festive-desc-code { background: #fdf4ff; border-color: #a21caf; color: #86198f; }
+.festive-card.festive-navratri .festive-countdown { background: #fdf4ff; border-color: #f0abfc; }
+.festive-card.festive-navratri .festive-count-flame { color: #a21caf; }
+.festive-card.festive-navratri .festive-count-label { color: #86198f; }
+.festive-card.festive-navratri .festive-coupon { background: #fdf4ff; border-color: #a21caf; }
+.festive-card.festive-navratri .festive-coupon-label { color: #86198f; }
+.festive-card.festive-navratri .festive-coupon-code { border-color: #f0abfc; }
+.festive-card.festive-navratri .festive-cta { background: #a21caf; box-shadow: 0 10px 24px rgba(162, 28, 175, 0.35); }
+.festive-card.festive-navratri .festive-cta:hover { background: #86198f; }
+.festive-card.festive-navratri .festive-close:focus-visible,
+.festive-card.festive-navratri .festive-copy-btn:focus-visible,
+.festive-card.festive-navratri .festive-cta:focus-visible,
+.festive-card.festive-navratri .festive-maybe:focus-visible { outline-color: #a21caf; }

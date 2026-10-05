@@ -14,46 +14,11 @@ import {
 
 const SEEN_KEY = "cm-festive-offer-seen";
 const HIDE_KEY = "cm-festive-offer-hide";
-// Ganesh Utsav 2026 (Sept 14 – Sept 25) — offer runs till midnight after
-// Visarjan on Anant Chaturdashi (Sept 25).
-const OFFER_END = new Date("2026-09-26T00:00:00");
-// Promo code shown on the popup. Fetched live from the backend
-// /api/coupons/active list (admin-managed); this is the graceful fallback and
-// must always name a real code from backend/utils/couponCatalog.js.
+// Navratri ends Oct 20 — update per festival.
+const OFFER_END = new Date("2026-10-21T00:00:00");
+// Fallback code; must exist in backend couponCatalog.
 const OFFER_CODE = "FESTIVE20";
 const OFFER_PERCENT = 20;
-
-const MODAK_IMG =
-  "https://images.pexels.com/photos/33643272/pexels-photo-33643272.jpeg";
-
-const PURAN_POLI_IMG = "https://images.pexels.com/photos/38229508/pexels-photo-38229508.jpeg";
-
-const LADOO_IMG = "https://images.pexels.com/photos/8887021/pexels-photo-8887021.jpeg";
-
- 
-const FOODS = [
-  {
-    name: "Modak",
-    tag: "Bappa's favourite",
-    tagClass: "hot",
-    src: MODAK_IMG,
-    alt: "Steamed Ukadiche Modak for Ganesh Chaturthi",
-  },
-  {
-    name: "Puran Poli",
-    tag: "Classic",
-    tagClass: "hot",
-    src: PURAN_POLI_IMG,
-    alt: "Sweet Puran Poli flatbread",
-  },
-  {
-    name: "Ladoo",
-    tag: "Festive",
-    tagClass: "hot",
-    src: LADOO_IMG,
-    alt: "Festive besan ladoo sweets",
-  },
-];
 
 function useCountdown() {
   const calc = () => {
@@ -78,9 +43,6 @@ const pad = (n) => String(n).padStart(2, "0");
 
 const FestiveOfferBillboard = () => {
   const location = useLocation();
-  // Booking flow must stay interruption-free: the 8s festive modal locks
-  // body scroll and covers the slot/address form, so never arm it on
-  // cook discovery, booking, waiting or payment routes.
   const isBookingRoute = /^\/(cook-on-demand|cooks(\/|$)|bookings(\/|$))/.test(
     location.pathname || ""
   );
@@ -106,7 +68,6 @@ const FestiveOfferBillboard = () => {
         }
       })
       .catch(() => {
-        /* backend down — keep the fallback default */
       });
     return () => {
       alive = false;
@@ -120,8 +81,6 @@ const FestiveOfferBillboard = () => {
       const hidden = localStorage.getItem(HIDE_KEY);
       const seen = sessionStorage.getItem(SEEN_KEY);
       if (!hidden && !seen) {
-        // Delayed entry so the hero paints first — less intrusive,
-        // better LCP and first impression.
         timer = setTimeout(() => setShowModal(true), 8000);
       }
     } catch {
@@ -154,13 +113,9 @@ const FestiveOfferBillboard = () => {
       sessionStorage.setItem(SEEN_KEY, "1");
       if (persist) localStorage.setItem(HIDE_KEY, "1");
     } catch {
-      /* storage unavailable — modal simply reappears next visit */
     }
   };
 
-  // If the user navigates into the booking flow while the modal is open
-  // (e.g. clicks "Claim % OFF"), close it immediately so it never covers
-  // the slot picker, address form, waiting screen or payment page.
   useEffect(() => {
     if (isBookingRoute) setShowModal(false);
   }, [isBookingRoute]);
@@ -169,7 +124,6 @@ const FestiveOfferBillboard = () => {
     try {
       await navigator.clipboard.writeText(heroCode);
     } catch {
-      /* clipboard blocked — still show feedback */
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
@@ -177,16 +131,15 @@ const FestiveOfferBillboard = () => {
 
   return (
     <>
-      {/* Entry popup billboard — never on booking routes */}
       {showModal && !isBookingRoute && (
         <div
           className="festive-overlay"
           onClick={closeModal}
           role="dialog"
           aria-modal="true"
-          aria-label="Festive offer"
+          aria-label="Navratri offer"
         >
-          <div className="festive-card" onClick={(e) => e.stopPropagation()}>
+          <div className="festive-card festive-navratri" onClick={(e) => e.stopPropagation()}>
             <button
               className="festive-close"
               onClick={closeModal}
@@ -198,16 +151,17 @@ const FestiveOfferBillboard = () => {
             <div className="festive-body">
               <div className="festive-main">
                 <p className="festive-eyebrow">
-                  <span aria-hidden="true">🪔</span> Ganesh Utsav · Ends {expired ? "tonight" : "Sept 25"}
+                  <span aria-hidden="true">💃</span> Navratri Special · Ends {expired ? "tonight" : "Oct 20"}
                 </p>
 
                 <h2 className="festive-title">
                   <span className="festive-title-first">Get {heroPercent}% OFF</span>{" "}
-                  <span className="festive-title-gold">festive feasts</span>
+                  <span className="festive-title-gold">Navratri feasts</span>
                 </h2>
 
                 <p className="festive-desc">
-                  Hot modaks, puran poli &amp; naivedya — cooked fresh in{" "}
+                  Nine nights of garba, dandiya &amp; festive cravings — modaks,
+                  puran poli &amp; festive sweets, cooked fresh in{" "}
                   <strong>your kitchen</strong>. Use code{" "}
                   <strong className="festive-desc-code">{heroCode}</strong> at
                   checkout.
@@ -251,28 +205,7 @@ const FestiveOfferBillboard = () => {
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="festive-showcase">
-                <div className="festive-foods">
-                  {FOODS.map((f) => (
-                    <figure key={f.name} className="festive-food">
-                      <span className="festive-food-ring">
-                        <img
-                          src={f.src}
-                          srcSet={`${f.src}?auto=compress&cs=tinysrgb&w=160 160w, ${f.src}?auto=compress&cs=tinysrgb&w=320 320w, ${f.src}?auto=compress&cs=tinysrgb&w=480 480w`}
-                          sizes="(max-width: 380px) 26vw, (max-width: 560px) 30vw, 128px"
-                          width={320}
-                          height={320}
-                          alt={f.alt}
-                          loading="lazy"
-                        />
-                        <span className={`festive-food-tag ${f.tagClass}`}>{f.tag}</span>
-                      </span>
-                      <figcaption>{f.name}</figcaption>
-                    </figure>
-                  ))}
-                </div>
                 <p className="festive-showcase-note">
                   Verified cooks · OTP-verified sessions · Min order ₹349
                 </p>

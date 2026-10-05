@@ -1,10 +1,3 @@
-// ConfirmDialog — modern replacement for window.confirm()/window.prompt().
-// Controlled: the caller owns `open` plus the pending payload, e.g.
-//   const [pending, setPending] = useState(null);
-//   <ConfirmDialog open={!!pending} title=... message=...
-//     onCancel={() => setPending(null)} onConfirm={() => doIt(pending)} />
-// Optional `input` ({ label, placeholder, initialValue }) turns it into a
-// prompt-style dialog; the typed value is passed to onConfirm(value).
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, Info, CheckCircle2, X, Loader2 } from "lucide-react";
@@ -24,9 +17,6 @@ const ConfirmDialog = ({
   tone = "brand",
   busy = false,
   input,
-  // Optional explicit decision checkbox (e.g. the refund clawback gate):
-  // { label, initialChecked }. `requireCheckbox` keeps the confirm button
-  // disabled until it is ticked, and onConfirm receives (value, checked).
   checkbox,
   requireCheckbox = false,
   onCancel,
@@ -36,7 +26,6 @@ const ConfirmDialog = ({
   const [checked, setChecked] = useState(false);
   const confirmRef = useRef(null);
 
-  // Reset the prompt field, lock body scroll, focus confirm, close on Escape.
   useEffect(() => {
     if (!open) return undefined;
     setValue(input?.initialValue || "");
@@ -53,15 +42,12 @@ const ConfirmDialog = ({
       window.removeEventListener("keydown", onKey);
       clearTimeout(focusTimer);
     };
-    // Re-run per opening so a stale prompt value never leaks across dialogs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   if (!open) return null;
   const { Icon, cls } = TONES[tone] || TONES.brand;
 
-  // Portaled to document.body: escapes .main-content's pageIn stacking
-  // context so the sticky navbar can never paint over the dialog.
   return createPortal(
     <div
       className="cf-overlay"

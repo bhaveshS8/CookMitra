@@ -1,10 +1,3 @@
-// Payment-gated cook schedule suite (no deps, no DB).
-// Run:  node backend/cook-schedule-visibility.test.js — exits non-zero on failure.
-//
-// Proves the backend rule ASSIGNED ≠ SCHEDULED: GET /bookings/cook/schedule
-// returns a booking only when cook==me AND date in the IST day AND
-// payment.status==paid AND status schedule-eligible. Query-level pins are
-// asserted (not just output rows), so frontend forgery can never unlock.
 
 const mongoose = require("mongoose");
 const Booking = require("./models/Booking");
@@ -82,7 +75,6 @@ const queryPinsServer = () =>
 
 (async () => {
   try {
-    // ── Unpaid invisibility ──
     let r = await schedule("today", [row({ status: "accepted", payment: { status: "pending" } })]);
     check("accepted+unpaid today -> hidden", r.statusCode === 200 && r.body.length === 0, `n=${r.body?.length}`);
     check("query pins cook+paid+eligible-status+day", queryPinsServer(), JSON.stringify(lastFilter));
@@ -93,7 +85,6 @@ const queryPinsServer = () =>
     r = await schedule("today", [row({ status: "requested", payment: { status: "pending" } })]);
     check("requested -> hidden", r.body.length === 0, `n=${r.body?.length}`);
 
-    // ── Paid visibility ──
     r = await schedule("today", [row({ status: "confirmed" })]);
     check("confirmed+paid today -> shown once", r.body.length === 1, `n=${r.body?.length}`);
 
@@ -103,11 +94,8 @@ const queryPinsServer = () =>
     r = await schedule("today", [row({ status: "completed" })]);
     check("completed+paid today -> shown (history)", r.body.length === 1, `n=${r.body?.length}`);
 
-    // ── Day scoping ──
     r = await schedule("today", [row({ status: "confirmed", date: at(1) })]);
     check("tomorrow booking NOT in today (query day bounds)", r.body.length === 0 || true, `n=${r.body?.length}`);
-    // (Rows are fixtures — the DB enforces the day range; assert the bounds
-    // bracket the requested IST day instead.)
     {
       const { dayBounds } = require("./utils/slots");
       const { istDayString } = require("./utils/time");
@@ -121,7 +109,6 @@ const queryPinsServer = () =>
     r = await schedule("tomorrow", [row({ status: "confirmed", date: at(1) })]);
     check("confirmed+paid tomorrow -> shown in tomorrow", r.body.length === 1, `n=${r.body?.length}`);
 
-    // ── Terminal / foreign ──
     r = await schedule("today", [row({ status: "cancelled" })]);
     check("cancelled+paid -> hidden", r.body.length === 0, `n=${r.body?.length}`);
 
@@ -134,7 +121,6 @@ const queryPinsServer = () =>
     r = await schedule("today", [row({ status: "confirmed", cook: OTHER })]);
     check("other cook's paid booking -> hidden (cook pinned)", r.body.length === 0 || String(lastFilter.cook) === ME, `cook=${lastFilter?.cook} n=${r.body?.length}`);
 
-    // ── Validation + idempotency ──
     r = await schedule("someday", [row({ status: "confirmed" })]);
     check("bad day param -> 400", r.statusCode === 400, `s=${r.statusCode}`);
 
@@ -145,8 +131,6 @@ const queryPinsServer = () =>
       check("schedule read idempotent (no dupes, stable)", a.body.length === 2 && b.body.length === 2, `${a.body?.length}/${b.body?.length}`);
     }
 
-    // ── E2E lifecycle at controller level ──
-    // requested -> accept (unpaid) hidden -> paid+confirmed shown exactly once.
     {
       const doc = {
         _id: "e2e1", customer: "cust1", cook: null, status: "requested",
@@ -157,7 +141,6 @@ const queryPinsServer = () =>
         save: async function () { return this; },
         toObject() { const { save, toObject, ...rest } = this; return { ...rest }; },
       };
-      // 1. accept assigns the cook (failed claim = someone else won).
       Booking.findOne = async () => doc;
       Booking.find = () => ({ select: async () => [] });
       const CookProfileM = require("./models/CookProfile");
@@ -178,11 +161,8 @@ const queryPinsServer = () =>
       const ra = makeRes();
       await controller.acceptBooking({ params: { id: "e2e1" }, user: { id: ME, role: "cook" }, body: {} }, ra, next);
       check("e2e accept assigns cook (pre-payment)", ra.statusCode === 200 && doc.cook === ME, `s=${ra.statusCode} cook=${doc.cook}`);
-      // 2. accepted+unpaid: schedule hides it.
       const rs1 = await schedule("today", [{ ...row({ _id: "e2e1", status: "accepted", payment: { status: "pending" } }) }]);
       check("e2e accepted+unpaid hidden from schedule", rs1.body.length === 0, `n=${rs1.body?.length}`);
-      // 3. backend-verified pay flips it (simulating payBooking's atomic
-      //    confirm — verification itself is covered by payment-adversarial).
       const rs2 = await schedule("today", [{ ...row({ _id: "e2e1", status: "confirmed", payment: { status: "paid", paidAmount: 499 } }) }]);
       check("e2e paid+confirmed appears exactly once", rs2.body.length === 1 && String(rs2.body[0]._id) === "e2e1", `n=${rs2.body?.length}`);
     }

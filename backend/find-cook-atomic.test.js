@@ -1,15 +1,6 @@
-// Find-Cook atomic assignment suite (no deps, no DB).
-// Run:  node backend/find-cook-atomic.test.js  — exits non-zero on any failure.
-//
-// Covers the broadcast lifecycle with in-memory fakes driving the REAL
-// controllers: creation ignores untrusted cook/price ids, exactly one cook
-// wins the atomic claim, losers/ignored/expired/cancelled attempts fail
-// safely, Ignore never kills the request, and payment stays locked to
-// server-assigned ACCEPTED bookings.
 
 const mongoose = require("mongoose");
 
-// ── Stub the slot engine BEFORE the controller loads (destructured import).
 const slots = require("./utils/slots");
 slots.getDayWindows = async () => [{ startTime: "08:00", endTime: "20:00" }];
 slots.resolveCookAvailability = async () => true;
@@ -42,7 +33,6 @@ const makeRes = () => {
 };
 const next = (e) => { if (e) throw e; };
 
-// ── Shared fakes ─────────────────────────────────────────────────────────
 const notificationLog = [];
 let createdPayload = null;
 
@@ -85,7 +75,6 @@ const futureDateStr = () => {
 
 (async () => {
   try {
-    // ══ A. Broadcast creation ══
     setDbReady(false);
     createdPayload = null;
     Booking.findOne = async (q) => (q?.clientKey ? null : null);
@@ -112,7 +101,6 @@ const futureDateStr = () => {
         guests: 4,
         address: "Flat 1, Sunshine Society, Pune",
         notes: "less spicy",
-        // Tampered / untrusted fields the server must ignore:
         cook: "someCookId",
         cookId: "someCookId",
         amount: 1,
@@ -127,7 +115,6 @@ const futureDateStr = () => {
       check("A2 every eligible cook notified on the same booking", reqNotifs.length >= 2 && ids.size === 1, `notifs=${reqNotifs.length} bookings=${ids.size}`);
     }
 
-    // A3: nobody eligible -> 409, no booking.
     {
       const savedFind = CookProfile.find;
       CookProfile.find = () => ({ populate: () => ({ lean: async () => [] }) });
@@ -143,8 +130,6 @@ const futureDateStr = () => {
       CookProfile.find = savedFind;
     }
 
-    // A4: duplicate clientKey returns the original (idempotent).
-    // NOTE: the pre-check is a production-DB branch — force it on here.
     {
       setDbReady(true);
       const original = { _id: "orig1", status: "requested", cook: null, toObject() { return { _id: "orig1", status: "requested", cook: null }; } };
@@ -159,7 +144,6 @@ const futureDateStr = () => {
       setDbReady(false);
     }
 
-    // ══ B. Atomic accept race (production claim path) ══
     setDbReady(true);
     const liveDoc = () => ({
       _id: "race1",
@@ -177,7 +161,6 @@ const futureDateStr = () => {
       save: async function () { return this; },
       toObject() { const { save, toObject, ...rest } = this; return { ...rest }; },
     });
-    // Simulated DB state: exactly one conditional claim commits.
     let dbCook = null;
     let dbStatus = "requested";
     const claimFilters = [];
@@ -187,8 +170,6 @@ const futureDateStr = () => {
       const d = liveDoc();
       d.cook = dbCook;
       d.status = dbStatus;
-      // The atomic $push lands in the DB doc: mirror one accepted entry so
-      // the response carries exactly one authoritative history row.
       d.statusHistory = dbStatus === "accepted"
         ? [{ status: "accepted", note: `Accepted by cook ${dbCook}` }]
         : [];
@@ -222,7 +203,6 @@ const futureDateStr = () => {
       return r;
     };
 
-    // B5: first cook wins; claim pins cook:null + requested + live window.
     notificationLog.length = 0;
     let r = await acceptAs("cookA");
     check("B5 first accept wins (200 + cook set)", r.statusCode === 200 && dbCook === "cookA" && dbStatus === "accepted", `s=${r.statusCode} cook=${dbCook}`);
@@ -231,14 +211,12 @@ const futureDateStr = () => {
     check("B5 exactly one acceptance history entry", (r.body?.statusHistory || []).filter((h) => h.status === "accepted").length === 1, JSON.stringify((r.body?.statusHistory || []).length));
     check("B5 only the winner's customer notified once", notificationLog.filter((n) => n.type === "booking_accepted" && String(n.user) === "cust1").length === 1, `${notificationLog.length}`);
 
-    // B6/B7: late + same-cook double accept -> safe (no duplicate winner).
     r = await acceptAs("cookB");
     check("B6 second cook -> 409 BOOKING_ALREADY_ASSIGNED", r.statusCode === 409 && r.body?.code === "BOOKING_ALREADY_ASSIGNED", `s=${r.statusCode} code=${r.body?.code}`);
     r = await acceptAs("cookA");
     check("B7 winner double-accept idempotent (200, no state change)", r.statusCode === 200 && r.body?.alreadyAccepted === true, `s=${r.statusCode}`);
     check("B7 still exactly one cook assigned", dbCook === "cookA" && dbStatus === "accepted", `cook=${dbCook}`);
 
-    // B8: ignored cook cannot accept (fresh requested doc, ignoredBy has them).
     {
       const d = liveDoc();
       d._id = "race2"; d.status = "requested"; d.cook = null; d.ignoredBy = ["cookC"];
@@ -248,7 +226,6 @@ const futureDateStr = () => {
       check("B8 ignored cook accept -> 409", rr.statusCode === 409, `s=${rr.statusCode}`);
     }
 
-    // B9: expired -> 410; cancelled -> 400.
     {
       const d = liveDoc();
       d._id = "race3"; d.status = "requested"; d.cook = null;
@@ -266,7 +243,6 @@ const futureDateStr = () => {
       check("B9 cancelled accept refused (not 200)", r3.statusCode !== 200, `s=${r3.statusCode}`);
     }
 
-    // B10: admin broadcast accept needs a cook; with cookId it assigns atomically.
     {
       const d = liveDoc();
       d._id = "race6"; d.status = "requested"; d.cook = null;
@@ -289,7 +265,6 @@ const futureDateStr = () => {
       check("B10 admin broadcast accept with cookId assigns atomically", rCook.statusCode === 200 && assignedTo === "cookD", `s=${rCook.statusCode} to=${assignedTo}`);
     }
 
-    // ══ C. Ignore keeps the request alive ══
     setDbReady(false);
     {
       const d = liveDoc();
@@ -308,7 +283,6 @@ const futureDateStr = () => {
       check("C12 repeat ignore idempotent (200, still requested)", r2.statusCode === 200 && r2.body?.status === "requested", `s=${r2.statusCode}`);
     }
 
-    // ══ D. Payment locked to assigned ACCEPTED ══
     {
       const mk = (over) => ({
         _id: "pay1", customer: "cust1", cook: null, status: "requested",
@@ -328,9 +302,7 @@ const futureDateStr = () => {
       check("D14 accepted-but-unassigned booking cannot pay (400)", rp2.statusCode === 400, `s=${rp2.statusCode}`);
     }
 
-    // ══ E. End-to-end lifecycle races ══
     setDbReady(true);
-    // E15: customer cancel wins -> late cook accept refused, one final state.
     {
       let st = "requested";
       let withCook = null;
@@ -352,7 +324,6 @@ const futureDateStr = () => {
       await controller.acceptBooking({ params: { id: "race7" }, user: { id: "cookA", role: "cook" }, body: {} }, ra, next);
       check("E15 cancel-then-accept: exactly one winner (cancel stands)", rc.statusCode === 200 && st === "cancelled" && ra.statusCode !== 200, `cancel=${rc.statusCode} accept=${ra.statusCode} st=${st}`);
     }
-    // E16: broadcast reschedule moves the slot + renews the window.
     {
       const d = {
         _id: "rs1", customer: "cust1", cook: null, ignoredBy: ["cookA"],
@@ -378,7 +349,6 @@ const futureDateStr = () => {
       }, rr, next);
       check("E16 broadcast reschedule moves slot (200)", rr.statusCode === 200, `s=${rr.statusCode} ${JSON.stringify(rr.body)?.slice(0, 120)}`);
     }
-    // E17: requests feed hides ignored + ineligible, shows live broadcast.
     {
       const live = {
         _id: "feed1", status: "requested", cook: null, serviceType: "cook_for_me",

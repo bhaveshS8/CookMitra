@@ -1,5 +1,3 @@
-// Immutable audit trail for cancellation & refund decisions (§26).
-// One row per state transition — critical for financial disputes.
 const mongoose = require("mongoose");
 
 const cancellationAuditSchema = new mongoose.Schema(

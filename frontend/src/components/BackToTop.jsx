@@ -1,11 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ArrowUp } from "lucide-react";
 
-// Sticky action bars (booking flows + booking details) occupy the same
-// bottom-right viewport band as this button — while any of them is on
-// screen the FAB hides so it can never cover (and swallow taps for) the
-// primary CTA. Checked on scroll/resize; bars mount per route/panel state
-// but any route change resets scroll (ScrollToTop), which re-evaluates.
 const STICKY_BAR_SELECTOR = ".od-stickybar, .bk-stickybar, .bd-actionbar";
 
 const stickyBarInView = () => {

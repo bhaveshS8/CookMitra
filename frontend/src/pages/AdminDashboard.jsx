@@ -77,7 +77,6 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("book
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="tabs-navigation-bar">
         <button
           className={`tab-btn ${activeTab === "bookings" ? "active" : ""}`}
@@ -184,10 +183,6 @@ const CookManagement = () => {
     }
   };
 
-  // Approval directory (P2-18): All / Pending / Approved / Rejected views so
-  // approved and rejected records are never hidden from the directory.
-  // Filtering is a display convenience only — every action re-checks
-  // admin authorization server-side.
   const [cookFilter, setCookFilter] = useState("pending");
   const COOK_FILTERS = [
     { key: "all", label: "All" },
@@ -257,7 +252,6 @@ const CookManagement = () => {
             const status = cook.approvalStatus || "pending";
             return (
             <article key={cook._id} className={`admin-cook-card acc-status-${status}`}>
-              {/* ── Header: avatar + identity + status ── */}
               <header className="acc-head">
                 <div className="acc-ava acc-ava-wrap">
                   {cook.photoUrl ? (
@@ -292,7 +286,6 @@ const CookManagement = () => {
                 </span>
               </header>
 
-              {/* ── Fact tiles: experience + rate + service area ── */}
               <div className="acc-stats">
                 <div className="acc-stat">
                   <span className="acc-stat-ico"><Briefcase size={14} /></span>
@@ -319,7 +312,6 @@ const CookManagement = () => {
                 )}
               </div>
 
-              {/* ── Specialties ── */}
               {(cook.specialties || []).length > 0 && (
                 <div className="acc-section">
                   <span className="acc-section-label">Specialties</span>
@@ -338,7 +330,6 @@ const CookManagement = () => {
                 </div>
               )}
 
-              {/* ── Bio / skills ── */}
               {(cook.skills || cook.bio) && (
                 <div className="acc-section">
                   <span className="acc-section-label">About</span>
@@ -346,7 +337,6 @@ const CookManagement = () => {
                 </div>
               )}
 
-              {/* ── Verification documents ── */}
               <div className="acc-section acc-docs-section">
                 <span className="acc-section-label">
                   <ShieldCheck size={13} />
@@ -365,7 +355,6 @@ const CookManagement = () => {
                 />
               </div>
 
-              {/* ── Admin upload on behalf of cook (collapsed by default) ── */}
               <details className="acc-upload-zone">
                 <summary className="acc-upload-head">
                   <Upload size={13} />
@@ -380,7 +369,6 @@ const CookManagement = () => {
                 </div>
               </details>
 
-              {/* ── Actions: one clear footer bar ── */}
               <footer className="acc-actions">
                 <div className="acc-actions-main">
                   {status === "pending" && (
@@ -437,25 +425,13 @@ const BookingManagement = () => {
   const { data: bookings, loading, refreshing, refetch } = useFetch("/bookings");
   const showToast = useShowToast();
   const [bookingFilter, setBookingFilter] = useState("all");
-  // F-06: per-booking busy state — double-clicking Accept/Complete/Cancel
-  // previously double-fired the PATCH (the cook dashboard already has this).
   const [actingId, setActingId] = useState(null);
-  // { bookingId, action } awaiting dialog confirmation.
   const [pendingAction, setPendingAction] = useState(null);
 
-  // ── Incoming-request popup ──
-  // A customer request interrupts the admin the same way it interrupts the
-  // cook: the newest unseen request auto-opens in BookingRequestModal (older
-  // ones queue behind it), and the list polls every 15s — paused on hidden
-  // tabs — so a request created while this tab is open pops without a manual
-  // refresh.
   const [requestModalBooking, setRequestModalBooking] = useState(null);
   const seenRequestIds = useRef(new Set());
   const requestsInit = useRef(false);
 
-  // Automatic, silent refresh of the booking list: a 15s background poll
-  // (paused on hidden tabs, fired at once when the tab/window regains focus)
-  // keeps the cards current without ever re-showing the first-load spinner.
   useAutoRefresh(refetch, { intervalMs: 15000 });
 
   const byNewest = (a, b) =>
@@ -468,8 +444,6 @@ const BookingManagement = () => {
     if (!requestsInit.current) {
       requestsInit.current = true;
       if (!requested.length) return;
-      // Seed everything except the newest as seen, then pop the newest so an
-      // already-waiting request greets the admin on open too.
       requested.slice(1).forEach((b) => seenRequestIds.current.add(String(b._id)));
       const newest = requested[0];
       seenRequestIds.current.add(String(newest._id));
@@ -486,7 +460,6 @@ const BookingManagement = () => {
       setRequestModalBooking([...fresh].sort(byNewest)[0]);
       playAlarmSound();
     } else {
-      // Dialog busy — ring so the queued request isn't missed.
       showToast(
         `${fresh.length} new booking request${fresh.length === 1 ? "" : "s"} waiting — finish this one first.`,
         "warning",
@@ -497,8 +470,6 @@ const BookingManagement = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookings]);
 
-  // After a dialog closes (accept / decline / dismiss), pop the next
-  // still-pending request so stacked arrivals are each answered in turn.
   const popNextPendingRequest = (excludeId) => {
     const next = (bookings || [])
       .filter((b) => b?.status === "requested" && String(b._id) !== String(excludeId || ""))
@@ -512,12 +483,6 @@ const BookingManagement = () => {
     }
   };
 
-  // Real-time booking flow (SSE → realtime-booking-* DOM events, mounted once
-  // in App): new requests refetch instantly; a cook winning the race (or the
-  // window expiring) closes/disables the admin's open popup at once and
-  // refreshes the cards. The 15s poll above stays as fallback. Admin
-  // assignment stays OPTIONAL — a cook's direct accept wins the same atomic
-  // server claim and simply closes this popup via the event below.
   const adminModalIdRef = useRef(null);
   adminModalIdRef.current = requestModalBooking?._id || null;
   useEffect(() => {
@@ -619,7 +584,6 @@ const BookingManagement = () => {
   const upcomingCount = (bookings || []).filter(isUpcoming).length;
   const pastCount = (bookings || []).filter(isPast).length;
 
-  // Every tab shows newer bookings first (creation time, newest → oldest).
   const createdMs = (b) => {
     const t = new Date(b?.createdAt).getTime();
     return Number.isFinite(t) ? t : 0;
@@ -822,11 +786,6 @@ const BookingManagement = () => {
                   <button
                     className="btn btn-success btn-sm abc-btn"
                     onClick={() => {
-                      // Broadcast (unassigned) requests MUST pick an eligible
-                      // cook — the server refuses a cook-less admin accept
-                      // (400). Open the Accept & Select Cook popup instead of
-                      // firing the PATCH directly; admin assignment stays
-                      // optional (a cook's direct accept simply wins first).
                       if (!booking.cook) {
                         setRequestModalBooking(booking);
                       } else {
@@ -888,9 +847,6 @@ const BookingManagement = () => {
         </div>
       )}
 
-      {/* Popup: each incoming customer request auto-opens for the admin with
-          Accept / Decline (on behalf of the cook). Stacked requests queue up
-          and are popped in turn as each dialog closes. */}
       <BookingRequestModal
         open={Boolean(requestModalBooking)}
         booking={requestModalBooking}
@@ -919,11 +875,8 @@ const BookingManagement = () => {
 const UserManagement = () => {
   const { data: users, loading, refetch } = useFetch("/auth/users");
   const showToast = useShowToast();
-  // { kind: "status", user, status } | { kind: "delete", user } | null
   const [pendingUserAction, setPendingUserAction] = useState(null);
 
-  // The API stores spec-UPPERCASE roles (ADMIN/COOK/CUSTOMER) — normalize the
-  // whole list so the admin-protection check and role badge below work.
   const list = (users || []).map((u) => ({ ...u, role: normalizeRole(u.role) }));
 
   const handleStatus = async () => {
@@ -1079,10 +1032,6 @@ const UserManagement = () => {
   );
 };
 
-// Admin registration: only an existing logged-in admin reaches this tab, so
-// new admin accounts can only be created by admins (the public /register
-// form and Google sign-in accept customer/cook roles only). The new admin
-// signs in afterwards on the regular /login page.
 const AdminManagement = () => {
   const { data: users, loading, refetch } = useFetch("/auth/users");
   const showToast = useShowToast();
@@ -1096,9 +1045,6 @@ const AdminManagement = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  // Credentials are hashed server-side, so this success banner is the only
-  // place the new admin's password is ever visible — share it once, then it
-  // is gone.
   const [createdCreds, setCreatedCreds] = useState(null);
   const [copied, setCopied] = useState("");
 
@@ -1119,7 +1065,6 @@ const AdminManagement = () => {
       try {
         document.execCommand("copy");
       } catch {
-        // clipboard unavailable — select the text manually instead
       }
       ta.remove();
     }
@@ -1175,7 +1120,6 @@ const AdminManagement = () => {
           alignItems: "start",
         }}
       >
-        {/* Registration form */}
         <div className="profile-card-block" style={{ margin: 0 }}>
           <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <UserPlus size={18} style={{ color: "var(--primary)" }} /> Register New Admin
@@ -1327,7 +1271,6 @@ const AdminManagement = () => {
           </form>
         </div>
 
-        {/* Existing admins */}
         <div className="profile-card-block" style={{ margin: 0 }}>
           <h3 style={{ marginTop: 0, display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <ShieldCheck size={18} style={{ color: "var(--primary)" }} /> Existing Admins ({admins.length})

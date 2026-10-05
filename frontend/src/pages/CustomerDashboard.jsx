@@ -36,14 +36,8 @@ const prettyService = (s) =>
     .trim()
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
-// Bookings that still need the customer's attention or are coming up — the
-// ones that were previously invisible (a "pay within 5 minutes" booking used
-// to have no home in the app, so it silently expired).
 const ACTIVE_STATUSES = ["requested", "accepted", "confirmed", "in_progress"];
 const UNATTENDED_STATUSES = ["unattended"];
-// Action line under the status badge. `confirmed` is deliberately absent: the
-// emerald "Confirmed" badge already states it, so "Confirmed — paid" was
-// redundant noise on the customer's own card.
 const ACTION_FOR = {
   requested: { label: "Finding a cook…" },
   accepted: { label: "Cook found — payment required" },
@@ -51,14 +45,9 @@ const ACTION_FOR = {
 };
 
 const CustomerDashboard = () => {
-  // F-07: surface fetch failures as an error state with retry — a failed
-  // /bookings/my must never render as a misleading "no bookings" empty page.
   const { data: bookings, loading, refreshing, error, refetch } = useFetch("/bookings/my");
   const navigate = useNavigate();
 
-  // Local clock for time-aware display states (upcoming → in progress →
-  // action-required) without polling the backend: re-categorization is pure
-  // and instant; fresh server data arrives via refetch below.
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 60000);
@@ -76,35 +65,21 @@ const CustomerDashboard = () => {
     };
   }, []);
 
-  // Automatic, silent refresh of "My Bookings": re-pulls the list every 30s in
-  // the background (paused on hidden tabs, refreshed at once when the tab or
-  // window regains focus). Existing cards stay on screen throughout — the
-  // first-load spinner is never re-triggered, so the list never blinks.
   useAutoRefresh(refetch, { intervalMs: 30000 });
 
-  // Only completed meals live in the main list — newer bookings first.
   const byNewest = (a, b) =>
     new Date(b?.createdAt).getTime() - new Date(a?.createdAt).getTime() ||
     String(b._id || "").localeCompare(String(a._id || ""));
   const completedBookings = (bookings?.filter((b) => b.status === "completed") || []).sort(byNewest);
-  // Active & upcoming first (soonest service date on top) — this is where a
-  // customer finds a booking that is waiting on payment or confirmation.
   const bySoonest = (a, b) =>
     new Date(a?.date).getTime() - new Date(b?.date).getTime() ||
     String(a.startTime || "").localeCompare(String(b.startTime || ""));
   const activeBookings = (bookings?.filter((b) => ACTIVE_STATUSES.includes(b.status)) || [])
-    // Time-aware: a live booking whose scheduled end has passed is OVERDUE —
-    // it must never sit in Active & Upcoming. Its backend status is untouched
-    // (display categorization only — no auto-complete, no mutation).
     .filter((b) => getBookingDisplayState(b, now) !== "OVERDUE")
     .sort(bySoonest);
-  // Action Required: live bookings past their scheduled end, still not
-  // completed. Dedicated home so overdue work can't hide as "upcoming".
   const overdueBookings = (bookings?.filter((b) => ACTIVE_STATUSES.includes(b.status)) || [])
     .filter((b) => getBookingDisplayState(b, now) === "OVERDUE")
     .sort(bySoonest);
-  // Refund buttons on overdue cards mirror the backend eligibility answer
-  // (fetched per card — overdue lists are short — never derived locally).
   const [refundEligibleIds, setRefundEligibleIds] = useState({});
   useEffect(() => {
     let cancelled = false;
@@ -133,27 +108,16 @@ const CustomerDashboard = () => {
       cancelled = true;
     };
   }, [bookings, now]);
-  // Requests that expired within the last 10 minutes (cook didn't respond) —
-  // kept visible so the customer can find another cook on the same slot
-  // instead of losing the flow. The server drops them once the grace passes.
   const expiredBookings = (bookings?.filter((b) => b.status === "expired") || []).sort(byNewest);
-  // Cancelled bookings stay visible with their tag so the customer keeps the
-  // history (what was called off, and whether a refund followed).
   const cancelledBookings = (bookings?.filter((b) => b.status === "cancelled") || []).sort(byNewest);
-  // Rejected bookings must NOT disappear (P1-10): the cook declined, so the
-  // customer keeps the record, the reason where permitted, and a retry path.
   const rejectedBookings = (bookings?.filter((b) => b.status === "rejected") || []).sort(byNewest);
-  // Unattended: cook never showed up after service hours passed
   const unattendedBookings = (bookings?.filter((b) => UNATTENDED_STATUSES.includes(b.status)) || []).sort(byNewest);
 
-  // "Find another cook" from an expired card: carry the same plan + slot,
-  // minus the cook who didn't respond (same snapshot the waiting screen uses).
   const retryAnotherCook = (booking) =>
     navigate("/cook-on-demand", {
       state: { retryFromBooking: buildRetryState(booking) },
     });
 
-  // "Copied" feedback for the tap-to-copy OTP pill (one at a time).
   const [copiedOtpId, setCopiedOtpId] = useState(null);
   const copyOtp = async (booking) => {
     const code = String(booking.serviceOtp || "");
@@ -174,21 +138,14 @@ const CustomerDashboard = () => {
         setCopiedOtpId((id) => (id === booking._id ? null : id));
       }, 1600);
     } catch {
-      // Clipboard unavailable — the code itself stays visible on the card.
     }
   };
 
-  // Short dish summary for the compact active cards.
   const dishLabel = (dishes) =>
     dishes.length <= 3
       ? dishes.join(" · ")
       : `${dishes.slice(0, 3).join(" · ")} +${dishes.length - 3} more`;
 
-  // Quick-info strip on every booking card: service-start OTP (only while it
-  // is still usable — mirrors the details page), tap-to-call the cook, and
-  // the ordered dishes. Renders nothing when there is nothing to show.
-  // Unified active cards already render dishes as chips, so they pass
-  // hideDishes to avoid showing them twice.
   const quickRow = (booking, hideDishes = false) => {
     const dishes = booking.selectedItems || [];
     const showOtp =
@@ -236,8 +193,6 @@ const CustomerDashboard = () => {
     );
   };
 
-  // Clicking anywhere on a booking card (except its own buttons/links)
-  // opens that booking's details page.
   const openBooking = (e, bookingId) => {
     if (e.target.closest("button, a, input, select, textarea")) return;
     navigate(`/bookings/${bookingId}`);
@@ -249,7 +204,6 @@ const CustomerDashboard = () => {
     }
   };
 
-  // Status pill language for the unified cards (completed uses Done).
   const STATUS_PILL = {
     requested: "badge-amber",
     accepted: "badge-blue",
@@ -271,13 +225,7 @@ const CustomerDashboard = () => {
     unattended: "Unattended",
   };
 
-  // Unified booking card: the exact completed-session skeleton (cook avatar +
-  // name, status pill, service/date/time/ref row, info + dish chips, notes,
-  // OTP/call strip, chevron, action footer) for Active/Expired/Unattended/
-  // Cancelled/Declined rows — keeping each row's own action line and CTA.
   const renderActiveCard = (booking, { actionIcon: ActionIcon, actionTitle, footHint, cta }) => {
-    // Broadcast requests have no cook yet — show the search state, never a
-    // fake cook name. The server-assigned cook appears after acceptance.
     const cookName = booking.cook?.name || (booking.status === "requested" ? "Finding your cook…" : "Your cook");
     const initial = (cookName || "C").charAt(0).toUpperCase();
     const ref = booking._id?.substring(18).toUpperCase();
@@ -445,12 +393,8 @@ const CustomerDashboard = () => {
           </h2>
           <div className="bookings-list-modern my-bookings-list my-active-list">
             {activeBookings.map((booking) => {
-              // No entry (e.g. confirmed) => no action line at all.
               const action = ACTION_FOR[booking.status] || {};
               const needsPayment = booking.status === "accepted";
-              // Phase-2 hook (optional): deep-link movable bookings to the
-              // details page where the Reschedule picker lives. Gated on the
-              // same client mirror the details page uses — never a doomed chip.
               const showReschedule =
                 !needsPayment &&
                 canRescheduleBooking(booking, { role: "customer" });
@@ -591,8 +535,6 @@ const CustomerDashboard = () => {
           </h2>
           <div className="bookings-list-modern my-bookings-list my-active-list">
             {cancelledBookings.map((booking) =>
-              // The status badge already says "Cancelled" — no second
-              // cancelled line on the card.
               renderActiveCard(booking, {
                 actionIcon: XCircle,
                 actionTitle: null,

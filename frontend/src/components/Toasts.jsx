@@ -16,7 +16,6 @@ const getIcon = (type) => {
   }
 };
 
-// Global toast stack renderer — mount once inside the Redux Provider.
 const Toasts = () => {
   const toasts = useSelector((s) => s.toast.toasts);
   const dispatch = useDispatch();

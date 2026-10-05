@@ -1,8 +1,3 @@
-// Standalone test: auto-complete notifies BOTH sides (parity with the
-// manual completeBooking path, which already notifies cook + customer).
-// Run:  node backend/auto-complete-notify.test.js — exits non-zero on failure.
-//
-// Drives the REAL markHoursCompleteIfNeeded with in-memory fakes (no DB).
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 
@@ -57,7 +52,6 @@ const baseDoc = (over = {}) => {
 };
 
 (async () => {
-  // ── 1. Live-clock auto-complete → completed + both notified ───────────────
   {
     notificationLog.length = 0;
     const doc = baseDoc();
@@ -69,7 +63,6 @@ const baseDoc = (over = {}) => {
     check("1. exactly one completion notice per side", notificationLog.filter((n) => String(n.user) === "cust1" && n.type === "booking_completed").length === 1 && notificationLog.filter((n) => String(n.user) === "cook1" && n.type === "booking_completed").length === 1, `n=${notificationLog.length}`);
   }
 
-  // ── 2. Idempotent: second pass notifies nobody again ──────────────────────
   {
     notificationLog.length = 0;
     const doc = baseDoc({ status: "completed", hoursCompleted: true });
@@ -77,7 +70,6 @@ const baseDoc = (over = {}) => {
     check("2. no duplicate completion notices", notificationLog.length === 0, `n=${notificationLog.length}`);
   }
 
-  // ── 3. Session still running → nothing happens ────────────────────────────
   {
     notificationLog.length = 0;
     const doc = baseDoc({ serviceEndsAt: new Date(Date.now() + H) });
@@ -85,7 +77,6 @@ const baseDoc = (over = {}) => {
     check("3. running session untouched, silent", doc.status === "in_progress" && notificationLog.length === 0, `${doc.status}/${notificationLog.length}`);
   }
 
-  // ── 4. F-11: unpaid arrival-only never auto-completes ─────────────────────
   {
     notificationLog.length = 0;
     const doc = baseDoc({

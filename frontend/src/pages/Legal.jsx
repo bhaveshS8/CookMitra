@@ -6,8 +6,6 @@ const SUPPORT_EMAIL = "contactuscookmitra@gmail.com";
 const SUPPORT_PHONE = "+91 9322321831";
 const UPDATED = "September 2026";
 
-// Shared layout for the compliance pages Razorpay requires merchants to
-// publish: Terms, Privacy, Refunds/Cancellation, and Contact.
 const LegalShell = ({ icon: Icon, eyebrow, title, intro, children }) => (
   <div className="dashboard-container legal-page">
     <Link to="/" className="back-link-bar">

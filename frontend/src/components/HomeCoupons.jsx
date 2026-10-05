@@ -3,10 +3,6 @@ import { Link } from "react-router-dom";
 import API from "../api/axios";
 import { Copy, Check, BadgePercent, Sparkles, ArrowRight } from "lucide-react";
 
-// "Festive Offers" section on the home page — lists every currently usable
-// coupon from GET /api/coupons/active (admin-managed via the dashboard).
-// Renders nothing when the backend is unreachable or there are no live offers,
-// so the home page stays clean instead of showing an empty section.
 const HomeCoupons = () => {
   const [coupons, setCoupons] = useState([]);
   const [copiedCode, setCopiedCode] = useState(null);
@@ -15,15 +11,12 @@ const HomeCoupons = () => {
     let alive = true;
     API.get("/coupons/active")
       .then((res) => {
-        // Tolerate the paginated envelope ({ data, pagination }) as well as
-        // the bare array, so ?page/limit use can never blank the section.
         const list = Array.isArray(res?.data) ? res.data : res?.data?.data;
         if (alive && Array.isArray(list)) {
           setCoupons(list.filter((c) => c && c.code));
         }
       })
       .catch(() => {
-        /* backend down — hide the section entirely */
       });
     return () => {
       alive = false;
@@ -36,7 +29,6 @@ const HomeCoupons = () => {
     try {
       await navigator.clipboard.writeText(code);
     } catch {
-      /* clipboard blocked — still show feedback */
     }
     setCopiedCode(code);
     setTimeout(() => setCopiedCode((c) => (c === code ? null : c)), 1800);
@@ -49,11 +41,6 @@ const HomeCoupons = () => {
       : date.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
   };
 
-  // Customer-facing cards never advertise the restrictive terms — no rupee
-  // cap ("up to ₹70"), no per-customer limit ("one per customer"). The limits
-  // still apply at checkout, but the card headline stays a clean % OFF.
-  // The copy lives in the DB description (admin-editable), so strip it at
-  // render time instead of trusting stored text.
   const cleanCouponDescription = (text) => {
     const cleaned = String(text || "")
       .replace(/\s*\bup\s*to\s*₹\s*[\d,]+/gi, "")

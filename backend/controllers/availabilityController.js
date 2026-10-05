@@ -3,15 +3,6 @@ const Booking = require("../models/Booking");
 const CookProfile = require("../models/CookProfile");
 const { getDayWindows, getDayBookings, computeStartOptions, suggestDurations, parseDay, resolveCookAvailability, timeToMinutes, findContainingWindow, findOverlapBooking, dayBounds, activeSlotMatch, resolveCookWindows } = require("../utils/slots");
 
-// Batched slot search — ONE request replaces the N+1 per-cook fan-out
-// (1 × GET /cooks + N × GET /availability/:cookId) the booking flow used
-// to fire from the browser. Same math, server-side: approved + available
-// cooks only, one bookings $in query for the whole day, in-memory slot
-// derivation per cook. Keeps 1000-user search spikes to ~3 DB round trips
-// instead of ~3 per cook.
-//
-// GET /api/availability/search?date=YYYY-MM-DD&durationHours=3&suggest=1
-// → { cooks: [{...profile, slots: [{_id,startTime,endTime,derived}]}], totalCooks, suggestions }
 exports.searchAvailability = async (req, res, next) => {
   try {
     const { date, durationHours } = req.query;
@@ -36,11 +27,6 @@ exports.searchAvailability = async (req, res, next) => {
       return res.status(400).json({ message: "durationHours must be between 0.5 and 12" });
     }
 
-    // Same discovery set as GET /cooks for guests: approved profiles whose
-    // account is live and who are currently marked available.
-    // Contact PII: the slot search needs names + suspension flags only —
-    // cook phones are shared post-accept via booking payloads, never in
-    // bulk discovery (this endpoint has no auth).
     let cooks = await CookProfile.find({ approvalStatus: "approved" })
       .populate("user", "name status")
       .sort({ createdAt: -1 })
@@ -55,11 +41,6 @@ exports.searchAvailability = async (req, res, next) => {
     );
     cooks = cooks.filter((_, i) => flags[i]);
 
-    // One bookings lookup for every cook on that day (indexed
-    // {cook,date,…}), then pure in-memory derivation per cook. Each cook's
-    // own published working hours are applied in memory (resolveCookWindows)
-    // so the batched search costs no extra queries while still respecting the
-    // schedule a cook actually agreed to.
     const { start: dayStart, end: dayEnd } = dayBounds(date);
     const cookUserIds = cooks.map((c) => c.user?._id || c.user);
     const allBookings = await Booking.find({
@@ -93,8 +74,6 @@ exports.searchAvailability = async (req, res, next) => {
       }
     });
 
-    // Recovery hints when nothing fits: shorter sessions that DO fit,
-    // unioned across cooks (same helper the per-cook endpoint uses).
     let suggestions = [];
     if (
       withSlots.every((c) => c.slots.length === 0) &&
@@ -125,9 +104,6 @@ exports.getAvailability = async (req, res, next) => {
   try {
     const { date, durationHours, startTime, endTime } = req.query;
 
-    // Accept either a User id or a CookProfile id — Availability.cook stores
-    // the user id, so a bare profile id would otherwise match nothing and
-    // every slot search would come back empty ("no slots").
     let cookId = req.params.cookId;
     let profile = null;
     try {
@@ -136,21 +112,15 @@ exports.getAvailability = async (req, res, next) => {
       ).lean();
       if (profile?.user) cookId = profile.user.toString();
     } catch {
-      // not a profile id — use the param as a user id
     }
     if (!profile) {
       profile = await CookProfile.findOne({ user: cookId }).select(
         "availabilityStatus unavailableDate approvalStatus"
       ).lean();
     }
-    // A cook who has toggled "unavailable" exposes no slots until they flip
-    // back or the next day begins.
     if (profile && !(await resolveCookAvailability(profile))) {
       return res.json([]);
     }
-    // Mirror getAvailableSlots: unapproved / suspended cooks expose no
-    // public slots (the cook themself and admins still see the raw list).
-    // Without this, per-cook probes answer for cooks the listing hides.
     {
       const viewerAdmin = req.user && String(req.user.role).toUpperCase() === "ADMIN";
       const viewerSelf = req.user?.id != null && String(req.user.id) === String(cookId);
@@ -161,8 +131,6 @@ exports.getAvailability = async (req, res, next) => {
           const cookUser = await User.findById(cookId).select("status").lean();
           suspended = !cookUser || cookUser.status === "suspended";
         } catch {
-          // fail-closed below only when we know the profile is unapproved;
-          // an unreadable account record must not block a valid cook.
           suspended = false;
         }
         if (profile.approvalStatus !== "approved" || suspended) {
@@ -173,7 +141,6 @@ exports.getAvailability = async (req, res, next) => {
 
     const filter = { cook: cookId, status: "available" };
     if (date) {
-      // IST business-day range (F-08) — matches how slots are stored.
       const bounds = dayBounds(date);
       if (!bounds) {
         return res.status(400).json({ message: "Invalid date" });
@@ -183,19 +150,11 @@ exports.getAvailability = async (req, res, next) => {
 
     const slots = await Availability.find(filter).sort({ date: 1, startTime: 1 }).lean();
 
-    // Duration-aware mode: derive bookable start times sized to the input
-    // service hours (open windows minus already-booked intervals).
-    // Exact-window mode (?startTime=&endTime=): answer whether that single
-    // interval is free — { free, reason } — so the booking flow can
-    // double-check a slot before creating the request.
     const dur = durationHours != null && durationHours !== "" ? Number(durationHours) : null;
     if ((dur != null || startTime != null || endTime != null) && date) {
       if (dur != null && (!Number.isFinite(dur) || dur < 0.5 || dur > 12)) {
         return res.status(400).json({ message: "durationHours must be between 0.5 and 12" });
       }
-      // Universal full-day availability: always derive from the full service
-      // day — published windows are informational only and never restrict
-      // bookability; existing bookings (fetched below) are the only blockers.
       const windows = await getDayWindows(cookId, date);
       const bookings = await getDayBookings(cookId, date);
       if (startTime != null || endTime != null) {
@@ -216,16 +175,10 @@ exports.getAvailability = async (req, res, next) => {
         return res.json({ free: true });
       }
       if (dur == null) {
-        // Exact-window-only query already returned above; without a duration
-        // there are no start options to derive — fall through to raw slots.
         return res.json(slots);
       }
       const options = computeStartOptions(windows, bookings, dur);
       const shaped = options.map((o) => ({ _id: `${o.startTime}-${o.endTime}`, ...o, derived: true }));
-      // Opt-in recovery hint: when nothing fits, name shorter session lengths
-      // that DO fit (computed from the same in-memory windows — no extra
-      // queries) so the client can offer one-tap retries. Shape is unchanged
-      // unless suggest=1 is passed.
       if (req.query.suggest === "1" || req.query.suggest === "true") {
         const suggestions = options.length ? [] : suggestDurations(windows, bookings, dur);
         return res.json({ slots: shaped, suggestions });
@@ -252,10 +205,6 @@ exports.setAvailability = async (req, res, next) => {
     if (sMin == null || eMin == null || eMin <= sMin) {
       return res.status(400).json({ message: "End time must be after start time" });
     }
-    // Overlap check, not exact-match: a stored 09:00–12:00 window must also
-    // block a new 10:00–11:00 window (and vice versa), not just an identical
-    // start time.
-    // IST business-day range (F-08) — matches stored slot dates.
     const bounds = dayBounds(day);
     const sameDay = await Availability.find({
       cook: req.user.id,

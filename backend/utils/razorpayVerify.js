@@ -1,12 +1,7 @@
-// Shared Razorpay verification — HMAC proves a triple is genuine, but only a
-// server-side fetch proves the money actually moved for THIS booking.
-// Enforced whenever the gateway client is configured; callers fail closed
-// when verification is unavailable.
 const { razorpay: razorpayClient, isConfigured } = require("../config/razorpay");
 
 const expectedCurrency = () => process.env.RAZORPAY_CURRENCY || "INR";
 
-// Order must charge exactly this booking's fee (blocks cheap-order replay).
 const assertRazorpayOrderAmount = async (orderId, expectedPaise) => {
   if (!isConfigured || !razorpayClient) return null;
   let order;
@@ -21,9 +16,6 @@ const assertRazorpayOrderAmount = async (orderId, expectedPaise) => {
   return null;
 };
 
-// Payment must be captured (not merely authorized/failed), for the expected
-// amount and currency, and belong to the submitted order. Returns null when
-// OK, otherwise a client-facing error message.
 const assertRazorpayPaymentCaptured = async (
   orderId,
   paymentId,

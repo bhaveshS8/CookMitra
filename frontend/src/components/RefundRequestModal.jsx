@@ -5,8 +5,6 @@ import { useShowToast } from "../store/hooks";
 import { formatCurrency, formatDate, formatTime12 } from "../utils/constants";
 import { AlertCircle, Loader2, Receipt, X } from "lucide-react";
 
-// Mirror of REFUND_REASONS on the server (refundController) — the value sent
-// is the label itself. The amount is never sent: the backend computes it.
 const REASONS = [
   "Service was not provided",
   "Cook did not arrive",
@@ -28,10 +26,6 @@ const prettyService = (s) =>
     .trim()
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
-// RefundRequestModal — customer files a post-service refund request.
-// Eligibility + amount come from GET /bookings/:id/refund-eligibility (the
-// parent passes it in); the move is POST /bookings/:id/refund-request
-// { reason, note? }. Nothing here decides money — the server does.
 const RefundRequestModal = ({ booking, eligibility, onClose, onRequested }) => {
   const showToast = useShowToast();
   const [reason, setReason] = useState("");
@@ -43,7 +37,6 @@ const RefundRequestModal = ({ booking, eligibility, onClose, onRequested }) => {
   const paidAmount = eligibility?.paidAmount || booking?.payment?.paidAmount || booking?.amount || 0;
   const refundable = eligibility?.refundableAmount || paidAmount || 0;
 
-  // Close on Escape (unless filing) and lock the page scroll.
   useEffect(() => {
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -88,8 +81,6 @@ const RefundRequestModal = ({ booking, eligibility, onClose, onRequested }) => {
     if (!submitting) onClose?.();
   };
 
-  // Portaled to document.body: escapes .main-content's pageIn stacking
-  // context so the sticky navbar can never paint over the dialog.
   return createPortal(
     <div className="login-modal-overlay" onClick={close}>
       <div

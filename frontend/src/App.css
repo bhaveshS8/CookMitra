@@ -1,7 +1,3 @@
-/* ==========================================================================
-   Cook Mitra — global stylesheet.
-   Imports the modular design system (see /src/styles).
-   ========================================================================== */
 
 @import "./styles/base.css";
 @import "./styles/navbar.css";

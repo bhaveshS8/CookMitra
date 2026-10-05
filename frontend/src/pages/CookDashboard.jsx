@@ -16,9 +16,6 @@ import CookPayoutPanel from "../components/CookPayoutPanel";
 import CookReferralCard from "../components/CookReferralCard";
 import { Check, XCircle, BellRing, ArrowRight, Star, MapPin, Navigation, CalendarDays, CalendarCheck, CalendarClock, Inbox, History, UserRound, Users, Soup, Wallet, ChefHat, AlertCircle, ShieldCheck } from "lucide-react";
 
-// Customer location summary for a cook's booking card: prefer the structured
-// addressDetails (flat/society, landmark, city); fall back to the free-text
-// address for older bookings. Pairs with the maps link below it.
 const customerLocationLabel = (booking) => {
   const d = booking?.addressDetails || {};
   const primary =
@@ -31,13 +28,7 @@ const customerLocationLabel = (booking) => {
 
 const CookDashboard = () => {
   const { data: bookings, loading: loadingBookings, refreshing: refreshingBookings, error: bookingError, refetch: refetchBookings } = useFetch("/bookings/cook");
-  // Find-Cook broadcast: unassigned REQUESTED bookings this cook is eligible
-  // for. Polled with the same tick below; each pops the Accept/Ignore
-  // dialog exactly once (same queue as direct requests).
   const { data: broadcastRequests, refetch: refetchBroadcast } = useFetch("/bookings/cook/requests");
-  // Payment-gated schedule (backend-enforced): ONLY paid + schedule-eligible
-  // bookings for the IST day. Accepted-but-unpaid never appears here — it
-  // lives in Upcoming as "Awaiting payment" until the backend verifies pay.
   const { data: scheduledToday, refetch: refetchToday } = useFetch("/bookings/cook/schedule?day=today");
   const { data: scheduledTomorrow, refetch: refetchTomorrow } = useFetch("/bookings/cook/schedule?day=tomorrow");
   const { data: cookProfile, loading: loadingProfile, refetch: refetchCookProfile } = useFetch("/cooks/me");
@@ -46,35 +37,20 @@ const CookDashboard = () => {
   const showToast = useShowToast();
   const user = useSelector((s) => s.auth.user);
   const navigate = useNavigate();
-  // Live local day: keeps the Today/Tomorrow badges correct across midnight
-  // even when the dashboard tab stays open (polling pauses in hidden tabs).
   const today = useLocalDay();
-  // Cooks land on the Today tab — today's jobs are what matter on open.
   const [view, setView] = useState("today");
   const [cancellingId, setCancellingId] = useState(null);
   const [pendingCancelId, setPendingCancelId] = useState(null);
-  // Booking id currently being accepted/ignored straight from its card.
   const [actingOn, setActingOn] = useState(null);
   const [requestModalBooking, setRequestModalBooking] = useState(null);
-  // Hero photo health: a stored photoUrl can go stale (e.g. server uploads
-  // wiped by a redeploy without a persistent volume) — fall back to the
-  // initial instead of showing a broken-image icon.
   const [photoOk, setPhotoOk] = useState(true);
   useEffect(() => setPhotoOk(true), [cookProfile?.photoUrl]);
   const seenHoursDone = useRef(new Set());
   const firstLoadDone = useRef(false);
-  // Auto-popup bookkeeping: ids of `requested` bookings already surfaced, so
-  // each new request pops the Accept/Decline dialog exactly once.
   const seenRequestIds = useRef(new Set());
   const requestsInit = useRef(false);
-  // Ids this cook already acted on / dismissed this session. Bridges the
-  // refetch gap: a just-ignored broadcast request is still `requested` in
-  // stale state, so the queue must not re-pop it before the server truth
-  // (ignored → hidden) arrives.
   const handledRequestIds = useRef(new Set());
 
-  // Cooks miss the 5-minute window without OS-level pings — ask once for
-  // browser-notification permission so new requests can alert even loudly.
   useEffect(() => {
     try {
       if ("Notification" in window && Notification.permission === "default") {
@@ -82,15 +58,9 @@ const CookDashboard = () => {
         if (p && typeof p.catch === "function") p.catch(() => {});
       }
     } catch {
-      // optional
     }
   }, []);
 
-  // Poll bookings + broadcast requests + payment-gated schedule so new
-  // requests pop up and paid bookings land in Today/Tomorrow without
-  // refresh. 15s + hidden-tab pause: fast enough for the 5-minute accept
-  // window, but a dashboard left open in a background tab stops hitting
-  // the API entirely.
   useEffect(() => {
     const tick = () => {
       if (!document.hidden) {
@@ -114,11 +84,6 @@ const CookDashboard = () => {
     refetchTomorrow();
   };
 
-  // Real-time booking flow (SSE → realtime-booking-* DOM events, mounted once
-  // in App): a new request refetches instantly so the popup appears without
-  // waiting for the 15s poll; an assignment/expiry elsewhere closes/disables
-  // THIS cook's open popup immediately and refreshes the cards so stale
-  // Accept buttons never stay actionable. Polling above stays as fallback.
   const modalIdRef = useRef(null);
   modalIdRef.current = requestModalBooking?._id || null;
   useEffect(() => {
@@ -146,7 +111,6 @@ const CookDashboard = () => {
     const onAssigned = (e) => {
       const d = e?.detail || {};
       const id = d.bookingId ? String(d.bookingId) : null;
-      // My own win already closed the modal with a success toast — stay quiet.
       const wonByMe = myId && d.assignedCookId && String(d.assignedCookId) === myId;
       closeIfOpen(
         id,
@@ -160,7 +124,6 @@ const CookDashboard = () => {
     };
     const onIgnored = (e) => {
       const d = e?.detail || {};
-      // Only my own ignore (e.g. from another tab) affects my queue.
       if (myId && d.cookId && String(d.cookId) === myId) {
         refetchBroadcast();
       }
@@ -178,8 +141,6 @@ const CookDashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?._id, user?.id]);
 
-  // Alarm once per booking when hours complete (skip state that already
-  // existed on first load to avoid noise).
   useEffect(() => {
     if (!bookings?.length) return;
     if (!firstLoadDone.current) {
@@ -205,14 +166,11 @@ const CookDashboard = () => {
             });
           }
         } catch {
-          // optional
         }
       }
     });
   }, [bookings, showToast]);
 
-  // Clicking anywhere on a booking card (except its own buttons/links)
-  // opens that booking's details page.
   const openBooking = (e, bookingId) => {
     if (e.target.closest("button, a, input, select, textarea")) return;
     navigate(`/bookings/${bookingId}`);
@@ -240,11 +198,6 @@ const CookDashboard = () => {
     }
   };
 
-  // Direct Accept / Ignore from the booking card itself (same endpoints
-  // as the request modal). Closes the modal when it shows this booking and
-  // queues the next waiting request, so stacked arrivals are each answered.
-  // Ignore on a broadcast request keeps the customer's booking REQUESTED
-  // (server) — the card just drops off this cook's queue via refetch.
   const handleRequestAction = async (booking, action) => {
     if (actingOn || !booking?._id) return;
     setActingOn(booking._id);
@@ -265,7 +218,6 @@ const CookDashboard = () => {
       popNextPendingRequest(booking._id);
     } catch (err) {
       const gone = err.response?.status === 410 || err.response?.status === 409;
-      // A lost accept race tells the truth: another cook already won it.
       showToast(
         err.response?.data?.code === "BOOKING_ALREADY_ASSIGNED"
           ? "This request has already been accepted by another cook."
@@ -273,9 +225,6 @@ const CookDashboard = () => {
         "error"
       );
       if (gone) {
-        // The request died meanwhile (expired / won by another cook / slot
-        // taken) — drop the dead row and move on instead of stranding it
-        // as actionable.
         handledRequestIds.current.add(String(booking._id));
         if (String(requestModalBooking?._id) === String(booking._id)) {
           setRequestModalBooking(null);
@@ -288,9 +237,6 @@ const CookDashboard = () => {
     }
   };
 
-  // Assigned ≠ scheduled: an ACCEPTED booking whose payment is still
-  // pending is "Awaiting Payment", never "Scheduled". Only backend-verified
-  // PAID bookings earn the Scheduled badge (and the Today/Tomorrow slots).
   const isPaidBooking = (b) => b?.payment?.status === "paid";
   const getStatusLabel = (booking) => {
     const status = typeof booking === "string" ? booking : booking?.status;
@@ -321,22 +267,11 @@ const CookDashboard = () => {
     }
   };
 
-  // Counts for the greeting + tabs. Broadcast (unassigned) requests count
-  // alongside direct ones — both need this cook's decision. Per-booking
-  // payment badges show earnings where they matter (on each card).
   const directPending = bookings?.filter((b) => b.status === "requested")?.length || 0;
   const broadcastPending = (broadcastRequests || []).filter((b) => b.status === "requested")?.length || 0;
   const pendingRequests = directPending + broadcastPending;
 
-  // Views: needs-action (new requests) vs today/tomorrow (that date, minus
-  // cancelled) vs upcoming (all live) vs previous (settled history).
-  // Expired holds never reach this list (the API hides them), so history is
-  // completed / cancelled / rejected only.
-  // Every tab shows newer bookings first (creation time, newest → oldest).
   const isPrevious = (b) => ["completed", "cancelled", "rejected"].includes(b.status);
-  // "Tomorrow" is always derived from the same live `today` string (rather
-  // than a second Date() call) so the tabs and the card badges use one
-  // midnight-aware source of truth.
   const tomorrowStr = (() => {
     const m = String(today || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!m) return localTomorrowStr();
@@ -348,8 +283,6 @@ const CookDashboard = () => {
   const isTodayBooking = (b) => getLocalDateStr(b?.date) === today;
   const isTomorrowBooking = (b) => getLocalDateStr(b?.date) === tomorrowStr;
   const isNotCancelled = (b) => b?.status !== 'cancelled';
-  // Newest bookings first in every tab. createdAt is the source of truth;
-  // ObjectId order is the tiebreak (also creation-ordered).
   const createdMs = (b) => {
     const t = new Date(b?.createdAt).getTime();
     return Number.isFinite(t) ? t : 0;
@@ -357,17 +290,9 @@ const CookDashboard = () => {
   const byNewest = (a, b) =>
     createdMs(b) - createdMs(a) ||
     String(b._id || "").localeCompare(String(a._id || ""));
-  // Schedule-eligible mirror of the backend rule (defense in depth — the
-  // /schedule endpoint already enforces this server-side): paid + a status
-  // that means scheduled. ACCEPTED+UNPAID is awaiting payment, never shown
-  // in Today/Tomorrow.
   const SCHEDULED_STATUSES = ["accepted", "confirmed", "in_progress", "completed"];
   const isScheduledBooking = (b) =>
     isPaidBooking(b) && SCHEDULED_STATUSES.includes(b?.status);
-  // needs-action shows BOTH direct requests and broadcast (Find-Cook)
-  // requests awaiting this cook — both carry Accept/Ignore actions.
-  // Today/Tomorrow render the backend's payment-gated schedule lists.
-  // Every other view lists only this cook's own (assigned) bookings.
   const scheduledTodayList = [...(scheduledToday || [])].filter(isScheduledBooking);
   const scheduledTomorrowList = [...(scheduledTomorrow || [])].filter(isScheduledBooking);
   const visibleBookings = (view === 'needs-action'
@@ -384,26 +309,18 @@ const CookDashboard = () => {
       if (view === 'needs-action') return b.status === 'requested';
       if (view === 'upcoming') return !isPrevious(b);
       if (view === 'previous') return isPrevious(b);
-      // 'all' (and any future view) shows every booking.
       return true;
     })
     .sort((a, b) =>
-      // Today/Tomorrow run in service order (startTime) — the schedule
-      // endpoint already returns them chronologically; every other tab
-      // shows newest first.
       view === 'today' || view === 'tomorrow'
         ? String(a.startTime || "").localeCompare(String(b.startTime || "")) || byNewest(a, b)
         : byNewest(a, b)
     );
   const previousCount = (bookings || []).filter(isPrevious).length;
-  // Tab badges count what the tab shows: the payment-gated schedule lists.
   const todayCount = scheduledTodayList.length;
   const tomorrowCount = scheduledTomorrowList.length;
   const upcomingCount = (bookings || []).filter((b) => !isPrevious(b)).length;
   const completedCount = bookings?.filter((b) => b.status === "completed")?.length || 0;
-  // Paid-out earnings (real gateway payments only — mirrors the server rule).
-  // Cancelled bookings are refunded to the customer, so their paid amounts
-  // are not earnings even though payment.status stays "paid".
   const totalEarned = (bookings || []).reduce(
     (s, b) =>
       b?.status !== "cancelled" && b.payment?.status === "paid" && b.payment?.razorpayPaymentId
@@ -420,19 +337,10 @@ const CookDashboard = () => {
   const firstName = user?.name?.split(" ")[0] || "Chef";
   const approval = cookProfile?.approvalStatus;
 
-  // Loud alert for a (new) booking request: alarm sound only — the
-  // Accept/Decline request popup already shows the details, so no
-  // message toast / OS notification on top of it.
   const alertNewRequest = () => {
     playAlarmSound();
   };
 
-  // Auto-popup: whenever a new `requested` booking appears in the polled
-  // lists (direct + Find-Cook broadcast), open it in the Accept/Decline
-  // dialog automatically so the cook never misses the 5-minute window.
-  // While a dialog is already open the newcomer only rings (no yanking the
-  // cook mid-decision) and is queued — closing the dialog pops the next
-  // waiting request.
   useEffect(() => {
     if (!bookings && !broadcastRequests) return;
     const requested = [...(bookings || []), ...(broadcastRequests || [])]
@@ -441,8 +349,6 @@ const CookDashboard = () => {
     if (!requestsInit.current) {
       requestsInit.current = true;
       if (!requested.length) return;
-      // Seed everything except the newest as seen, then pop the newest so an
-      // already-waiting request greets the cook on login too.
       requested.slice(1).forEach((b) => seenRequestIds.current.add(String(b._id)));
       const newest = requested[0];
       seenRequestIds.current.add(String(newest._id));
@@ -460,15 +366,11 @@ const CookDashboard = () => {
       setRequestModalBooking(newest);
       alertNewRequest();
     } else {
-      // Dialog busy — ring so the queued request isn't missed (no message
-      // popup; the next request dialog pops as soon as this one closes).
       playAlarmSound();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookings, broadcastRequests]);
 
-  // After a dialog closes (accept / decline / dismiss), pop the next still-
-  // pending request so stacked arrivals are each answered in turn.
   const popNextPendingRequest = (excludeId) => {
     const next = [...(bookings || []), ...(broadcastRequests || [])]
       .filter(
@@ -480,7 +382,6 @@ const CookDashboard = () => {
       .sort(byNewest)[0];
     if (next) {
       seenRequestIds.current.add(String(next._id));
-      // Defer a tick so the current dialog's close animation/state settles.
       setTimeout(() => {
         setRequestModalBooking(next);
         alertNewRequest();
@@ -490,7 +391,6 @@ const CookDashboard = () => {
 
   return (
     <div className="dashboard-container cook-dash">
-      {/* Hero — greeting, verification, rating, availability */}
       <div className="cook-modern-hero cook-hero">
         <div className="cook-modern-hero-inner">
           <Link
@@ -560,7 +460,6 @@ const CookDashboard = () => {
         </div>
       </div>
 
-      {/* Stat shortcuts */}
       <div className="cook-stats-grid">
         <button type="button" className="cook-stat-card cook-stat-mob-hide" onClick={() => setView("needs-action")}>
           <div className="cook-stat-icon amber">
@@ -580,8 +479,6 @@ const CookDashboard = () => {
             <div className="cook-stat-label">Upcoming</div>
           </div>
         </button>
-        {/* Earned is a read-only figure, not a shortcut — deliberately not a
-            button, so it cannot navigate anywhere; it just shows money earned. */}
         <Link
           className="cook-stat-card cook-stat-static"
           to="/cook/earnings"
@@ -623,7 +520,6 @@ const CookDashboard = () => {
         </div>
       )}
 
-      {/* Tabs */}
       <div className="cook-tabs">
         <button
           className={`cook-tab ${view === "needs-action" ? "active" : ""}`}
@@ -670,14 +566,11 @@ const CookDashboard = () => {
         </button>
       </div>
 
-      {/* BOOKINGS VIEWS */}
       {view !== "profile" && view !== "reports" && (
         <div>
 
-          {/* First-load spinner — only shown before any data has arrived */}
           {loadingBookings && <p className="cook-loading-text">Loading bookings...</p>}
 
-          {/* Subtle background-sync pill — data stays visible, just a quiet indicator */}
           {!loadingBookings && refreshingBookings && (
             <div className="cook-syncing-pill" aria-live="polite" aria-label="Syncing bookings">
               <span className="cook-syncing-dot" />
@@ -687,7 +580,6 @@ const CookDashboard = () => {
 
           {bookingError && <p className="error">{bookingError}</p>}
 
-          {/* Show the list whenever we have data — even while a background refresh is running */}
           {bookings && bookings.length > 0 ? (
             visibleBookings.length > 0 ? (
             <div className="bookings-list-modern cook-bookings-grid">
@@ -840,11 +732,6 @@ const CookDashboard = () => {
                       <Link to={`/bookings/${booking._id}`} className="btn btn-outline btn-sm">
                         {booking.serviceStartedAt ? "View more" : "Start with OTP"} <ArrowRight size={15} />
                       </Link>
-                      {/* No manual complete here by design — bookings complete
-                          automatically once the service hours end. Cancel is
-                          available until 30 minutes before the scheduled start
-                          (mirror of the backend cutoff — the button hides once
-                          locked; schedule-reached alone is not a start). */}
                       {!booking.serviceStartedAt && !isCancelLocked(booking) && (
                         <button
                           className="btn btn-danger-outline btn-sm"
@@ -923,7 +810,6 @@ const CookDashboard = () => {
         </div>
       )}
 
-      {/* REPORTS TAB: complaints the cook filed — status + admin replies. */}
       {view === "reports" && (
         <div>
           <h3 style={{ fontSize: "1.1rem", marginBottom: "0.25rem" }}>My reports to support</h3>
@@ -999,7 +885,6 @@ const CookDashboard = () => {
         </div>
       )}
 
-      {/* PROFILE TAB: cook profile + working hours + payouts + recent reviews */}
       {view === "profile" && (
         <div>
           <CookProfileManager onSaved={() => refetchCookProfile()} />
@@ -1012,10 +897,6 @@ const CookDashboard = () => {
         </div>
       )}
 
-      {/* Booking request modal — auto-pops for every new `requested`
-          booking, direct or Find-Cook broadcast (polling + queue above).
-          Lives here so it sees requestModalBooking state + refetches.
-          Shows the job summary with Accept / Ignore buttons. */}
       <BookingRequestModal
         open={!!requestModalBooking}
         onClose={() => {
@@ -1026,8 +907,6 @@ const CookDashboard = () => {
         }}
         booking={requestModalBooking}
         onAction={() => {
-          /* Modal handles its own API call + toast + close; we just
-             refetch here in case parent state is stale. */
           const actedId = requestModalBooking?._id;
           if (actedId) handledRequestIds.current.add(String(actedId));
           refetchAllRequests();
@@ -1096,8 +975,6 @@ const RecentReviewsPreview = ({ reviews, loading }) => {
   );
 };
 
-// Profile tab reuses the shared cook profile form (same as the Cook Setup
-// page) so the two can never diverge again.
 const CookProfileManager = ({ onSaved }) => {
   return (
     <div className="cook-profile-wrap">

@@ -2,9 +2,6 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// Local disk storage for cook verification documents (Aadhaar / PAN / photo).
-// Directory comes from utils/storage (UPLOAD_DIR-aware) so writer, static
-// mount and signed-URL viewer can never disagree on the location (F-01).
 const { uploadDir } = require("../utils/storage");
 fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -27,9 +24,6 @@ const ALLOWED_MIME = new Set([
   "application/pdf",
 ]);
 
-// MIME types are client-supplied and spoofable, so enforce the file extension
-// too — otherwise an .html/.svg upload passes as image/jpeg and is served
-// back verbatim under /uploads (stored XSS / content spoofing).
 const ALLOWED_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".pdf"]);
 
 const fileFilter = (req, file, cb) => {
@@ -40,14 +34,6 @@ const fileFilter = (req, file, cb) => {
   cb(err);
 };
 
-// Content validation: MIME type + extension are both client-controlled, so
-// verify actual file magic bytes AFTER multer writes to disk, and reject
-// polyglots that embed executable markup (HTML/JS/PHP) in an image/PDF
-// container. Runs as route middleware after the multer wrapper; invalid
-// files are deleted and the request is refused with 400. (Residual: files
-// are not re-encoded — a purpose-built image-processing step would be the
-// next layer; the Browser never executes these thanks to nosniff +
-// extension allowlist + auth gating on identity docs.)
 const BYTE = (buf, ...sig) => sig.every((b, i) => buf[i] === b);
 const SIGNATURE_CHECKS = {
   ".jpg": (buf) => BYTE(buf, 0xff, 0xd8, 0xff),
@@ -59,8 +45,6 @@ const SIGNATURE_CHECKS = {
     buf.toString("ascii", 8, 12) === "WEBP",
   ".pdf": (buf) => buf.length >= 5 && buf.toString("ascii", 0, 5) === "%PDF-",
 };
-// Executable-markup markers scanned (case-insensitive) in the file header —
-// a genuine photo/PDF never starts with these.
 const DANGEROUS_MARKERS = ["<html", "<script", "<?php", "<%", "<!doctype", "mz\x90\x00"];
 const HEADER_SCAN_BYTES = 4096;
 
@@ -68,7 +52,6 @@ const unlinkQuiet = (p) => {
   try {
     if (p) fs.unlinkSync(p);
   } catch {
-    // best-effort cleanup
   }
 };
 
@@ -113,8 +96,6 @@ const validateUploadedContent = (req, res, next) => {
 const cookDocUpload = multer({
   storage,
   fileFilter,
-  // 2 MB per file, at most 3 files / 5 fields per request — a single-file
-  // cap alone still allows disk-fill via many small parts.
   limits: { fileSize: 2 * 1024 * 1024, files: 3, fields: 5 },
 });
 

@@ -1,24 +1,3 @@
-// refund-hardening.test.js — adversarial regression suite for the refund
-// hardening pass (stubbed controllers, no DB).
-// Run:  node backend/refund-hardening.test.js  — exits non-zero on failure.
-//
-// Covers:
-//  1. finance.parseRupeeAmount — strict amount parser (booleans/strings/NaN/
-//     Infinity/decimals/zero/negatives/objects).
-//  2. approveRefund — malformed amounts refused; an already-created gateway
-//     refund is ADOPTED instead of creating a second one; an ambiguous
-//     gateway response is never recorded as a completed refund.
-//  3. markRefundSettled — fails closed when the gateway is unreachable,
-//     adopts an existing gateway refund instead of paying twice, and records
-//     the normalized reference key on the manual path.
-//  4. reconcileRefund — adopts an existing gateway refund, returns the row to
-//     the decision queue when the gateway holds none, 503 when unreachable,
-//     and refuses illegal states.
-//  5. Ledger idempotency across adoption paths (one economic event → one row).
-//  6. Static UI wiring checks (processing rows + recovery action + clawback
-//     decision exist in the admin console).
-//
-// Gateway env BEFORE requires (config snapshots at load).
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 process.env.RAZORPAY_KEY_ID = "rk_test_abcdef123456";
 process.env.RAZORPAY_KEY_SECRET = "s3cr3tK3yV4lu3AbCdEfGh";
@@ -48,7 +27,6 @@ const makeRes = () => {
 };
 const next = (err) => { if (err) throw err || new Error("next()"); };
 
-// ── fakes ────────────────────────────────────────────────────────────────────
 let store = new Map();
 let ledgerRows = [];
 let ledgerKeys = new Set();
@@ -95,8 +73,6 @@ const mkDoc = (over = {}) => {
   const doc = {
     ...base,
     ...over,
-    // Sub-docs MERGE over the defaults (a partial `payment` override must not
-    // wipe razorpayPaymentId/testMode, exactly like a real booking doc).
     payment: { ...base.payment, ...(over.payment || {}) },
     payout: { ...base.payout, ...(over.payout || {}) },
     toObject() {
@@ -108,8 +84,6 @@ const mkDoc = (over = {}) => {
   return doc;
 };
 
-// Atomic-update emulation: honours the refundStatus guard ($in / equality) and
-// the payout-status $ne pin, applies dotted $set, pushes history.
 Booking.findOneAndUpdate = async (filter, update) => {
   const doc = store.get(String(filter._id));
   if (!doc) return null;
@@ -229,7 +203,6 @@ const reset = () => {
 
     console.log("\n═══ markRefundSettled: gateway guard ═══");
     {
-      // (a) Gateway unreachable → refuse to guess (503), nothing changes.
       reset();
       const doc = mkDoc({ payment: { refundStatus: "failed", refundAmount: 349 } });
       refundListImpl = async () => { throw new Error("network down"); };
@@ -239,7 +212,6 @@ const reset = () => {
       check("503 wrote no ledger row", ledgerRows.length === 0);
     }
     {
-      // (b) Gateway already holds the refund → adopt, never record a manual transfer.
       reset();
       const doc = mkDoc({ payment: { refundStatus: "processing", refundAmount: 349 } });
       refundListImpl = async () => ({ items: [{ id: "rf_gw", amount: 34900, status: "processed" }] });
@@ -251,7 +223,6 @@ const reset = () => {
       check("customer notified about the adopted refund", notifications.some((n) => String(n.user) === "cust1"));
     }
     {
-      // (c) Gateway holds none → manual settlement records the normalized key.
       reset();
       const doc = mkDoc({ payment: { refundStatus: "manual", refundAmount: 349 } });
       const r = makeRes();
@@ -262,7 +233,6 @@ const reset = () => {
       check("ledger keeps prevState + relatedKey", row?.prevState === "refund:manual" && row?.relatedKey === "manual-ref001", `${row?.prevState}/${row?.relatedKey}`);
     }
     {
-      // Invalid reference shapes never reach the DB.
       reset();
       const doc = mkDoc({ payment: { refundStatus: "manual", refundAmount: 349 } });
       for (const bad of ["A", "   ", "<script>x</script>", "AB\nCD", "X".repeat(121)]) {
@@ -271,7 +241,6 @@ const reset = () => {
         check(`reference ${JSON.stringify(String(bad).slice(0, 14))} refused`, r.statusCode === 400, `s=${r.statusCode}`);
       }
       check("no bad reference ever persisted", doc.payment.refundReference === undefined && doc.payment.refundStatus === "manual", String(doc.payment.refundReference));
-      // Duplicate-key race at the DB level fails closed (unique index).
       reset();
       const raced = mkDoc({ payment: { refundStatus: "manual", refundAmount: 349 } });
       const savedClaim = Booking.findOneAndUpdate;
@@ -284,7 +253,6 @@ const reset = () => {
 
     console.log("\n═══ reconcileRefund ═══");
     {
-      // (a) Adopts an existing gateway refund (and keeps the ledger key stable).
       reset();
       const doc = mkDoc({ payment: { refundStatus: "processing", refundAmount: 349 } });
       refundListImpl = async () => ({ items: [{ id: "rf_reconcile", amount: 34900, status: "processed" }] });
@@ -295,7 +263,6 @@ const reset = () => {
       check("reconcile notifies the customer once", notifications.filter((n) => String(n.user) === "cust1").length === 1);
     }
     {
-      // (b) Gateway holds no refund → back to pending, no ledger event.
       reset();
       const doc = mkDoc({ payment: { refundStatus: "processing", refundAmount: 349 } });
       const r = makeRes();
@@ -305,7 +272,6 @@ const reset = () => {
       check("history explains the re-queue", /no refund found/i.test(String(doc.statusHistory.map((h) => h.note).join(" "))));
     }
     {
-      // (c) Unreachable gateway → 503, untouched. (d–f) Illegal states.
       reset();
       const doc = mkDoc({ payment: { refundStatus: "failed", refundAmount: 349 } });
       refundListImpl = async () => { throw new Error("timeout"); };
@@ -332,7 +298,6 @@ const reset = () => {
       check("unknown booking -> 404", r.statusCode === 404, `s=${r.statusCode}`);
     }
     {
-      // (g) Idempotency: a pre-existing approve ledger row is never duplicated.
       reset();
       ledgerKeys.add("refund-approve:b1");
       ledgerRows.push({ idempotencyKey: "refund-approve:b1", type: "refund.approved", amount: 349 });
@@ -371,5 +336,4 @@ const reset = () => {
   }
 })();
 
-
-
+

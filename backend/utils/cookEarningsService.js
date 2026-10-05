@@ -1,5 +1,3 @@
-// Shared helpers for the Cook Partner earnings system.
-// Server-side only — frontend values are never trusted for money.
 
 const Booking = require("../models/Booking");
 const CookProfile = require("../models/CookProfile");
@@ -21,7 +19,6 @@ const audit = async ({ actor, actorRole, event, cook, refId, refModel, detail })
   try {
     await CookEventLog.create({ actor, actorRole, event, cook, refId, refModel, detail });
   } catch {
-    // audit never breaks the money path
   }
 };
 
@@ -29,9 +26,7 @@ const notifyCook = async ({ cookId, type, message, booking, link }) => {
   try {
     await Notification.create({ user: cookId, type, message, booking: booking || null, link: link || "" });
   } catch {
-    // non-fatal
   }
-  // Best-effort WhatsApp via the existing dispatcher (text only, no new system).
   try {
     const { sendWhatsAppText } = require("./whatsappApi");
     const User = require("../models/User");
@@ -39,11 +34,9 @@ const notifyCook = async ({ cookId, type, message, booking, link }) => {
     const phone = u?.phone || u?.mobile;
     if (phone) await sendWhatsAppText(phone, `Cook Mitra: ${message}`);
   } catch {
-    // non-fatal
   }
 };
 
-// Ensure the cook has a referral code (lazy mint, idempotent).
 const ensureReferralCode = async (cookUserId, cookName) => {
   let profile = await CookProfile.findOne({ user: cookUserId });
   if (!profile) return null;
@@ -66,8 +59,6 @@ const ensureReferralCode = async (cookUserId, cookName) => {
   return CookProfile.findOne({ user: cookUserId });
 };
 
-// Ensure a booking carries its immutable payout snapshot (§2).
-// Writes ONLY when missing — historical values are never recomputed.
 const ensureBookingPayoutSnapshot = async (booking) => {
   if (!booking) return booking;
   if (booking.payoutInfo?.finalCustomerPrice > 0 && booking.payoutInfo?.cookPayoutAmount > 0) {
@@ -108,8 +99,6 @@ const ensureBookingPayoutSnapshot = async (booking) => {
   }
 };
 
-// Verified bookings for referral qualification: completed + paid + real money
-// + OTP-started + arrived (same evidence bar as the payout gate).
 const countVerifiedBookings = async (cookUserId) =>
   Booking.countDocuments({
     cook: cookUserId,
@@ -120,7 +109,6 @@ const countVerifiedBookings = async (cookUserId) =>
     serviceStartedAt: { $exists: true, $ne: null },
   });
 
-// Ensure the 4 incentive enrollments exist for a cook (anchored at enrollment).
 const ensureIncentives = async (cookUserId) => {
   const profile = await CookProfile.findOne({ user: cookUserId });
   let start = profile?.incentiveEnrolledAt || profile?.createdAt || new Date();
@@ -131,7 +119,6 @@ const ensureIncentives = async (cookUserId) => {
         { $set: { incentiveEnrolledAt: start } }
       );
     } catch {
-      // non-fatal
     }
   }
   const existing = await CookIncentive.find({ cook: cookUserId }).select("code").lean();
@@ -159,7 +146,6 @@ const ensureIncentives = async (cookUserId) => {
   return CookIncentive.find({ cook: cookUserId }).sort({ target: 1 }).lean();
 };
 
-// Server-computed verified-lead count inside an incentive window (§9).
 const countVerifiedLeadsInWindow = async (cookUserId, startDate, endDate) =>
   CookLead.countDocuments({
     cook: cookUserId,
@@ -168,7 +154,6 @@ const countVerifiedLeadsInWindow = async (cookUserId, startDate, endDate) =>
     verifiedAt: { $gte: startDate, $lte: endDate },
   });
 
-// Refresh eligibility for all of a cook's incentives (backend authority).
 const refreshIncentiveEligibility = async (cookUserId, now = new Date()) => {
   const incentives = await ensureIncentives(cookUserId);
   const out = [];
@@ -189,7 +174,6 @@ const refreshIncentiveEligibility = async (cookUserId, now = new Date()) => {
     try {
       await CookIncentive.updateOne({ _id: inc._id }, { $set: update });
     } catch {
-      // non-fatal
     }
     if (eligible && inc.status === "in_progress") {
       await audit({

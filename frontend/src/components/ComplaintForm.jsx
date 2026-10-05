@@ -3,12 +3,6 @@ import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
 import { ShieldAlert, CheckCircle2, AlertCircle, Send } from "lucide-react";
 
-// Either side reports an issue about the other, filed against one of their
-// own bookings (the counterparty is derived server-side so nobody types ids
-// by hand).
-// Props: bookingId (required), filedBy ("cook" | "customer", default "cook"),
-// counterpartyName (optional, shown in the title),
-// onSubmitted(complaint) — optional callback after a successful filing.
 const CATEGORIES = {
   cook: [
     { value: "behaviour", label: "Rude / uncooperative behaviour" },

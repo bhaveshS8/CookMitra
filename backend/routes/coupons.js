@@ -12,9 +12,6 @@ const {
   deleteCoupon,
 } = require("../controllers/couponController");
 
-// Phase 11: coupon routes previously had zero route-level validation —
-// malformed admin bodies reached Mongoose as 500s and typeless preview input
-// flowed into discount math. Schemas below mirror the Coupon model.
 const SERVICE_TYPES = ["cook_for_me", "cook_with_me", "teach_me", "preparation_help"];
 const codeRule = (field = "code", optional = false) => {
   let r = body(field);
@@ -28,11 +25,6 @@ const codeRule = (field = "code", optional = false) => {
     .matches(/^[A-Za-z0-9]+$/)
     .withMessage("Coupon code may only contain letters and numbers");
 };
-// NOTE: .optional() must lead each chain — trailed after validators it does
-// NOT skip missing fields (every absent optional field 400s). Verified live.
-// All body fields are optional-style (only `code` is required on create):
-// flat vs percent coupons need different subsets, enforced by
-// createTypeCheck below — not by marking every field required.
 const couponBodyRules = () => {
   const O = (field) => body(field).optional();
   return [
@@ -61,8 +53,6 @@ const couponBodyRules = () => {
   ];
 };
 const idRule = param("id").isMongoId().withMessage("Invalid id");
-// Create-time cross-field rule: flat coupons need flatAmount, percent
-// coupons (the default) need percent. Type-level checks above still apply.
 const createTypeCheck = body().custom((_, { req }) => {
   const t = req.body?.discountType || "percent";
   if (t === "flat" && req.body?.flatAmount == null) {
@@ -74,11 +64,8 @@ const createTypeCheck = body().custom((_, { req }) => {
   return true;
 });
 
-// Public — promo codes are meant to be shared. The homepage billboard renders
-// whatever comes back here, so admin-created offers go live immediately.
 router.get("/active", listActiveCoupons);
 
-// Customer — preview a coupon against a live order amount (never mutates usage).
 router.post(
   "/validate",
   auth,
@@ -92,7 +79,6 @@ router.post(
   validateCoupon
 );
 
-// Admin — full management (list / create / edit / delete).
 router.get("/", auth, authorize("admin"), listCoupons);
 router.post("/", auth, authorize("admin"), [codeRule("code"), ...couponBodyRules(), createTypeCheck], validate, createCoupon);
 router.patch("/:id", auth, authorize("admin"), [idRule, codeRule("code", true), ...couponBodyRules()], validate, updateCoupon);

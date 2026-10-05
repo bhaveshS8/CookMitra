@@ -1,7 +1,3 @@
-// Admin Cancellations & Refunds console (§25).
-// Read + workflow actions (hold / under-review / note / detail). Money moves
-// only through the existing payoutController refund paths, which mirror
-// their outcomes onto cancellationInfo.refundStatus.
 
 const Booking = require("../models/Booking");
 const CancellationAudit = require("../models/CancellationAudit");
@@ -21,7 +17,6 @@ const WORKFLOW_STATUSES = [
   "NOT_APPLICABLE",
 ];
 
-// Tabs: All | Pending | Under Review | Approved | Processing | Processed | Held | Rejected.
 exports.listCancellations = async (req, res, next) => {
   try {
     const filter = {
@@ -87,7 +82,6 @@ exports.listCancellations = async (req, res, next) => {
   }
 };
 
-// Detail: booking + parties + payment + snapshot + audit + complaints (§20).
 exports.getCancellationDetail = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id)
@@ -142,7 +136,6 @@ const workflowAction = async ({ req, res, to, event, needReason }) => {
           : `Your refund request is ${labels[to] || "being processed"}${reason ? ` — ${reason}` : ""}.`,
     });
   } catch {
-    // non-fatal
   }
   const fresh = await Booking.findById(req.params.id);
   res.json(fresh);

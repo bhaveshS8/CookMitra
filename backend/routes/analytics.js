@@ -15,34 +15,8 @@ const {
   enumerateMonths,
 } = require("../utils/analytics");
 
-// Admin booking + financial analytics.
-//
-// Business definitions (single source of truth — see utils/analytics.js):
-// - total = ALL bookings in scope (every status, incl. future/unknown).
-// - active = requested+accepted+confirmed+in_progress.
-// - completed = completed. lost = cancelled+expired+rejected+unattended.
-// - Financial scope = real captured money only: payment.status=="paid" AND
-//   payment.testMode != true. Test-mode / zero-fee rows carry no real money.
-// - grossCollected = SUM(paidAmount fallback amount) over paid-real.
-// - refunds = SUM(refundAmount) only where refundStatus in
-//   [processed, manual] (failed/pending/processing/rejected move no money).
-// - netCollected = gross - refunds.
-// - platformEarnings/cookEarnings: gross commission/cookPayout shares scaled
-//   pro-rata by net/gross (rounded; cook = remainder so the two sum to net
-//   exactly). Refunded money belongs to neither party.
-// - cookPaid = SUM(payout.amount) where payout.status=="settled" (real money).
-// - cookPending = net cook entitlement on completed + paid-real + payout
-//   pending + refund in [none, rejected] (matches the payout queue gate).
-// - Hours: scheduledHours = valid 1..4h durations over all in-scope rows;
-//   completedHours = same filtered to status==completed.
-// - Trend groups by SCHEDULED service date (Booking.date) in Asia/Kolkata;
-//   the response states the dimension explicitly — never mixed with
-//   createdAt. ?dateField=created switches every scoped metric to creation
-//   date (stated in meta.filters).
-//
 // Security: auth + authorize("admin") enforced here (frontend hiding is not
 // security). ?from/?to/?dateField are strictly validated — no raw Mongo
-// operators from the query string ever reach the pipeline.
 
 const ALLOWED_DATE_FIELDS = new Set(["service", "created"]);
 
@@ -61,7 +35,6 @@ router.get("/bookings", auth, authorize("admin"), async (req, res, next) => {
         to: req.query.to,
         dateField: req.query.dateField,
       };
-      // Ignore the "all time" preset sentinel sent by the UI.
       if (
         (q.from == null || String(q.from).trim() === "" || String(q.from) === "all") &&
         (q.to == null || String(q.to).trim() === "" || String(q.to) === "all")
@@ -86,9 +59,6 @@ router.get("/bookings", auth, authorize("admin"), async (req, res, next) => {
     const hasScope = Object.keys(scopeMatch).length > 0;
     const matchStage = hasScope ? [{ $match: scopeMatch }] : [];
 
-    // One $facet = one collection scan for every widget (correctness first;
-    // admin-only low traffic, existing indexes on date/status/payment cover
-    // the pre-facet $match).
     const facetResult = await Booking.aggregate([
       ...matchStage,
       {
@@ -476,7 +446,6 @@ router.get("/bookings", auth, authorize("admin"), async (req, res, next) => {
     const completed = byStatus.completed || 0;
     const lost = LOST_STATUSES.reduce((a, s) => a + (byStatus[s] || 0), 0);
 
-    // ── Financials (integer rupees; Math.round only at the final ratio) ──
     const m = facet.money && facet.money[0];
     const rint = (v) => {
       const n = Math.round(Number(v) || 0);
@@ -489,7 +458,6 @@ router.get("/bookings", auth, authorize("admin"), async (req, res, next) => {
     const cookGross = m ? rint(m.cookGross) : 0;
     const refunds = m ? rint(m.refunded) : 0;
     const netCollected = Math.max(0, grossCollected - refunds);
-    // Pro-rata net split so platform + cook == net exactly.
     let platformEarnings = 0;
     let cookEarnings = 0;
     if (grossCollected > 0 && netCollected > 0) {
@@ -508,10 +476,6 @@ router.get("/bookings", auth, authorize("admin"), async (req, res, next) => {
     const settledPayoutCount = pp ? Math.max(0, Math.round(Number(pp.settledCount) || 0)) : 0;
 
     const pe = facet.pendingPayoutEntitlement && facet.pendingPayoutEntitlement[0];
-    // Pending entitlement: the queue only admits refund-free rows
-    // (refundStatus in [none, rejected]), so each row's net cook share is its
-    // full cookPayout snapshot — summed directly with NO global scaling
-    // (scaling by unrelated bookings' refunds would undervalue it).
     let cookPending = 0;
     let pendingPayoutCount = 0;
     if (pe) {
@@ -539,7 +503,6 @@ router.get("/bookings", auth, authorize("admin"), async (req, res, next) => {
     const unattendedRate = pct(byStatus.unattended || 0, totalBookings);
     const lostRate = pct(lost, totalBookings);
 
-    // Areas: facet already grouped by lowercased+trimmed city.
     const topAreas = (facet.areas || []).map((r) => ({
       area: displayCity(r.key),
       key: r.key,
@@ -578,8 +541,6 @@ router.get("/bookings", auth, authorize("admin"), async (req, res, next) => {
       bookings: Math.max(0, Math.round(Number(r.bookings) || 0)),
     }));
 
-    // Monthly trend: net = gross - refunded; zero-fill the requested window
-    // (or the data span when unfiltered, capped to a sane length).
     const monthRows = facet.months || [];
     const monthMap = new Map(
       monthRows.map((r) => [
@@ -594,7 +555,6 @@ router.get("/bookings", auth, authorize("admin"), async (req, res, next) => {
     );
     let monthlyTrend = [];
     if (range && range.fromStr && range.toStr) {
-      // Window derived from the filter bounds (month granularity, IST).
       const startKey = (() => {
         const d = new Date(range.from.getTime());
         const parts = new Intl.DateTimeFormat("en-CA", {
@@ -725,7 +685,6 @@ router.get("/bookings", auth, authorize("admin"), async (req, res, next) => {
           avgDuration,
           scheduledCount,
         },
-        // Legacy flat aliases (backward compatible with the previous UI).
         totalBookings,
         statusCounts: { ...byStatus },
         active,

@@ -5,8 +5,6 @@ import { useShowToast } from "../store/hooks";
 import { formatCurrency, formatDate } from "../utils/constants";
 import { Eye, Check, X, Pause, FileText, Ban } from "lucide-react";
 
-// Admin → Cancellations & Refunds (§25). Review workflow only — money moves
-// through the existing refund approve/reject/settle endpoints.
 const TABS = ["All", "Pending", "Under Review", "Approved", "Processing", "Processed", "Held", "Rejected"];
 
 const AdminCancellationPanel = () => {

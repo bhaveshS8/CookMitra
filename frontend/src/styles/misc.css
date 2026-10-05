@@ -1,8 +1,4 @@
-/* ==========================================================================
-   Misc chrome — icon buttons, admin tables, tracking niceties
-   ========================================================================== */
 
-/* Bell icon button (desktop nav) */
 .nav-icon-btn {
   width: 40px;
   height: 40px;
@@ -38,7 +34,6 @@
   box-shadow: var(--shadow-sm);
 }
 
-/* Tracking page location status */
 .loc-msg {
   display: inline-flex;
   align-items: center;
@@ -52,31 +47,23 @@
   padding: 0.5rem 0.8rem;
 }
 
-/* Auth-friendly brand box reuse */
 .auth-brand-badge svg { color: #fff; }
 
-/* Admin stat tables inside dossier (inline-table friendly) */
 table { border-collapse: collapse; width: 100%; }
 th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--slate-500); }
 td, th { padding: 0.7rem 0.5rem; }
 
-/* ---- Gap fillers (coverage audit) ---- */
 .error-message { color: var(--accent-rose); font-weight: 600; font-size: 0.9rem; }
 
-/* Cook dashboard wrapper */
 .cook-modern { max-width: 1200px; margin: 0 auto; padding: 1.75rem 1.5rem; }
 
-/* Hero floating "Live Tracking" title */
 .hero-v2-float-live-title { font-weight: 800; font-size: 0.9rem; line-height: 1.2; }
 
-/* How-it-works card header row */
 .how-card-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.35rem; }
 .how-card-header h3 { margin: 0; }
 
-/* Lead capture left copy */
 .lead-copy .section-title { margin-bottom: 0.6rem; }
 
-/* Login form layout — matches register form rhythm (0.85rem stack gap) */
 .login-form { display: flex; flex-direction: column; gap: 0.85rem; }
 .login-input {
   padding-left: 2.6rem;
@@ -95,16 +82,12 @@ td, th { padding: 0.7rem 0.5rem; }
   background: #fff;
 }
 
-/* Best-match card top row */
 .match-card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
 
-/* Note under slot chips (on-demand) */
 .slot-pay-note { color: var(--slate-500); font-size: 0.82rem; text-align: center; margin-top: 0.6rem; }
 
-/* Booking-flow action button */
 .bf-btn { min-width: 150px; }
 
-/* ---- Login prompt modal ---- */
 .login-modal-overlay {
   position: fixed;
   inset: 0;
@@ -123,9 +106,6 @@ td, th { padding: 0.7rem 0.5rem; }
   position: relative;
   width: 100%;
   max-width: 400px;
-  /* margin:auto (not just flex centering) so a card taller than the viewport
-     can still scroll from the very top — otherwise the head/close button
-     gets clipped out of reach on short laptop/tablet viewports. */
   margin: auto;
   background: #fff;
   border-radius: var(--radius-xl);
@@ -195,10 +175,6 @@ td, th { padding: 0.7rem 0.5rem; }
 }
 .login-modal-maybe:hover { color: var(--slate-700); }
 
-/* Shared dialog arrangement: laptop/tablet use the centered card above;
-   phones and small tablets go near-full-width so BookingRequestModal,
-   AddCookModal, CouponModal and LoginPromptModal all clear the navbar
-   with room to breathe and scroll when taller than the viewport. */
 @media (max-width: 560px) {
   .login-modal-overlay {
     padding: 0.75rem;
@@ -218,15 +194,12 @@ td, th { padding: 0.7rem 0.5rem; }
     margin: auto;
   }
 }
-/* Very small phones: reclaim overlay gutter so dialogs (incl. the cook's
-   booking-request popup) keep usable content width. */
 @media (max-width: 400px) {
   .login-modal-overlay { padding: 0.5rem; }
   .login-modal { padding: 1.75rem 1.1rem; }
   .add-cook-modal { padding: 1.4rem 1rem; }
 }
 
-/* ---- Add cook (admin) modal ---- */
 .add-cook-modal {
   position: relative;
   width: 100%;
@@ -243,8 +216,6 @@ td, th { padding: 0.7rem 0.5rem; }
   animation: loginModalPop 0.22s ease;
 }
 .add-cook-head { text-align: center; margin-bottom: 1.25rem; margin-top: 0.5rem; }
-/* Booking-request dialog: pin Accept / Decline while long addresses/notes
-   scroll — the 5-minute window leaves no time to hunt for the buttons. */
 .add-cook-modal .booking-actions-row {
   position: sticky;
   bottom: 0;
@@ -254,9 +225,6 @@ td, th { padding: 0.7rem 0.5rem; }
   margin-top: 0.9rem;
 }
 
-/* ---- Booking request dialog (cook + admin "Respond to Request") ----
-   Own compact card (no longer borrows the add-cook form modal): gradient
-   beam, icon header, live countdown pill, detail sheet, sticky actions. */
 .brm-card {
   position: relative;
   width: 100%;
@@ -369,8 +337,6 @@ td, th { padding: 0.7rem 0.5rem; }
 .brm-expired-note { margin: 0; width: 100%; text-align: center; font-size: 0.86rem; font-weight: 700; color: var(--slate-500); }
 .brm-details > * { min-width: 0; }
 .brm-row span { min-width: 0; overflow-wrap: anywhere; }
-/* Long unbroken tokens (flat numbers, venue lines without spaces) must wrap
-   instead of pushing the card wider than the viewport. */
 .brm-details { overflow-wrap: break-word; word-break: break-word; }
 @media (max-width: 560px) {
   .brm-card { padding: 1.25rem 1rem 1rem; border-radius: 20px; }
@@ -389,13 +355,9 @@ td, th { padding: 0.7rem 0.5rem; }
   .brm-row { font-size: 0.82rem; }
   .brm-timer { font-size: 0.78rem; }
 }
-/* Tablet + small laptop: roomier card than phones, still comfortably
-   centered — never stretched to full width. */
 @media (min-width: 561px) and (max-width: 1024px) {
   .brm-card { max-width: 520px; padding: 1.6rem 1.6rem 1.35rem; }
 }
-/* Short viewports (landscape phones/tablets, small laptop windows): shrink
-   chrome so the details + Accept/Decline stay reachable without hunting. */
 @media (max-height: 620px) {
   .login-modal-overlay { padding-top: 0.75rem; padding-bottom: 0.75rem; }
   .brm-card { padding-top: 1rem; padding-bottom: 0.9rem; }
@@ -424,7 +386,6 @@ td, th { padding: 0.7rem 0.5rem; }
 .add-cook-success { text-align: center; padding: 0.5rem 0; }
 .add-cook-success h4 { margin: 0 0 0.5rem; font-size: 1.2rem; }
 .add-cook-success .btn + .btn { margin-top: 0.5rem; }
-/* Login credentials card shown to the admin after adding a cook */
 .add-cook-creds {
   text-align: left;
   background: var(--slate-50);
@@ -454,7 +415,6 @@ td, th { padding: 0.7rem 0.5rem; }
 .add-cook-cred-pass { font-family: var(--font-mono); }
 .add-cook-creds-note { margin: 0; font-size: 0.78rem; color: var(--slate-500); }
 
-/* Legal / compliance pages (Terms, Privacy, Refunds, Contact) */
 .legal-page {
   max-width: 860px;
   padding: 2rem 0;
@@ -503,7 +463,6 @@ td, th { padding: 0.7rem 0.5rem; }
   font-weight: 700;
 }
 
-/* Policy slab table — stacks into cards on small screens, no overflow. */
 .legal-table-wrap {
   overflow-x: auto;
   margin: 0.75rem 0 1rem;
@@ -618,7 +577,6 @@ td, th { padding: 0.7rem 0.5rem; }
   text-decoration-color: var(--primary-700);
 }
 
-/* Stamp-style "Last updated" emphasis */
 .legal-content .updated-note {
   display: inline-block;
   font-size: 0.82rem;
@@ -626,7 +584,6 @@ td, th { padding: 0.7rem 0.5rem; }
   margin-top: 0.25rem;
 }
 
-/* Responsive: legal pages */
 @media (max-width: 640px) {
   .legal-page {
     padding: 1rem 0;
@@ -667,7 +624,6 @@ td, th { padding: 0.7rem 0.5rem; }
   }
 }
 
-/* Print styles for legal / compliance pages */
 @media print {
   .legal-page .back-link-bar,
   .legal-page .badge {
@@ -725,7 +681,6 @@ td, th { padding: 0.7rem 0.5rem; }
     background: #fff;
   }
 }
-/* ---- 320px floor: popups & dialogs reclaim their last gutter -------- */
 @media (max-width: 320px) {
   .login-modal-overlay { padding: 0.45rem; }
   .login-modal { padding: 1.4rem 0.9rem; }

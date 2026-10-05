@@ -1,8 +1,4 @@
-/* ==========================================================================
-   Buttons, Badges, Dots, Avatars
-   ========================================================================== */
 
-/* ---- Buttons ---- */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -62,10 +58,8 @@
 .btn-block { width: 100%; }
 
 @media (max-width: 640px) {
-  /* Full-width buttons must wrap long labels instead of clipping them. */
   .btn-block { white-space: normal; text-align: center; }
 }
-/* ---- Small phones: tighter buttons, labels still wrap ----------------- */
 @media (max-width: 375px) {
   .btn { padding: 0.56rem 0.9rem; font-size: 0.86rem; }
   .btn-sm { padding: 0.42rem 0.72rem; font-size: 0.8rem; }
@@ -76,7 +70,6 @@
   .btn-sm { padding: 0.4rem 0.65rem; font-size: 0.78rem; }
 }
 
-/* ---- Badges ---- */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -96,7 +89,6 @@
 .badge-rose { background: var(--accent-rose-light); color: #9f1239; }
 .badge-slate { background: var(--slate-100); color: var(--slate-600); }
 
-/* Verified check dot on cook avatars */
 .verified-dot {
   position: absolute;
   right: -2px;
@@ -115,7 +107,6 @@
   box-shadow: 0 2px 6px rgba(5, 150, 105, 0.4);
 }
 
-/* ---- Chips / tags ---- */
 .tag, .tags {
   display: inline-flex;
   align-items: center;
@@ -128,6 +119,5 @@
   font-weight: 600;
 }
 
-/* Star rating cluster */
 .star-rating-display { display: inline-flex; align-items: center; gap: 2px; }
 .rating-count-label { color: var(--slate-400); font-size: 0.82rem; }

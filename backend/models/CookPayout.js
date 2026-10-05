@@ -1,5 +1,3 @@
-// Weekly payout cycle grouping eligible bookings per cook (§5).
-// Idempotent: payoutRef unique, one cycle per cook per week.
 const mongoose = require("mongoose");
 
 const cookPayoutSchema = new mongoose.Schema(
@@ -7,7 +5,6 @@ const cookPayoutSchema = new mongoose.Schema(
     cook: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     weekStart: { type: Date, required: true },
     weekEnd: { type: Date, required: true },
-    // Unique payout reference (DB-level idempotency, §5).
     payoutRef: { type: String, required: true, trim: true },
     bookings: [{ type: mongoose.Schema.Types.ObjectId, ref: "Booking" }],
     bookingCount: { type: Number, default: 0, min: 0 },

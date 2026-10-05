@@ -1,15 +1,9 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 
-// Active SSE client connections: Set of client objects
-// { id, res, userId, role }
 const clients = new Set();
 
-/**
- * Express handler for Server-Sent Events (SSE) connection: /api/realtime/stream
- */
 const sseHandler = async (req, res) => {
-  // Support token via query param (EventSource does not easily support custom headers in standard browser JS)
   const token = req.query.token || req.headers.authorization?.replace("Bearer ", "");
   if (!token) {
     return res.status(401).json({ message: "Authentication token required for real-time stream" });
@@ -36,15 +30,12 @@ const sseHandler = async (req, res) => {
   const clientObj = { id: clientId, res, userId, role };
   clients.add(clientObj);
 
-  // Initial connection handshake
   res.write(`event: connected\ndata: ${JSON.stringify({ clientId, timestamp: Date.now() })}\n\n`);
 
-  // Heartbeat every 25 seconds to keep connection alive across proxies
   const heartbeat = setInterval(() => {
     try {
       res.write(": heartbeat\n\n");
     } catch {
-      // client connection dropped
     }
   }, 25000);
 
@@ -54,12 +45,6 @@ const sseHandler = async (req, res) => {
   });
 };
 
-/**
- * Emit a real-time event to connected SSE clients.
- * @param {string} eventType - e.g. "booking_request", "booking_assigned", "booking_ignored", "booking_expired"
- * @param {object} data - Payload to send
- * @param {object} options - Filtering options: { targetUserIds?: string[], targetRoles?: string[] }
- */
 const emit = (eventType, data = {}, options = {}) => {
   const { targetUserIds, targetRoles } = options;
   const targetUserSet = targetUserIds ? new Set(targetUserIds.map((id) => String(id))) : null;

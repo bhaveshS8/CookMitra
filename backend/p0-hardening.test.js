@@ -1,6 +1,3 @@
-// p0-hardening.test.js — P0-1 (admin registration) + P0-2 (signed doc URLs)
-// + P0-3 (session cookie) regression tests. Stubbed, no DB.
-// Run: node backend/p0-hardening.test.js — exits non-zero on any failure.
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret-for-p0-hardening-32chars!!";
 process.env.NODE_ENV = process.env.NODE_ENV || "test";
 
@@ -63,8 +60,6 @@ async function main() {
     check("role=cook (lowercase) maps to COOK", res.statusCode === 201 && created?.role === "COOK", `role=${created?.role}`);
   }
   {
-    // Prototype-pollution-style payload: __proto__/constructor keys must not
-    // escalate the role or pollute Object.prototype.
     const before = ({}).polluted;
     const payload = JSON.parse('{"name":"Proto Attacker","email":"proto@x.com","password":"secret12","phone":"9876543210","role":"ADMIN","__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}}}');
     const { res, created } = await tryRegister(payload);
@@ -77,12 +72,10 @@ async function main() {
     delete Object.prototype.polluted;
   }
   {
-    // Mass assignment: extra privileged fields in body must not land on the user.
     const { created } = await tryRegister({ ...base, email: "mass@x.com", role: "CUSTOMER", status: "suspended", isAdmin: true });
     check("mass assignment cannot set status/isAdmin", created && created.status === undefined && created.isAdmin === undefined);
   }
   {
-    // 20 simultaneous ADMIN registration attempts — all must fail to escalate.
     const attempts = await Promise.all(
       Array.from({ length: 20 }, (_, i) =>
         tryRegister({ ...base, email: `race${i}@x.com`, role: "ADMIN" })
@@ -95,7 +88,6 @@ async function main() {
     );
   }
   {
-    // Session cookie is issued on register (P0-3).
     const { res } = await tryRegister({ ...base, email: "cookie1@x.com", role: "CUSTOMER" });
     const setCookie = String(res.headers["Set-Cookie"] || "");
     check("register sets __Host- session cookie", setCookie.includes("__Host-cm_session="), setCookie.slice(0, 80));
@@ -119,7 +111,6 @@ async function main() {
     check("no session JWT accepted as doc token", verifyDocToken("eyJhbGciOiJIUzI1NiJ9.e30.abc") === null);
   }
   {
-    // Tampering with the doc path invalidates the signature.
     const { token } = signDocUrl(aadhar, cookId);
     const [p, s] = token.split(".");
     const other = Buffer.from(JSON.stringify({ doc: `/uploads/aadhar_OTHERID_123_file.jpg`, uid: cookId, exp: Date.now() + 60000 }))
@@ -128,7 +119,6 @@ async function main() {
     void p;
   }
   {
-    // Expired token rejected.
     const { token } = signDocUrl(aadhar, cookId, 30 * 1000);
     const [p] = token.split(".");
     const payload = JSON.parse(Buffer.from(p.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
@@ -137,21 +127,17 @@ async function main() {
     check("expired token rejected", verifyDocToken(`${re}.${token.split(".")[1]}`) === null);
   }
   {
-    // photo_ cannot be minted (stays public/cacheable by design).
     let threw = false;
     try { signDocUrl(`/uploads/photo_${cookId}_1.jpg`, cookId); } catch { threw = true; }
     check("photo_ mint refused", threw === true);
   }
   {
-    // Malformed tokens rejected.
     check("empty rejected", verifyDocToken("") === null);
     check("garbage rejected", verifyDocToken("not.a.valid.token.here") === null);
     check("null rejected", verifyDocToken(null) === null);
   }
 
   {
-    // Adversarial: with JWT_SECRET unset, an attacker can compute
-    // sha256("doc-view:") offline — verify must fail closed anyway.
     const saved = process.env.JWT_SECRET;
     const { token } = signDocUrl(aadhar, cookId);
     delete process.env.JWT_SECRET;
@@ -168,14 +154,12 @@ async function main() {
     const realFindById = U.findById;
     U.findById = () => ({ select: () => ({ lean: async () => ({ _id: cookId, role: "CUSTOMER", status: "active" }) }) });
     const token = jwt.sign({ id: cookId, role: "CUSTOMER" }, process.env.JWT_SECRET);
-    // Cookie-authenticated GET works.
     {
       const r = makeRes();
       let passed = false;
       await auth({ method: "GET", path: "/", headers: {}, header: (k) => (String(k).toLowerCase() === "cookie" ? `__Host-cm_session=${encodeURIComponent(token)}` : "") }, r, () => { passed = true; });
       check("cookie session authenticates GET", passed === true && r.statusCode === 200);
     }
-    // Cookie-authenticated cross-origin POST is refused (CSRF).
     {
       const r = makeRes();
       let passed = false;
@@ -199,7 +183,6 @@ async function main() {
   {
     const cookCtrl = require("./controllers/cookController");
     const CookProfile = require("./models/CookProfile");
-    // Non-object schedule must 400, never throw (TypeError -> 500).
     {
       const realFUA = CookProfile.findOneAndUpdate;
       let called = false;
@@ -219,7 +202,6 @@ async function main() {
       }
       CookProfile.findOneAndUpdate = realFUA;
     }
-    // Admin overview must strip OTP secrets and exclude test money.
     {
       const BookingM = require("./models/Booking");
       const ReviewM = require("./models/Review");

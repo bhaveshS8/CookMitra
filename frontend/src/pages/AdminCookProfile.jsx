@@ -89,7 +89,6 @@ const BookingCard = ({ booking }) => (
       </div>
     </div>
 
-    {/* Customer rating for this service */}
     {booking.status === "completed" && (
       booking.review ? (
         <div style={{ marginTop: "0.75rem", padding: "0.6rem 0.9rem", background: "var(--accent-amber-light, #fef3c7)", border: "1px solid var(--accent-amber, #f59e0b)", borderRadius: "var(--radius-sm)", fontSize: "0.88rem" }}>
@@ -143,7 +142,6 @@ const AdminCookProfile = () => {
 
   const { profile, bookings = [], reviews = [], summary } = data;
   const cook = profile.user || {};
-  // Newer bookings first in both tabs (creation time, newest → oldest).
   const byNewest = (a, b) =>
     new Date(b?.createdAt).getTime() - new Date(a?.createdAt).getTime() ||
     String(b?._id || "").localeCompare(String(a?._id || ""));
@@ -191,7 +189,6 @@ const AdminCookProfile = () => {
         </div>
       </div>
 
-      {/* Earnings summary */}
       <div className="bookings-list-modern" style={{ marginBottom: "2rem" }}>
         <div className="booking-item-card">
           <div className="booking-metadata-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
@@ -231,7 +228,6 @@ const AdminCookProfile = () => {
         </div>
       </div>
 
-      {/* Profile, contact, address, documents */}
       <div className="bookings-list-modern" style={{ marginBottom: "2rem" }}>
         <div className="booking-item-card">
           <div className="booking-item-top">
@@ -294,7 +290,6 @@ const AdminCookProfile = () => {
               <FileText size={16} style={{ verticalAlign: "-3px" }} /> Verification Documents
             </h3>
           </div>
-          {/* Click a thumbnail to preview — images open in a lightbox, PDFs preview inline */}
           <AdminDocViewer
             docs={[
               { label: "Aadhaar Card", url: profile.aadharCardUrl },
@@ -307,7 +302,6 @@ const AdminCookProfile = () => {
             ]}
           />
 
-          {/* Admin can attach files the cook sent over email/WhatsApp */}
           <div
             style={{
               marginTop: "1rem",
@@ -324,7 +318,6 @@ const AdminCookProfile = () => {
         </div>
       </div>
 
-      {/* Earnings per service */}
       <h2 style={{ fontSize: "1.4rem", marginBottom: "1rem" }}>Earnings by Service</h2>
       {serviceRows.length > 0 ? (
         <div className="dossier-table-card">
@@ -359,7 +352,6 @@ const AdminCookProfile = () => {
         </p>
       )}
 
-      {/* Customer ratings across services */}
       <h2 style={{ fontSize: "1.4rem", marginBottom: "1rem" }}>
         Customer Ratings ({reviews.length}){avgRating ? ` — ★ ${avgRating} average` : ""}
       </h2>
@@ -398,7 +390,6 @@ const AdminCookProfile = () => {
         </p>
       )}
 
-      {/* Current bookings */}
       <h2 style={{ fontSize: "1.4rem", marginBottom: "1rem" }}>
         Current Bookings ({current.length})
       </h2>
@@ -412,7 +403,6 @@ const AdminCookProfile = () => {
         <p style={{ color: "var(--slate-500)", marginBottom: "2rem" }}>No current bookings.</p>
       )}
 
-      {/* Past bookings */}
       <h2 style={{ fontSize: "1.4rem", marginBottom: "1rem" }}>
         Past Bookings ({past.length})
       </h2>

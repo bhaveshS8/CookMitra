@@ -1,5 +1,3 @@
-// CouponManagement — admin Coupons tab: list, create, edit, activate/deactivate,
-// delete (server refuses deleting redeemed coupons — deactivate instead).
 import React, { useState } from "react";
 import API from "../api/axios";
 import { useFetch } from "../hooks/useFetch";

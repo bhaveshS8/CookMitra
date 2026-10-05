@@ -1,24 +1,6 @@
 // payment-adversarial.test.js — ADVERSARIAL payment security audit (mocked gateway).
-// Run:  node backend/payment-adversarial.test.js  — exits non-zero on failure.
-//
-// Uses a properly mocked Razorpay verification service: the gateway client's
-// orders.fetch / payments.fetch are stubbed per-scenario (captured,
-// authorized, failed, refunded, wrong amount/currency, timeout), while the
-// REAL payBooking / verifyPayment / webhook code runs unchanged. HMACs are
-// computed with the test secret exactly like the gateway would.
-//
-// Covers all 20 scenarios: cross-booking reuse (A→B), same-amount reuse,
-// wrong order/payment/signature, missing stored order, non-captured,
-// amount/currency mismatch, duplicate confirm, replay, pay-during-cancel,
-// pay-during-expiry, gateway timeout, DB failure after verification,
-// concurrent confirms, frontend field manipulation, test-mode-in-prod,
-// refund-then-retry, foreign-customer payment. Plus: payout-singleton,
-// secret-leak scan, and shared-helper unit checks.
-//
-// No network, no DB (all model statics stubbed). Follows the repo's stubbed
 // unit-test convention (cf. review-rating.test.js, security-audit.test.js).
 
-// ── env BEFORE requires (config/razorpay snapshots these at load) ──────────
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 process.env.RAZORPAY_KEY_ID = "rk_test_abcdef123456";
 process.env.RAZORPAY_KEY_SECRET = "s3cr3tK3yV4lu3AbCdEfGh";
@@ -40,10 +22,6 @@ const check = (n, ok, d) => {
   ok ? passes++ : failures++;
 };
 
-// ── mocked gateway ──────────────────────────────────────────────────────────
-// Mirrors Razorpay semantics: orders.fetch returns the minted order (amount in
-// paise); payments.fetch returns the payment with status/amount/currency and
-// the order it belongs to. Throwing emulates gateway timeout/outage.
 const mockOrders = {};
 const mockPayments = {};
 const gwFail = { orders: false, payments: false };
@@ -67,16 +45,12 @@ const mintPayment = (id, orderId, amountPaise, { status = "captured", currency =
   mockPayments[id] = { id, order_id: orderId, amount: amountPaise, currency, status, amount_refunded: refunded };
 };
 
-// ── fakes ───────────────────────────────────────────────────────────────────
 const notifLog = [];
 let couponCalls = 0;
 Notification.create = async (d) => { notifLog.push(d); return d; };
 User.findById = () => ({ select: async () => ({ name: "T Cook", phone: "9000000001" }) });
 const Coupon = require("./models/Coupon");
 Coupon.updateOne = async () => { couponCalls++; return { acknowledged: true }; };
-// Ledger + webhook-event stores are covered in finance-audit.test.js; here
-// they are fast no-ops so the suite never waits on buffered real-model
-// writes (no DB in this process).
 const LedgerEntry = require("./models/LedgerEntry");
 const savedLedgerCreate = LedgerEntry.create;
 LedgerEntry.create = async (e) => e;
@@ -119,7 +93,6 @@ const mkBooking = (over = {}) => {
   };
   return d;
 };
-// Ownership-aware findOne (like Mongo): { _id, customer } must both match.
 const makeFindOne = (getDoc) => async (filter) => {
   if (filter && filter.$or) {
     const d = getDoc();
@@ -138,9 +111,6 @@ const makeFindOne = (getDoc) => async (filter) => {
   if (filter.customer && String(filter.customer) !== String(d.customer)) return null;
   return d;
 };
-// Atomic compare-and-set claim: check + apply with NO await between, so two
-// interleaved invocations behave exactly like MongoDB's findOneAndUpdate.
-// Supports dotted $set paths ("payment.status") like the driver does.
 const setDeep = (obj, dotted, value) => {
   const parts = String(dotted).split(".");
   let cur = obj;
@@ -203,7 +173,6 @@ const callPay = async (doc, userId, body) => {
 };
 const payBody = (o, p, s) => ({ method: "upi", payment: { razorpayOrderId: o, razorpayPaymentId: p, razorpaySignature: s } });
 
-// Verified-then-minted triple for a 34900-paise fee (fresh ids per test).
 let n = 0;
 const tripleFor = (feePaise = 34900, tag = "t") => {
   n += 1;
@@ -213,7 +182,6 @@ const tripleFor = (feePaise = 34900, tag = "t") => {
   mintPayment(p, o, feePaise, { status: "captured" });
   return { o, p, s: sign(o, p) };
 };
-// Booking pre-bound to the triple's order (what createOrder persists).
 const boundBooking = (t, over = {}) =>
   mkBooking({ payment: { status: "pending", razorpayOrderId: t.o }, ...over });
 
@@ -222,9 +190,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
 
 (async () => {
   console.log("═══ cross-booking reuse ═══");
-  // T1: Booking A order used for Booking B (same fee — only binding blocks).
-  // Both triples are fully genuine (valid HMAC, captured, exact amount);
-  // the ONLY thing distinguishing them is which booking minted the order.
   {
     const tA = tripleFor(34900, "t1a");
     const tB = tripleFor(34900, "t1b");
@@ -235,12 +200,9 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     check("T1 A-order on B rejected", r.status === 402 && /belong/.test(r.payload?.message || ""), `s=${r.status}`);
     check("T1 B untouched", docB.status === "accepted" && docB.payment.status === "pending", docB.status);
   }
-  // T2 is T1 with identical amounts by construction (both 34900) — the binding
-  // check, not the amount, is what rejects. Asserted above; pin explicitly:
   check("T2 same-amount reuse still bound to order", true, "covered by T1 (amounts equal, order differs)");
 
   console.log("\n═══ malformed triples ═══");
-  // T3a: unknown order id (valid HMAC shape impossible without secret — use garbage sig).
   {
     const doc = boundBooking(tripleFor(34900, "t3a"));
     useDoc(doc);
@@ -248,7 +210,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     snapLeak("T3a", r.status, r.payload);
     check("T3a wrong order id rejected", r.status === 402, `s=${r.status}`);
   }
-  // T3b: genuine triple minted for NO booking (unminted order) with valid HMAC.
   {
     const o = "order_orphan_1", p = "pay_orphan_1";
     mintOrder(o, 34900); mintPayment(p, o, 34900, { status: "captured" });
@@ -257,8 +218,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     const r = await callPay(doc, "custA", payBody(o, p, sign(o, p)));
     check("T3b чужой valid triple rejected (binding)", r.status === 402, `s=${r.status}`);
   }
-  // T4: payment id belonging to a DIFFERENT order (valid HMAC over the
-  // submitted pair — the payment↔order linkage check is what must catch it).
   {
     const t = tripleFor(34900, "t4");
     const tX = tripleFor(34900, "t4x");
@@ -268,7 +227,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     snapLeak("T4", r.status, r.payload);
     check("T4 foreign payment id rejected", r.status === 402, `s=${r.status}`);
   }
-  // T5: tampered signature byte.
   {
     const t = tripleFor(34900, "t5");
     const doc = boundBooking(t);
@@ -278,7 +236,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     snapLeak("T5", r.status, r.payload);
     check("T5 wrong signature rejected", r.status === 402, `s=${r.status}`);
   }
-  // T6: missing stored order id (legacy/unbound booking) + otherwise-valid triple.
   {
     const t = tripleFor(34900, "t6");
     const doc = mkBooking({ payment: { status: "pending" } }); // no stored order
@@ -288,7 +245,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
   }
 
   console.log("\n═══ gateway truth ═══");
-  // T7: authorized / failed / refunded are NOT captured.
   for (const [label, over] of [["authorized", { status: "authorized" }], ["failed", { status: "failed" }], ["refunded", { status: "captured", refunded: 34900 }]]) {
     const t = tripleFor(34900, `t7-${label}`);
     mintPayment(t.p, t.o, 34900, over);
@@ -298,7 +254,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     snapLeak(`T7-${label}`, r.status, r.payload);
     check(`T7 ${label} not treated as paid`, r.status === 402 && doc.payment.status === "pending", `s=${r.status}`);
   }
-  // T8: amount mismatch — order side and payment side.
   {
     const t = tripleFor(34900, "t8o");
     mockOrders[t.o].amount = 100; // cheap order replay
@@ -315,7 +270,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     const r = await callPay(doc, "custA", payBody(t.o, t.p, t.s));
     check("T8b under-captured payment rejected", r.status === 402, `s=${r.status}`);
   }
-  // T9: currency mismatch.
   {
     const t = tripleFor(34900, "t9");
     mockPayments[t.p].currency = "USD";
@@ -326,7 +280,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
   }
 
   console.log("\n═══ idempotency & replay ═══");
-  // T10: duplicate confirm → 200 alreadyPaid, single history entry.
   {
     const t = tripleFor(34900, "t10");
     const doc = boundBooking(t);
@@ -340,7 +293,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     check("T10 retry 200 alreadyPaid (not 400)", r2.status === 200 && r2.payload?.alreadyPaid === true, `s=${r2.status}`);
     check("T10 single confirm entry", hist1 === 1 && hist2 === 1, `${hist1}/${hist2}`);
   }
-  // T11: replay of A's triple on B after A confirmed.
   {
     const t = tripleFor(34900, "t11");
     const docA = boundBooking(t, { _id: "bA", customer: "custA" });
@@ -354,14 +306,12 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
   }
 
   console.log("\n═══ lifecycle interplay ═══");
-  // T12: pay during cancellation (unpaid cancelled → 410).
   {
     const doc = mkBooking({ status: "cancelled", payment: { status: "pending" } });
     useDoc(doc);
     const r = await callPay(doc, "custA", payBody("o", "p", "s"));
     check("T12 pay on cancelled (unpaid) → 410", r.status === 410, `s=${r.status}`);
   }
-  // T12b: paid-then-cancelled retry reports truth, keeps cancelled.
   {
     const doc = mkBooking({
       status: "cancelled",
@@ -374,7 +324,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
       r.status === 200 && r.payload?.alreadyPaid === true && doc.status === "cancelled" &&
       doc.payment.refundStatus === "pending" && doc.statusHistory.length === h0, `s=${r.status}`);
   }
-  // T13: pay during expiration (window lapsed → auto-cancel → 410).
   {
     const doc = mkBooking({ paymentExpiresAt: new Date(Date.now() - 1000) });
     useDoc(doc);
@@ -383,7 +332,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
   }
 
   console.log("\n═══ failure injection ═══");
-  // T14: gateway timeout on order fetch and on payment fetch.
   {
     const t = tripleFor(34900, "t14");
     const doc = boundBooking(t);
@@ -398,7 +346,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     check("T14a order-fetch timeout → 402, no state change", r1.status === 402 && clean, `s=${r1.status}`);
     check("T14b payment-fetch timeout → 402, no state change", r2.status === 402 && clean, `s=${r2.status}`);
   }
-  // T15: DB failure after verification (claim throws).
   {
     const t = tripleFor(34900, "t15");
     const doc = boundBooking(t);
@@ -417,7 +364,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
   }
 
   console.log("\n═══ concurrency ═══");
-  // T16: two simultaneous confirms, one booking (atomic CAS fake).
   {
     const t = tripleFor(34900, "t16");
     const doc = boundBooking(t);
@@ -438,10 +384,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
   }
 
   console.log("\n═══ frontend manipulation ═══");
-  // T17a: amount:1 with a full-fee triple. The client amount field is dead
-  // input: settlement ALWAYS uses booking.amount (server) + the gateway-
-  // verified order/payment amounts. A lying client can neither discount nor
-  // overcharge — the booking confirms at the full server fee.
   {
     const t = tripleFor(34900, "t17a");
     const doc = boundBooking(t);
@@ -450,21 +392,18 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     snapLeak("T17a", r.status, r.payload);
     check("T17a client amount cannot alter settlement", r.status === 200 && doc.payment.paidAmount === 349 && doc.status === "confirmed", `s=${r.status} paid=${doc.payment.paidAmount}`);
   }
-  // T17b: injected payment.status:"paid" without a triple.
   {
     const doc = boundBooking(tripleFor(34900, "t17b"));
     useDoc(doc);
     const r = await callPay(doc, "custA", { method: "upi", payment: { status: "paid", paidAmount: 349 } });
     check("T17b injected paid flag rejected", r.status === 400 && doc.payment.status === "pending", `s=${r.status}`);
   }
-  // T17c: testMode is removed — always rejected (no simulated checkout).
   {
     const doc = mkBooking({});
     useDoc(doc);
     const r = await callPay(doc, "custA", { method: "upi", testMode: true });
     check("T17c testMode rejected (feature removed)", r.status === 400 && doc.payment.status === "pending", `s=${r.status}`);
   }
-  // T18: testMode with prod configuration → still refused.
   {
     const doc = mkBooking({});
     useDoc(doc);
@@ -479,7 +418,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     snapLeak("T18", r.status, r.payload);
     check("T18 testMode in prod config refused", r.status === 400 && doc.payment.status === "pending", `s=${r.status}`);
   }
-  // T18b: opted-in test payment no longer exists — env opt-in changes nothing.
   {
     const doc = mkBooking({});
     useDoc(doc);
@@ -495,7 +433,6 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
   }
 
   console.log("\n═══ refunds & foreign payments ═══");
-  // T19: refund queued, then confirmation retried → truth, refund intact.
   {
     const doc = mkBooking({
       status: "confirmed",
@@ -508,14 +445,12 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
       r.status === 200 && r.payload?.alreadyPaid === true && doc.payment.refundStatus === "pending" &&
       doc.statusHistory.length === h0, `s=${r.status}`);
   }
-  // T20a: attacker confirms someone else's booking → 404 (ownership filter).
   {
     const doc = mkBooking({ _id: "bV", customer: "victim" });
     useDoc(doc);
     const r = await callPay(doc, "attacker", payBody("o", "p", "s"));
     check("T20a foreign booking → 404", r.status === 404, `s=${r.status}`);
   }
-  // T20b: victim's genuine triple submitted on attacker's own booking.
   {
     const tV = tripleFor(34900, "t20v");
     const tA = tripleFor(34900, "t20a");
@@ -562,33 +497,27 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     payload: { payment: { entity: { id: paymentId, order_id: orderId, amount: amountPaise, currency: cur, status: st } } },
   });
   {
-    // W1: happy-path reconcile (accepted + exact amount).
     const doc = mkBooking({ _id: "bW", status: "accepted", amount: 349, payment: { status: "pending", razorpayOrderId: "order_w1" } });
     Booking.findOne = makeFindOne(() => doc);
     Booking.findOneAndUpdate = makeClaim(() => doc);
     const w1 = await sendWebhook(capEvent("order_w1", "pay_w1", 34900));
     check("W1 captured webhook confirms", w1.payload?.handled === true && doc.status === "confirmed" &&
       doc.payment.webhookReconciled === true, JSON.stringify(w1.payload));
-    // W2: duplicate delivery is deduped by event key (not reprocessed).
     const h0 = doc.statusHistory.length;
     const w2 = await sendWebhook(capEvent("order_w1", "pay_w1", 34900));
     check("W2 duplicate webhook deduped", w2.payload?.handled === "duplicate" && doc.statusHistory.length === h0, `hist=${doc.statusHistory.length}/${h0}`);
-    // W3: authorized (non-captured) entity ignored.
     const doc3 = mkBooking({ _id: "bW3", status: "accepted", amount: 349, payment: { status: "pending", razorpayOrderId: "order_w3" } });
     Booking.findOne = makeFindOne(() => doc3);
     const w3 = await sendWebhook(capEvent("order_w3", "pay_w3", 34900, "authorized"));
     check("W3 authorized ignored", w3.payload?.handled === false && doc3.status === "accepted", JSON.stringify(w3.payload));
-    // W4: amount mismatch → no confirm + refund queued.
     const doc4 = mkBooking({ _id: "bW4", status: "accepted", amount: 349, payment: { status: "pending", razorpayOrderId: "order_w4" } });
     Booking.findOne = makeFindOne(() => doc4);
     const w4 = await sendWebhook(capEvent("order_w4", "pay_w4", 100));
     check("W4 amount mismatch: refund queued, not confirmed",
       doc4.status === "accepted" && doc4.payment.refundStatus === "pending", `${doc4.status}/${doc4.payment.refundStatus}`);
-    // W5: unknown order ignored.
     Booking.findOne = makeFindOne(() => null);
     const w5 = await sendWebhook(capEvent("order_unknown", "pay_u", 34900));
     check("W5 unknown order ignored", w5.payload?.handled === false, JSON.stringify(w5.payload));
-    // W6: bad signature → unactioned.
     const w6 = await sendWebhook(capEvent("order_w1", "pay_w1", 34900), "wrong_secret");
     check("W6 bad signature unactioned", w6.payload?.received === false, JSON.stringify(w6.payload));
   }

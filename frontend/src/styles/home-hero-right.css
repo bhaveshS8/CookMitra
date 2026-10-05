@@ -1,9 +1,5 @@
-/* ==========================================================================
-   Home — Hero (part 2: cook visual, floating cards, stats)
-   ========================================================================== */
 
 .hero-v2-right { position: relative; display: flex; justify-content: center; align-items: center; }
-/* Warm festive glow behind the hero image */
 .hero-v2-right::before {
   content: "";
   position: absolute;
@@ -13,11 +9,6 @@
   filter: blur(30px);
   pointer-events: none;
 }
-/* Modern photo card — clean rounded frame with a gold gradient edge and a
-   soft offset accent plate behind it (static, no motion).
-   NOTE: no z-index here on purpose — a z-index would create a stacking
-   context and the ::before accent plate (z-index: -1) would paint behind
-   this element's own gradient background, i.e. become invisible. */
 .hero-v2-cook-wrap {
   position: relative;
   width: min(100%, 520px);
@@ -46,7 +37,6 @@
   transition: transform 0.4s ease;
 }
 .hero-v2-cook-wrap:hover .hero-v2-cook-img { transform: scale(1.025); }
-/* Flickering diyas at the base of the arch */
 .hero-diyas {
   position: absolute;
   bottom: -24px;
@@ -65,9 +55,6 @@
 
 .hero-v2-float {
   position: absolute;
-  /* Above the photo card (.hero-v2-cook-wrap is z-index: 1) and the diyas
-     (z-index: 3) — otherwise the image paints over these floating badges and
-     they end up hidden behind it. */
   z-index: 4;
   display: flex;
   align-items: center;
@@ -99,7 +86,6 @@
 }
 .hero-v2-float-live-sub { font-size: 0.74rem; opacity: 0.92; }
 
-/* Stats strip — festive glass pills */
 .hero-v2-stats {
   position: relative;
   z-index: 1;
@@ -135,23 +121,18 @@
 .hero-v2-stat-label { font-size: 0.78rem; color: #7C2D12; margin-top: 0.2rem; }
 .hero-v2-stat-sep { display: none; }
 
-/* Entrance */
 .hero-enter {
   opacity: 0;
   animation: riseIn 0.55s ease forwards;
   animation-delay: var(--d, 0s);
 }
 
-/* Phones (single-column hero, no side gap): keep the floating badges inside
-   the photo card — the rating pill off the edge, the live pill off the focal
-   centre and down near the base, and the diyas clear of the stats strip. */
 @media (max-width: 640px) {
   .hero-v2-float-rating { top: -12px; right: 8px; }
   .hero-v2-float-live { top: auto; bottom: 54px; left: 8px; max-width: calc(100% - 16px); }
   .hero-diyas { bottom: -14px; font-size: 1.2rem; }
   .hero-diyas .hero-diya-big { font-size: 1.6rem; }
 }
-/* ---- Small phones: floats shrink, stay inside the photo card --------- */
 @media (max-width: 375px) {
   .hero-v2-float { font-size: 0.72rem; padding: 0.36rem 0.62rem; }
   .hero-v2-float-rating { top: -8px; right: 6px; }

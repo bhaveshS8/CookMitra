@@ -3,7 +3,6 @@ import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
 import { formatCurrency, formatDate } from "../utils/constants";
 
-// Admin → Cook Partner Incentives (§14): leads, incentives, referrals, payouts.
 const TABS = [
   { id: "leads", label: "Leads" },
   { id: "incentives", label: "Incentives" },

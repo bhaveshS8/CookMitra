@@ -1,12 +1,3 @@
-// Standalone test for the customer-dashboard display classifier
-// (getBookingDisplayState in frontend/src/utils/constants.js).
-// Run:  node backend/booking-display-state.test.js — exits non-zero on failure.
-//
-// The classifier is display-only: UPCOMING / IN_PROGRESS stay in Active &
-// Upcoming, OVERDUE moves to Action Required, terminal statuses pass
-// through. Backend status is never mutated (no auto-complete). The REAL
-// frontend module is loaded (export-prefixes stripped — the module is
-// dependency-free), so these assert the shipped logic, not a copy.
 
 const fs = require("fs");
 const path = require("path");
@@ -34,11 +25,8 @@ const at = (ms) => new Date(ms);
 (async () => {
   const now = Date.now();
 
-  // ── 1-2. Future / running bookings → Active & Upcoming ────────────────────
   {
     const future = { status: "confirmed", serviceStartedAt: null, serviceEndsAt: null, date: at(now + 2 * H), startTime: "10:00", endTime: "12:00", durationHours: 2 };
-    // Static IST slot far in the future regardless of wall clock: use live
-    // clock fields for determinism instead.
     const f2 = { status: "confirmed", serviceStartedAt: at(now + H), serviceEndsAt: at(now + 2 * H) };
     check("1. future booking -> UPCOMING", getBookingDisplayState(f2, now) === "UPCOMING", getBookingDisplayState(f2, now));
     check("1. future booking not overdue", isBookingOverdue(f2, now) === false, "");
@@ -47,19 +35,16 @@ const at = (ms) => new Date(ms);
     void future;
   }
 
-  // ── 3-4. End passed + not completed → Action Required ─────────────────────
   for (const status of ["requested", "accepted", "confirmed", "in_progress"]) {
     const b = { status, serviceStartedAt: at(now - 3 * H), serviceEndsAt: at(now - H) };
     check(`3-4. ${status} past end -> OVERDUE`, getBookingDisplayState(b, now) === "OVERDUE", getBookingDisplayState(b, now));
   }
 
-  // ── 5-7. Terminal statuses pass through even past end ─────────────────────
   for (const [status, want] of [["completed", "COMPLETED"], ["cancelled", "CANCELLED"], ["rejected", "REJECTED"], ["expired", "EXPIRED"]]) {
     const b = { status, serviceStartedAt: at(now - 3 * H), serviceEndsAt: at(now - 2 * H) };
     check(`5-7. ${status} past end -> ${want}`, getBookingDisplayState(b, now) === want, getBookingDisplayState(b, now));
   }
 
-  // ── 8-10. Exact boundaries ────────────────────────────────────────────────
   {
     const base = { status: "confirmed", serviceStartedAt: at(now - 2 * H) };
     const before = { ...base, serviceEndsAt: at(now + 1000) };
@@ -70,16 +55,13 @@ const at = (ms) => new Date(ms);
     check("10. one second after end -> OVERDUE", getBookingDisplayState(after, now) === "OVERDUE", getBookingDisplayState(after, now));
   }
 
-  // ── 13. Missing/invalid end handled safely ────────────────────────────────
   {
     check("13. missing end -> UPCOMING (safe)", getBookingDisplayState({ status: "confirmed" }, now) === "UPCOMING", "");
     check("13. garbage end -> UPCOMING (safe)", getBookingDisplayState({ status: "accepted", date: "nope", startTime: "xx", endTime: "yy" }, now) === "UPCOMING", "");
     check("13. null booking -> UNKNOWN", getBookingDisplayState(null, now) === "UNKNOWN", "");
   }
 
-  // ── 14. Durations + static IST schedule ───────────────────────────────────
   {
-    // Yesterday 17:00–20:00 IST (all durations share the same end rule).
     const y = new Date(now - 24 * H);
     const p = (n) => String(n).padStart(2, "0");
     const ds = `${y.getFullYear()}-${p(y.getMonth() + 1)}-${p(y.getDate())}`;
@@ -87,20 +69,17 @@ const at = (ms) => new Date(ms);
       const b = { status: "confirmed", date: `${ds}T00:00:00`, startTime: s, endTime: e, durationHours: 2 };
       check(`14. past static slot ${s}-${e} -> OVERDUE`, getBookingDisplayState(b, now) === "OVERDUE", getBookingDisplayState(b, now));
     }
-    // Tomorrow 17:00–20:00 IST → UPCOMING (also crosses midnight safely).
     const t = new Date(now + 24 * H);
     const ts = `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`;
     const f = { status: "accepted", date: `${ts}T00:00:00`, startTime: "17:00", endTime: "20:00", durationHours: 3 };
     check("14. future static slot -> UPCOMING", getBookingDisplayState(f, now) === "UPCOMING", getBookingDisplayState(f, now));
   }
 
-  // ── 15. Completed mid-service stays completed ─────────────────────────────
   {
     const b = { status: "completed", serviceStartedAt: at(now - 3 * H), serviceEndsAt: at(now - H) };
     check("15. completed past end -> COMPLETED", getBookingDisplayState(b, now) === "COMPLETED", "");
   }
 
-  // ── Reschedule gating: overdue never offers a doomed chip ─────────────────
   {
     const overdue = { status: "confirmed", date: at(now - 3 * H), startTime: "10:00", endTime: "12:00", durationHours: 2, rescheduleCount: 0, serviceStartedAt: at(now - 3 * H), serviceEndsAt: at(now - H) };
     check("12. overdue booking offers no reschedule chip", canRescheduleBooking(overdue, { role: "customer" }, now) === false, "");
@@ -111,7 +90,6 @@ const at = (ms) => new Date(ms);
     check("12. upcoming booking keeps reschedule chip", canRescheduleBooking(upcoming, { role: "customer" }, now) === true, "");
   }
 
-  // ── Source-of-truth: module under test is the shipped file ────────────────
   {
     check("classifier exported from shipped constants.js", typeof getBookingDisplayState === "function" && typeof isBookingOverdue === "function", "");
   }

@@ -8,7 +8,6 @@ const POLL_MS = 30000;
 const POPUP_TTL_MS = 9000;
 const MAX_POPUPS = 3;
 
-// Where a popup tap-through goes — mirrors pages/Notifications.jsx targetFor.
 const targetFor = (n) => {
   if (n?.link) return n.link;
   const b = n?.booking;
@@ -23,18 +22,10 @@ const normalizeList = (data) => {
   return [];
 };
 
-// Global poller: whenever a NEW unread notification arrives for the signed-in
-// customer/cook/admin, show it as a popup card (bottom-right) with a tap-through.
-// First fetch after mount only seeds the baseline so old unreads don't all
-// pop at once — only arrivals after that pop up.
 const NotificationPopup = () => {
   const user = useSelector((s) => s.auth.user);
   const navigate = useNavigate();
   const location = useLocation();
-  // Booking flow must stay interruption-free: bottom-right notification
-  // cards cover the slot picker / Pay button, so suppress them while the
-  // customer is planning, waiting or paying. Polling continues in the
-  // background (badge stays fresh); only the visual popup is held back.
   const isBookingRoute = /^\/(cook-on-demand|cooks(\/|$)|bookings(\/|$))/.test(
     location.pathname || ""
   );
@@ -54,24 +45,17 @@ const NotificationPopup = () => {
 
   const queuePopup = useCallback(
     (n) => {
-      // Never pop a card over the booking flow — the notification is still
-      // recorded and the navbar badge still refreshes via the event below.
       if (isBookingRoute) {
         try {
           window.dispatchEvent(new CustomEvent("notifications-updated"));
         } catch {
-          // non-fatal
         }
         return;
       }
-      // Cooks already get the Accept/Decline request dialog for a new
-      // booking request — skip the generic message card so only the
-      // request popup shows.
       if (user?.role === "cook" && n?.type === "booking_request") {
         try {
           window.dispatchEvent(new CustomEvent("notifications-updated"));
         } catch {
-          // non-fatal
         }
         return;
       }
@@ -90,27 +74,19 @@ const NotificationPopup = () => {
           setTimeout(() => dismiss(id), POPUP_TTL_MS)
         );
       }
-      // Nudge the navbar badge to refresh immediately instead of waiting
-      // for its own 60s poll.
       try {
         window.dispatchEvent(new CustomEvent("notifications-updated"));
       } catch {
-        // non-fatal
       }
     },
     [dismiss, isBookingRoute, user?.role]
   );
 
-  // Leaving the booking flow must not strand a stale card either: entering
-  // it clears anything already on screen (e.g. a popup that arrived just
-  // before the user tapped "Book").
   useEffect(() => {
     if (isBookingRoute) setPopups([]);
   }, [isBookingRoute]);
 
   useEffect(() => {
-    // Reset baseline when the account changes so a new login doesn't pop
-    // the previous account's leftovers (or miss its own arrivals).
     knownIds.current = new Set();
     initialized.current = false;
     setPopups([]);
@@ -142,13 +118,11 @@ const NotificationPopup = () => {
           const key = String(n._id || n.id || "");
           if (key) knownIds.current.add(key);
         });
-        // Oldest first so the newest ends up on top of the stack.
         fresh
           .slice()
           .reverse()
           .forEach(queuePopup);
       } catch {
-        // badge/page show errors; popups stay silent on poll failure
       }
     };
 
@@ -168,7 +142,6 @@ const NotificationPopup = () => {
     };
   }, [user, queuePopup]);
 
-  // Clear pending auto-dismiss timers on unmount.
   useEffect(
     () => () => {
       timers.current.forEach((t) => clearTimeout(t));
@@ -178,17 +151,14 @@ const NotificationPopup = () => {
   );
 
   const openPopup = async (p) => {
-    // Opening the destination counts as reading it (best-effort).
     if (p.notifId) {
       try {
         await API.patch(`/notifications/${p.notifId}/read`);
       } catch {
-        // non-fatal — navigation still happens
       }
       try {
         window.dispatchEvent(new CustomEvent("notifications-updated"));
       } catch {
-        // non-fatal
       }
     }
     dismiss(p._id);

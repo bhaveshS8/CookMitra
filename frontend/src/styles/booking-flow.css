@@ -1,6 +1,3 @@
-/* ==========================================================================
-   Booking flow — waiting page (countdown ring, steps, summary)
-   ========================================================================== */
 
 .booking-flow-page {
   position: relative;
@@ -37,19 +34,14 @@
 .bf-cook-name { color: var(--primary); }
 .bf-accept-pulse { color: var(--accent-emerald); animation: acceptPulse 1.4s ease-in-out infinite; }
 
-/* Floating snack emojis */
 .bf-emoji { position: absolute; font-size: 1.4rem; opacity: 0.5; animation: floaty 5s ease-in-out infinite; pointer-events: none; z-index: -1; }
 .bf-emoji.e1 { top: 4%; left: 6%; }
 .bf-emoji.e2 { top: 12%; right: 7%; animation-delay: -1.4s; }
 .bf-emoji.e3 { bottom: 16%; left: 9%; animation-delay: -2.6s; }
 .bf-emoji.e4 { bottom: 8%; right: 10%; animation-delay: -0.8s; }
 
-/* Countdown ring */
 .bf-wait-head { display: flex; align-items: center; gap: 1.7rem; }
 .bf-ring-wrap { position: relative; width: 132px; height: 132px; flex-shrink: 0; }
-/* Compact variant used on the payment page — keeps the SVG ring and its
-   centered overlay exactly the same size so the time always sits in the
-   middle of the circle. */
 .bf-ring-wrap.small { width: 104px; height: 104px; }
 .bf-ring { transform: rotate(-90deg); display: block; width: 100%; height: 100%; }
 .bf-ring-track { fill: none; stroke: var(--slate-100); stroke-width: 10; }
@@ -84,7 +76,6 @@
 .bf-dots i:nth-child(2) { animation-delay: 0.2s; }
 .bf-dots i:nth-child(3) { animation-delay: 0.4s; }
 
-/* Progress steps */
 .bf-steps { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 1.5rem; }
 .bf-step {
   display: inline-flex;
@@ -101,7 +92,6 @@
 .bf-step.done { color: var(--accent-emerald); border-color: #a7f3d0; background: var(--accent-emerald-light); }
 .bf-step.active { color: var(--primary); border-color: #ffd3a8; background: var(--primary-light); }
 
-/* Summary chips */
 .bf-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 0.55rem; margin-top: 1.3rem; }
 .bf-chip {
   display: inline-flex;
@@ -116,7 +106,6 @@
   font-weight: 650;
 }
 
-/* Kitchen wisdom fact */
 .bf-fact {
   margin-top: 1.5rem;
   border-radius: var(--radius-md);
@@ -130,7 +119,6 @@
 .bf-actions { margin-top: 1.6rem; }
 .bf-btn-ghost:hover { border-color: var(--accent-rose); color: var(--accent-rose); }
 
-/* Loading / redirect interstitial */
 .bf-loader {
   display: flex;
   flex-direction: column;
@@ -155,10 +143,6 @@
   font-weight: 600;
 }
 
-/* ==========================================================================
-   Reschedule modal (RescheduleModal.jsx) — BookingRequestModal shell pattern:
-   compact card, icon header, CustomCalendar + slot chips, sticky actions.
-   ========================================================================== */
 .rs-card {
   position: relative;
   width: 100%;
@@ -284,8 +268,6 @@
 }
 .rs-actions .btn { flex: 1 1 0; min-height: 48px; justify-content: center; }
 
-/* ---- Advanced reschedule (v2): current summary, cook swap, reason,
-   confirmation, success. Same design language; responsive sheet. ---- */
 .rs-card.rs-wide { max-width: 640px; }
 .rs-section-title { margin: 0.35rem 0 0; font-size: 0.86rem; font-weight: 800; color: var(--slate-800); }
 .rs-current {
@@ -403,10 +385,6 @@
   .rs-cooks { grid-template-columns: repeat(2, 1fr); }
 }
 
-/* ==========================================================================
-   Refund request modal (RefundRequestModal.jsx) — same shell language as
-   the reschedule card: icon header, summary sheet, sticky actions.
-   ========================================================================== */
 .rf-card {
   position: relative;
   width: 100%;
@@ -527,7 +505,6 @@
   .rf-actions { flex-direction: column; }
   .rf-actions .btn { width: 100%; }
 }
-/* ---- Small phones: reschedule/refund dialogs ------------------------ */
 @media (max-width: 375px) {
   .rf-card { padding: 1.1rem 0.9rem 0.9rem; }
   .rf-head h3 { font-size: 1.02rem; }

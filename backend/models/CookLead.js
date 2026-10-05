@@ -1,5 +1,3 @@
-// Customer lead submitted by a Cook Partner (§7).
-// A lead is NOT a booking — verification + admin approval decide incentives.
 const mongoose = require("mongoose");
 
 const cookLeadSchema = new mongoose.Schema(
@@ -7,7 +5,6 @@ const cookLeadSchema = new mongoose.Schema(
     cook: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     customerName: { type: String, required: true, trim: true, maxlength: 80 },
     mobileNumber: { type: String, required: true, trim: true, maxlength: 20 },
-    // Normalized 10-digit core for duplicate detection (§7, §15).
     normalizedPhone: { type: String, required: true, trim: true },
     location: { type: String, required: true, trim: true, maxlength: 120 },
     requiredService: {
@@ -32,7 +29,6 @@ const cookLeadSchema = new mongoose.Schema(
     rejectionReason: { type: String, default: "", trim: true, maxlength: 300 },
     verifiedAt: { type: Date },
     verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
-    // Idempotency: same cook submitting the same phone twice collides here.
     idempotencyKey: { type: String, default: "", trim: true },
   },
   { timestamps: true }

@@ -1,12 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-// Visit analytics graph — daily visits (area) + unique visitors (line).
-// Pure SVG, no chart library: responsive, offline-friendly, matches the
-// dashboard palette. Props: days = [{ day: "YYYY-MM-DD", visits, uniques }].
 const H = 260;
 const PAD = { top: 16, right: 12, bottom: 30, left: 42 };
 
-// Round up to a "nice" axis step (1 / 2 / 2.5 / 5 × 10^n).
 const niceCeil = (v) => {
   if (!Number.isFinite(v) || v <= 0) return 1;
   const exp = Math.floor(Math.log10(v));
@@ -63,7 +59,6 @@ const VisitChart = ({ days = [] }) => {
       pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(" ");
     const area = `${line("visits")} L${x(n - 1).toFixed(1)},${(PAD.top + innerH).toFixed(1)} L${x(0).toFixed(1)},${(PAD.top + innerH).toFixed(1)} Z`;
     const ticks = [0, 1, 2, 3, 4].map((t) => t * step);
-    // ~7 evenly spaced x labels regardless of range length.
     const labelIdx = n <= 7 ? pts.map((_, i) => i) : Array.from({ length: 7 }, (_, k) => Math.round((k * (n - 1)) / 6));
     const peak = pts.reduce((best, p) => (p.visits > (best?.visits ?? -1) ? p : best), null);
     const avg = n ? pts.reduce((s, p) => s + p.visits, 0) / n : 0;
@@ -87,7 +82,6 @@ const VisitChart = ({ days = [] }) => {
   };
 
   const hp = hover != null ? model.pts[hover] : null;
-  // Keep the tooltip inside the chart on both edges.
   const tipLeft = hover != null ? Math.min(Math.max((model.x(hover) / W) * 100, 18), 82) : 0;
 
   return (
@@ -126,7 +120,6 @@ const VisitChart = ({ days = [] }) => {
             </linearGradient>
           </defs>
 
-          {/* Gridlines + y labels */}
           {model.ticks.map((t) => (
             <g key={t}>
               <line
@@ -150,7 +143,6 @@ const VisitChart = ({ days = [] }) => {
             </g>
           ))}
 
-          {/* X labels */}
           {model.labelIdx.map((i) => (
             <text
               key={model.pts[i].day}
@@ -165,12 +157,10 @@ const VisitChart = ({ days = [] }) => {
             </text>
           ))}
 
-          {/* Visits area + uniques line */}
           <path d={model.area} fill="url(#visit-area)" />
           <path d={model.line("visits")} fill="none" stroke="#ea580c" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
           <path d={model.line("uniques")} fill="none" stroke="#059669" strokeWidth="2" strokeDasharray="6 3" strokeLinejoin="round" strokeLinecap="round" />
 
-          {/* Hover guide + dots */}
           {hp && (
             <g>
               <line

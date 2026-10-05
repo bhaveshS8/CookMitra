@@ -1,21 +1,3 @@
-// Standalone regression test for the self-serve RESCHEDULE flow (no deps, no DB).
-// Run:  node backend/reschedule.test.js  — exits non-zero on any failure.
-//
-// Policy (v1): the booking's own customer or an admin may move an upcoming
-// booking to a new date/start time. The move is instant — the other side is
-// notified — keeps the same cook, duration and money (NO refund / re-charge /
-// coupon release / ledger work), and is gated by:
-//   1. status ∈ requested|accepted|confirmed and nothing started,
-//   2. the 30-minute cutoff on the CURRENT slot (moves close like cancels),
-//   3. a ≥30-minute lead on the NEW slot plus the same grid / service-day /
-//      window / overlap rules booking creation enforces,
-//   4. a max of 2 moves for customers (admins exempt).
-// The 5-minute request/payment windows are renewed so a moved hold survives.
-//
-// It drives the REAL controller with in-memory fakes (no DB), so the atomic
-// claim branch (status + rescheduleCount guard, requires a live DB) is skipped
-// here and is covered by concurrency-adversarial.e2e.js. Route-surface checks
-// prove the 410 tombstone is gone and the validators/roles are right.
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 
@@ -36,8 +18,6 @@ const check = (name, ok, detail) => {
   else failures += 1;
 };
 
-// IST business-day offset helper: "today" for the app is always IST, and IST
-// has no DST, so adding whole days to an instant is exact.
 const istDayOffset = (offset) => istDayString(new Date(Date.now() + offset * 24 * 60 * 60 * 1000));
 
 const CUSTOMER = { id: "cust1", role: "CUSTOMER" };
@@ -45,7 +25,6 @@ const STRANGER = { id: "cust9", role: "CUSTOMER" };
 const COOK = { id: "cook1", role: "COOK" };
 const ADMIN = { id: "admin1", role: "ADMIN" };
 
-// ── In-memory fakes ─────────────────────────────────────────────────────────
 let bookingDoc = null;
 let rivals = [];
 let cookProfile = null;
@@ -103,9 +82,6 @@ const reset = (over = {}) => {
   return bookingDoc;
 };
 
-// Thenable query chain: `await Model.findOne(...)` (direct await in the
-// controller) and `Model.findOne(...).select(...).lean()` (getDayWindows)
-// both have to work — `.select`/`.lean` resolve to the same doc.
 const chainable = (doc) => ({
   select: () => chainable(doc),
   lean: () => chainable(doc),
@@ -152,7 +128,6 @@ const callOptions = (user, query) =>
   });
 
 (async () => {
-  // ── 1. Happy path: customer moves a live `requested` hold ────────────────
   {
     const doc = reset();
     const firstWindow = doc.requestExpiresAt.getTime();
@@ -187,7 +162,6 @@ const callOptions = (user, query) =>
     check("response carries the new slot", r.payload?.startTime === "14:00" && r.payload?.endTime === "16:00", `${r.payload?.startTime}-${r.payload?.endTime}`);
   }
 
-  // ── 2. Accepted (unpaid) moves renew the PAYMENT window ──────────────────
   {
     const doc = reset({ status: "accepted", paymentExpiresAt: new Date(Date.now() + 60 * 1000) });
     const before = doc.paymentExpiresAt.getTime();
@@ -201,7 +175,6 @@ const callOptions = (user, query) =>
     check("accepted move keeps the status (no re-accept dance)", doc.status === "accepted", doc.status);
   }
 
-  // ── 3. Paid `confirmed` move: nothing about the money changes ────────────
   {
     const doc = reset({
       status: "confirmed",
@@ -220,7 +193,6 @@ const callOptions = (user, query) =>
     check("amount untouched", Number(doc.amount) === 199, String(doc.amount));
   }
 
-  // ── 4. Retry safety: the current slot is an idempotent 200 ───────────────
   {
     const doc = reset({ status: "confirmed" });
     const r = await callMove(CUSTOMER, { date: istDayOffset(3), startTime: "10:00" });
@@ -228,7 +200,6 @@ const callOptions = (user, query) =>
     check("no-op writes nothing and notifies nobody", doc.saveCalls === 0 && doc.rescheduleCount === 0 && notificationLog.length === 0, `saves=${doc.saveCalls} n=${notificationLog.length}`);
   }
 
-  // ── 5. Role matrix ───────────────────────────────────────────────────────
   {
     reset();
     let r = await callMove(STRANGER, { date: istDayOffset(4), startTime: "14:00" });
@@ -254,7 +225,6 @@ const callOptions = (user, query) =>
     );
   }
 
-  // ── 6. Status guards: nothing started / terminal may move ────────────────
   for (const status of ["in_progress", "completed", "cancelled", "rejected", "expired", "unattended"]) {
     const doc = reset({ status });
     const r = await callMove(CUSTOMER, { date: istDayOffset(4), startTime: "14:00" });
@@ -262,14 +232,12 @@ const callOptions = (user, query) =>
     check(`${status} stays untouched`, doc.rescheduleCount === 0 && doc.saveCalls === 0 && notificationLog.length === 0, `saves=${doc.saveCalls}`);
   }
 
-  // ── 7. Started-service flags lock the row even in a live status ──────────
   for (const flag of ["serviceStartedAt", "cookArrived", "hoursCompleted"]) {
     reset({ status: "confirmed", [flag]: flag === "hoursCompleted" ? true : new Date() });
     const r = await callMove(CUSTOMER, { date: istDayOffset(4), startTime: "14:00" });
     check(`${flag} blocks the move -> 400`, r.status === 400 && /under way/.test(String(r.payload?.message)), `s=${r.status} ${r.payload?.message}`);
   }
 
-  // ── 8. 30-minute cutoff on the CURRENT slot (admins exempt) ──────────────
   {
     const lockStart = minutesToTime(Math.floor(istNowMinutes() / 30) * 30);
     const doc = reset({
@@ -285,10 +253,7 @@ const callOptions = (user, query) =>
     check("admin is exempt from the cutoff -> 200", rAdmin.status === 200, `s=${rAdmin.status}`);
   }
 
-  // ── 9. Minimum lead on the NEW slot ──────────────────────────────────────
   {
-    // Next half-hour boundary: always ≥ now and < now+30min, so the move must
-    // be refused. (If now is exactly on a boundary the lead is 0 minutes.)
     const nowMin = istNowMinutes();
     const leadStart = nowMin % 30 === 0 ? nowMin : Math.ceil(nowMin / 30) * 30;
     const doc = reset({
@@ -307,7 +272,6 @@ const callOptions = (user, query) =>
     check("lead refusal leaves the booking untouched", doc.rescheduleCount === 0 && doc.saveCalls === 0, "");
   }
 
-  // ── 10. Customer cap of 2 moves (admins exempt) ──────────────────────────
   {
     const doc = reset({ status: "confirmed", rescheduleCount: 2 });
     const r = await callMove(CUSTOMER, { date: istDayOffset(4), startTime: "14:00" });
@@ -318,7 +282,6 @@ const callOptions = (user, query) =>
     check("admin move still increments the counter", bookingDoc.rescheduleCount === 3, String(bookingDoc.rescheduleCount));
   }
 
-  // ── 11. Input matrix ─────────────────────────────────────────────────────
   {
     const cases = [
       ["off-grid start", { date: istDayOffset(4), startTime: "14:15" }, /30-minute interval/],
@@ -337,7 +300,6 @@ const callOptions = (user, query) =>
     }
   }
 
-  // ── 12. Duration + service day ───────────────────────────────────────────
   {
     reset();
     const r = await callMove(CUSTOMER, { date: istDayOffset(4), startTime: "19:00" });
@@ -355,7 +317,6 @@ const callOptions = (user, query) =>
     check("duration refusal writes nothing", doc.saveCalls === 0, "");
   }
 
-  // ── 13. Cook must still be bookable ──────────────────────────────────────
   {
     reset();
     cookProfile = null;
@@ -369,7 +330,6 @@ const callOptions = (user, query) =>
     check("cook toggled unavailable -> 400", r.status === 400 && /unavailable/.test(String(r.payload?.message)), `s=${r.status} ${r.payload?.message}`);
   }
 
-  // ── 14. Overlap checks exclude the booking itself ────────────────────────
   {
     reset();
     rivals = [{ _id: "rival1", startTime: "14:00", endTime: "16:00", status: "confirmed" }];
@@ -383,14 +343,12 @@ const callOptions = (user, query) =>
     check("the booking itself never blocks its own move", r.status === 200, `s=${r.status}`);
   }
   {
-    // Partially overlapping window: 11:00–12:00 collides with 10:00–12:00.
     reset({ date: istMidnight(istDayOffset(4)), startTime: "10:00", endTime: "12:00" });
     rivals = [{ _id: "rival1", startTime: "11:00", endTime: "13:00", status: "accepted" }];
     const r = await callMove(CUSTOMER, { date: istDayOffset(4), startTime: "11:00" });
     check("partial overlap on the target slot -> 409", r.status === 409, `s=${r.status}`);
   }
 
-  // ── 15. Reschedule-options feed ──────────────────────────────────────────
   {
     reset();
     const r = await callOptions(CUSTOMER, { date: istDayOffset(4) });
@@ -417,16 +375,12 @@ const callOptions = (user, query) =>
     check("options: past date -> 400", r4.status === 400, `s=${r4.status}`);
   }
   {
-    // Self-exclusion: Booking.find hands back the booking itself on the target
-    // day — its own 10:00 slot must still be offered.
     reset();
     rivals = [{ _id: "booking1", startTime: "10:00", endTime: "12:00", status: "confirmed" }];
     const r = await callOptions(CUSTOMER, { date: istDayOffset(4) });
     check("options exclude the booking's own hold", (r.payload?.slots || []).some((s) => s.startTime === "10:00"), JSON.stringify((r.payload?.slots || []).map((s) => s.startTime)));
   }
   {
-    // Today: the customer sees only slots ≥30 minutes out; the admin sees the
-    // full day (support override).
     reset();
     const rCust = await callOptions(CUSTOMER, { date: istDayString() });
     const leadOk = (rCust.payload?.slots || []).every((s) => {
@@ -442,7 +396,6 @@ const callOptions = (user, query) =>
     );
   }
 
-  // ── 16. Route surface: validators + roles, no tombstone ──────────────────
   {
     const routeSrc = fs.readFileSync(path.join(__dirname, "routes", "bookings.js"), "utf8");
     const reschedIdx = routeSrc.indexOf('"/:id/reschedule"');
@@ -467,7 +420,6 @@ const callOptions = (user, query) =>
     );
   }
 
-  // ── 17. Tombstone regression: the 410 is gone everywhere ─────────────────
   {
     reset();
     const r = await callMove(CUSTOMER, { date: istDayOffset(4), startTime: "14:00" });
@@ -484,7 +436,6 @@ const callOptions = (user, query) =>
     check("notification type is no longer marked legacy", !/nothing emits this any more/.test(notifSrc));
   }
 
-  // ── 18. rescheduleLocked mirrors the cancel cutoff ───────────────────────
   {
     check("far-future slot is not locked", controller.rescheduleLocked({ date: istMidnight(istDayOffset(2)), startTime: "10:00" }) === false);
     const soonStart = minutesToTime(Math.floor(istNowMinutes() / 30) * 30);

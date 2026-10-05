@@ -1,12 +1,3 @@
-// Helpers to share a booking's order details + user location to the cook on WhatsApp.
-//
-// Two layers live here:
-//  1. Plain-text MESSAGE builders (build*Message) — single source of truth.
-//     Used by the Meta WhatsApp Cloud API sender (utils/whatsappApi.js) to
-//     push automatic notifications to the user + cook.
-//  2. wa.me deep-link builders (build*WhatsAppUrl) — click-to-chat links
-//     returned to the client. These delegate to (1) so both paths stay in sync.
-// URL builders return null when the recipient has no valid Indian mobile number.
 
 const FRONTEND_BASE_URL = (
   process.env.FRONTEND_URL ||
@@ -49,12 +40,7 @@ const fullVenue = (booking) => {
   return parts || booking?.address || "";
 };
 
-// ── Plain-text messages (Meta Cloud API + wa.me share one source) ────────────
 
-// New-request alert for the COOK. Privacy: the customer's phone stays hidden
-// until the cook accepts (in-app payloads redact it while `requested` too) —
-// contact details unlock on accept, and the full job sheet follows payment.
-// Venue stays: the cook needs it to decide within the 5-minute window.
 const buildBookingRequestMessage = ({ customerName, booking }) => {
   const mapsLink = mapsPin(booking);
   const lines = [
@@ -75,8 +61,6 @@ const buildBookingRequestMessage = ({ customerName, booking }) => {
   return lines.join("\n");
 };
 
-// After the cook ACCEPTS, this is the "booked" confirmation containing:
-// cook name, cook phone number and the venue pin.
 const buildCustomerConfirmationMessage = ({ cookName, cookPhone, booking }) => {
   const venueMapsLink = mapsPin(booking);
   const isConfirmed = ["accepted", "confirmed", "in_progress"].includes(booking?.status);
@@ -107,9 +91,6 @@ const buildCustomerConfirmationMessage = ({ cookName, cookPhone, booking }) => {
   return lines.join("\n");
 };
 
-// Sent right after the customer's payment succeeds (cook already accepted),
-// so the cook receives the customer's name, phone number and venue location
-// (address + GPS pin) in one tap.
 const buildCookJobSheetMessage = ({ customerName, customerPhone, booking }) => {
   const mapsLink = mapsPin(booking);
   const lines = [
@@ -130,7 +111,6 @@ const buildCookJobSheetMessage = ({ customerName, customerPhone, booking }) => {
   return lines.join("\n");
 };
 
-// "Cooking hours complete" alarm for EITHER party (pass recipient context).
 const buildHoursCompleteMessage = ({ booking, cookName, cookPhone, customerName }) => {
   const endStr = booking?.endTime || "";
   const completedAt = booking?.hoursCompletedAt
@@ -151,7 +131,6 @@ const buildHoursCompleteMessage = ({ booking, cookName, cookPhone, customerName 
   return lines.join("\n");
 };
 
-// "Service complete — please rate your cook" reminder for the CUSTOMER.
 const buildReviewMessage = ({ cookName, booking, reviewUrl }) => {
   const link = reviewUrl || bookingUrl(booking?._id);
   const lines = [
@@ -298,7 +277,6 @@ const buildServiceCompletedMessage = ({ booking, cookName, forCook = false }) =>
     .join("\n");
 };
 
-// ── wa.me deep links (delegate to the message builders above) ────────────────
 
 const buildBookingWhatsAppUrl = ({ cookPhone, customerName, booking }) => {
   const mobile = normalizeIndianMobile(cookPhone);
@@ -307,10 +285,6 @@ const buildBookingWhatsAppUrl = ({ cookPhone, customerName, booking }) => {
   return `https://wa.me/91${mobile}?text=${encodeURIComponent(text)}`;
 };
 
-// Build a wa.me link targeting the CUSTOMER's own WhatsApp: sends their order
-// details + booking confirmation (cook name/phone, venue pin). Cook live
-// location tracking was removed — no live pins or tracking links here.
-// Returns null when the customer has no valid number.
 const buildCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone, booking }) => {
   const mobile = normalizeIndianMobile(customerPhone);
   if (!mobile) return null;
@@ -318,10 +292,6 @@ const buildCustomerWhatsAppUrl = ({ customerPhone, cookName, cookPhone, booking 
   return `https://wa.me/91${mobile}?text=${encodeURIComponent(text)}`;
 };
 
-// Build a wa.me link targeting the COOK's WhatsApp with the full job sheet:
-// sent right after the customer's payment succeeds (cook already accepted),
-// so the cook receives the customer's name, phone number and venue location
-// (address + GPS pin) in one tap. Returns null for invalid cook numbers.
 const buildCookJobSheetWhatsAppUrl = ({ cookPhone, customerName, customerPhone, booking }) => {
   const mobile = normalizeIndianMobile(cookPhone);
   if (!mobile) return null;
@@ -329,9 +299,6 @@ const buildCookJobSheetWhatsAppUrl = ({ cookPhone, customerName, customerPhone, 
   return `https://wa.me/91${mobile}?text=${encodeURIComponent(text)}`;
 };
 
-// Build a wa.me "cooking hours complete" alarm targeted at EITHER party's own
-// WhatsApp (pass the recipient's phone as toPhone). Used so both customer and
-// cook get the alarm as a WhatsApp message. Returns null for invalid numbers.
 const buildHoursCompleteWhatsAppUrl = ({ toPhone, booking, cookName, cookPhone, customerName }) => {
   const mobile = normalizeIndianMobile(toPhone);
   if (!mobile) return null;
@@ -339,9 +306,6 @@ const buildHoursCompleteWhatsAppUrl = ({ toPhone, booking, cookName, cookPhone, 
   return `https://wa.me/91${mobile}?text=${encodeURIComponent(text)}`;
 };
 
-// Build a wa.me "service complete — please rate your cook" reminder targeted
-// at the CUSTOMER's own WhatsApp. Links back to the booking page where the
-// review form lives. Returns null for invalid numbers.
 const buildReviewWhatsAppUrl = ({ customerPhone, cookName, booking, reviewUrl }) => {
   const mobile = normalizeIndianMobile(customerPhone);
   if (!mobile) return null;
@@ -358,7 +322,6 @@ module.exports = {
   buildReviewWhatsAppUrl,
   bookingUrl,
   FRONTEND_BASE_URL,
-  // Plain-text messages (Meta Cloud API sender):
   buildBookingRequestMessage,
   buildCustomerConfirmationMessage,
   buildCookJobSheetMessage,

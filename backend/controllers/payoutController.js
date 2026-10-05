@@ -1,10 +1,3 @@
-// Cook payout settlement + refund console — admin-only ledger operations.
-//
-// Every paid booking records the cook's 85% in Booking.payout (status
-// "pending"). Nothing paid the cook until an admin makes an actual UPI/bank
-// transfer outside the app and records the reference here. This module gives
-// that flow one console: a pending queue with the cook's payout details,
-// history, per-cook statements, and a failed-refund follow-up queue.
 const Booking = require("../models/Booking");
 const mongoose = require("mongoose");
 const CookProfile = require("../models/CookProfile");
@@ -21,15 +14,6 @@ const {
 } = require("../utils/finance");
 const { logCancellationAudit, syncCancellationRefundStatus } = require("../utils/cancellationAudit");
 
-// Test payments carry no real money — they must never enter the payout
-// queue. Real gateway/webhook payments (paid + not testMode) do — but only
-// once the service is actually rendered: booking `completed` AND cooking
-// hours flagged complete. Upcoming (confirmed/in_progress) and cancelled
-// bookings never enter the queue — settling those would release the cook's
-// share for an unrendered session (a cancelled session is refunded to the
-// customer instead). Zero-value rows carry no money and are excluded so a
-// free booking can never look payable. Rows predating the payout subdoc
-// (missing `payout`) are treated as pending so legacy money can't stick.
 const PAYOUT_PENDING_OR_MISSING = {
   $or: [{ "payout.status": "pending" }, { "payout.status": { $exists: false } }],
 };
@@ -42,10 +26,6 @@ const pendingFilter = () => ({
   ...PAYOUT_PENDING_OR_MISSING,
 });
 
-// Cook payout queue: every completed paid booking whose 85% is not yet
-// settled, oldest first (fairness — cooks see their oldest money first).
-// Includes the cook's saved payout details so the admin can copy the UPI id
-// / read the bank last-4 without opening another page.
 exports.getPayoutQueue = async (req, res, next) => {
   try {
     const pg = paginationParams(req);
@@ -56,14 +36,11 @@ exports.getPayoutQueue = async (req, res, next) => {
         .populate("customer", "name"),
       pg
     );
-    // Attach each cook's payout details in one extra query round.
     const cookIds = [...new Set((bookings || []).map((b) => String(b.cook?._id || b.cook)))];
     const profiles = await CookProfile.find({ user: { $in: cookIds } })
       .select("user payoutDetails")
       .lean();
     const byUser = new Map(profiles.map((p) => [String(p.user), p.payoutDetails || null]));
-    // Eligibility flags ride along so the console never implies a blocked
-    // row is payable: settlePayout enforces the same validator server-side.
     const enriched = (bookings || []).map((b) => {
       const plain = b.toObject ? b.toObject() : b;
       const { eligible, reasons } = payoutEligibility(b);
@@ -80,7 +57,6 @@ exports.getPayoutQueue = async (req, res, next) => {
   }
 };
 
-// Payout history: bookings already settled (newest first) for the audit trail.
 exports.getPayoutHistory = async (req, res, next) => {
   try {
     const filter = { "payout.status": "settled", "payment.testMode": { $ne: true } };
@@ -101,15 +77,6 @@ exports.getPayoutHistory = async (req, res, next) => {
   }
 };
 
-// Mark one booking's cook share as paid. Offline money is treated as a
-// financial transaction, not a text field:
-// - the reference is format-validated AND globally unique (one transfer
-//   recorded twice is the classic double-spend);
-// - the centralized eligibility validator gates every rupee (paid, completed,
-//   evidenced service, no live refund);
-// - the recipient is snapshotted from the cook's profile at settle time, so
-//   later detail edits can't rewrite history;
-// - the claim is atomic (pending→settled) + idempotent on retry.
 exports.settlePayout = async (req, res, next) => {
   try {
     const reference = String(req.body?.reference || "").trim();
@@ -130,12 +97,6 @@ exports.settlePayout = async (req, res, next) => {
     if (!eligible) {
       return res.status(400).json({ message: reasons[0], reasons, code: "PAYOUT_NOT_ELIGIBLE" });
     }
-    // One transfer, one record: a reference that already settled another
-    // booking is a double-entry until proven otherwise. Compared on the
-    // NORMALIZED key (case/whitespace-insensitive) — bank refs are too;
-    // the exact typed text is still stored for audit fidelity. Checked
-    // across BOTH families: the same offline transfer must not close a
-    // manual refund and a payout (markRefundSettled checks both directions).
     const refKey = normalizePayoutReference(reference);
     const dup = await Booking.findOne({
       $or: [
@@ -146,13 +107,6 @@ exports.settlePayout = async (req, res, next) => {
     if (dup && String(dup._id) !== String(existing._id)) {
       return res.status(409).json({ message: "This reference is already recorded on another payment — use the unique UPI/bank transaction id", code: "DUPLICATE_PAYOUT_REFERENCE" });
     }
-    // Freeze who is being paid: the cook's CURRENT destination details.
-    // Semantics (documented, not proof): this records the destination the
-    // admin had on file at settlement time — "recipient recorded by the
-    // admin at settlement time". The transfer itself happens externally
-    // BEFORE this click, so the UI requires the admin to confirm the shown
-    // destination matches the actual transfer (see AdminPayoutsPanel).
-    // Later profile edits can never rewrite this snapshot.
     let recipient = null;
     try {
       const profile = await CookProfile.findOne({ user: existing.cook }).select("payoutDetails").lean();
@@ -170,11 +124,6 @@ exports.settlePayout = async (req, res, next) => {
     }
     let booking;
     try {
-      // Atomic claim with the FULL economic guard set, not just the payout
-      // flag: a customer refund queued (or approved) between the eligibility
-      // read above and this write must fail the claim instead of creating a
-      // refund+payout contradiction. Legacy rows without a payout subdoc
-      // claim through the same gate.
       booking = await Booking.findOneAndUpdate(
         {
           _id: existing._id,
@@ -201,9 +150,6 @@ exports.settlePayout = async (req, res, next) => {
         { new: true }
       );
     } catch (e) {
-      // Lost a uniqueness race between the check above and the claim:
-      // another booking settled with this reference (or its case-variant)
-      // first. The uniq_payout_reference* indexes make this fail closed.
       if (e?.code === 11000) {
         return res.status(409).json({ message: "This reference is already recorded on another payment — use the unique UPI/bank transaction id", code: "DUPLICATE_PAYOUT_REFERENCE" });
       }
@@ -227,7 +173,6 @@ exports.settlePayout = async (req, res, next) => {
       reason: `Cook share settled to ${recipient?.upiId || recipient?.accountLast4 || "recorded destination"}`,
     });
 
-    // Tell the cook their money is on the way (non-fatal).
     try {
       const Notification = require("../models/Notification");
       await Notification.create({
@@ -241,7 +186,6 @@ exports.settlePayout = async (req, res, next) => {
         } session. Ref: ${booking.payout.reference}`,
       });
     } catch {
-      // non-fatal
     }
 
     res.json(booking);
@@ -250,8 +194,6 @@ exports.settlePayout = async (req, res, next) => {
   }
 };
 
-// Per-cook statement: earnings, commission, settled vs pending totals.
-// Cooks call this for "me"; admins use /statement/:cookId for anyone.
 exports.getPayoutStatement = async (req, res, next) => {
   try {
     const cookId = req.params.cookId === "me" ? req.user.id : req.params.cookId;
@@ -272,10 +214,6 @@ exports.getPayoutStatement = async (req, res, next) => {
     const rows = await Booking.find(match)
       .select("amount commission cookPayout payout payment status date hoursCompleted")
       .lean();
-    // earnings = gross cook share across paid real bookings (refunds NOT
-    // deducted); refunded = successful refunds (processed/manual, real money
-    // only); netEarnings = what the cook side actually keeps. Labels must
-    // use netEarnings for "earned" — see CookPayoutPanel.
     const SETTLED_REFUND = ["processed", "manual"];
     const statement = rows.reduce(
       (acc, b) => {
@@ -292,11 +230,6 @@ exports.getPayoutStatement = async (req, res, next) => {
         if (b.payout?.status === "settled") {
           acc.settled += b.payout.amount || b.cookPayout || 0;
         } else if (!b.payout || b.payout?.status === "pending") {
-          // "Pending" means releasable money: only a completed service with
-          // completed service hours can ever be settled, and never while a
-          // customer refund for the same money is live. Upcoming or
-          // cancelled rows stay in history but hold no payable amount.
-          // Missing payout subdoc (legacy rows) behaves as pending.
           const liveRefund = b.payment?.refundStatus
             && !["none", "rejected"].includes(b.payment.refundStatus);
           if (b.status === "completed" && b.hoursCompleted === true && !liveRefund) {
@@ -333,10 +266,6 @@ exports.getPayoutStatement = async (req, res, next) => {
   }
 };
 
-// Best-effort gateway refund lookup: returns { ok, items[] } where items
-// are normalized { id, amountPaise, status }. Used by recovery paths to
-// adopt an already-created gateway refund instead of moving money twice.
-// Never throws — callers decide how to proceed when the gateway is silent.
 const lookupGatewayRefunds = async (razorpayPaymentId) => {
   try {
     if (!razorpayPaymentId || !razorpayConfigured || !razorpayClient || !razorpayClient.refunds) {
@@ -357,19 +286,9 @@ const lookupGatewayRefunds = async (razorpayPaymentId) => {
   }
 };
 
-// An already-created gateway refund matching this approval (same amount in
-// paise), if any. Matching by amount prevents adopting an unrelated partial
-// refund for a different decision.
 const matchingGatewayRefund = (items, refundAmountPaise) =>
   (items || []).find((r) => r.amountPaise === refundAmountPaise && !["failed", "cancelled"].includes(r.status)) || null;
 
-// Admin refund queue: refund requests awaiting a decision ("pending"), rows
-// mid-approval ("processing" — a crashed approve must stay visible, never
-// vanish), plus bookings whose approved refund failed or needs a manual
-// transfer, so support never has to query the DB by hand. Optional
-// ?status=pending|processing|failed|manual|processed|rejected|all narrows
-// the list (default: actionable states); processed/rejected provide the
-// historical view for support follow-ups.
 exports.getRefundQueue = async (req, res, next) => {
   try {
     const ACTIONABLE = ["pending", "processing", "failed", "manual"];
@@ -403,13 +322,6 @@ exports.getRefundQueue = async (req, res, next) => {
   }
 };
 
-// Admin: approve a queued refund — the ONLY path that moves money back to
-// the customer. Atomic claim (pending→processing) first: two concurrent
-// approves cannot both reach the gateway. Real gateway payments are refunded
-// via Razorpay (failures stay queued as "failed" for retry/follow-up); when
-// the gateway is not configured the request becomes "manual" for an outside
-// transfer, closed later via markRefundSettled. Test payments carry no real
-// money, so they close as processed immediately.
 exports.approveRefund = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id);
@@ -419,11 +331,6 @@ exports.approveRefund = async (req, res, next) => {
     if (booking.payment?.refundStatus !== "pending") {
       return res.status(400).json({ message: "Only refunds awaiting approval can be approved", code: "REFUND_NOT_ELIGIBLE" });
     }
-    // Validate BEFORE claiming: amount caps, test-mode routing, and the
-    // settled-payout clawback gate are all pure checks on the queued state.
-    // Optional body.amount selects a PARTIAL refund (0 < amount <= cap);
-    // omitted/wild values fall back to the full capped amount. The customer
-    // can never set this — this route is admin-only.
     const clawback = req.body?.clawback === true;
     const pre = refundApprovalCheck(booking, { clawback });
     if (!pre.ok) {
@@ -432,9 +339,6 @@ exports.approveRefund = async (req, res, next) => {
     let approvedAmount = pre.amount;
     let partial = false;
     if (req.body?.amount !== undefined && (typeof req.body.amount !== "string" || req.body.amount.trim() !== "")) {
-      // Strict parse (finance.parseRupeeAmount): booleans would otherwise
-      // coerce via Number(true) === 1 into a silent ₹1 refund, and decimals
-      // would round to an amount the admin never typed. Rejected loudly.
       const parsed = parseRupeeAmount(req.body.amount, { label: "Approved amount" });
       if (!parsed.ok) {
         return res.status(400).json({ message: parsed.error, code: "REFUND_AMOUNT_INVALID" });
@@ -446,13 +350,6 @@ exports.approveRefund = async (req, res, next) => {
       approvedAmount = parsed.value;
       partial = parsed.value < pre.amount;
     }
-    // Exactly one approver survives: concurrent approves lose here with a
-    // safe 400 instead of double-charging the gateway. When no clawback was
-    // declared, the claim additionally pins payout-not-settled: a cook
-    // settlement committing between the pre-check and this write must fail
-    // the claim instead of creating a refund+payout contradiction without a
-    // recorded clawback decision. (With clawback:true the payout was already
-    // settled at pre-check time, and settled is terminal, so no pin needed.)
     const claimFilter = { _id: booking._id, "payment.refundStatus": "pending" };
     if (!clawback) claimFilter["payout.status"] = { $ne: "settled" };
     const claimed = await Booking.findOneAndUpdate(
@@ -463,13 +360,7 @@ exports.approveRefund = async (req, res, next) => {
     if (!claimed) {
       return res.status(400).json({ message: "This refund is already being processed — please refresh.", code: "REFUND_ALREADY_PROCESSED" });
     }
-    // Whether a settled payout actually backs the clawback flag: a flag set
-    // on an UNsettled payout must not fabricate a "was already settled"
-    // audit trail below.
     const hadSettledPayout = booking.payout?.status === "settled";
-    // Final state commit, atomically: the gateway call above (or a parallel
-    // admin action such as manual settlement) must not be clobbered by a
-    // stale full-document save. Loser re-reads for an accurate answer.
     const commitRefundState = async (set) => {
       const { _note, ...fields } = set;
       const done = await Booking.findOneAndUpdate(
@@ -523,11 +414,6 @@ exports.approveRefund = async (req, res, next) => {
     const requestedAmount = Math.round(Number(claimed.payment?.refundAmount || refundAmount));
     let endStatus;
     let refundId = "";
-    // Idempotency before money: ask the gateway what already exists for this
-    // payment. A previous approval may have created a refund and then crashed
-    // before the database learned about it (the row was later reconciled back
-    // to pending). Adopt the matching refund instead of creating a second one
-    // — the customer must never be paid twice.
     let adoptedNote = "";
     if (claimed.payment?.razorpayPaymentId && razorpayConfigured && razorpayClient) {
       const existing = await lookupGatewayRefunds(claimed.payment.razorpayPaymentId);
@@ -543,10 +429,6 @@ exports.approveRefund = async (req, res, next) => {
             speed: "normal",
             notes: { booking: String(claimed._id), reason: "admin_approved" },
           });
-          // Gateway response integrity: an ambiguous body (missing id, wrong
-          // amount, unacceptable status) must NOT be recorded as a completed
-          // refund — it stays "failed" so the reconciliation path can adopt
-          // the real refund (if any) later instead of guessing.
           const gatewayId = String(refund?.id || "");
           const gatewayPaise = Math.round(Number(refund?.amount ?? refundAmount * 100));
           const gatewayStatus = String(refund?.status || "").toLowerCase();
@@ -586,7 +468,6 @@ exports.approveRefund = async (req, res, next) => {
     }
     const settled = fresh;
 
-    // Mirror the outcome onto the cancellation workflow tracker (§13/§26).
     try {
       const workflow =
         settled.payment.refundStatus === "processed"
@@ -618,7 +499,6 @@ exports.approveRefund = async (req, res, next) => {
         });
       }
     } catch {
-      // non-fatal: money + ledger already committed
     }
 
     await recordLedger({
@@ -655,11 +535,7 @@ exports.approveRefund = async (req, res, next) => {
           : "Your approved refund hit a gateway error — our team is following up and will notify you.",
       });
     } catch {
-      // non-fatal
     }
-    // The assigned cook's payout is decided by this refund (blocked while the
-    // refund is live; clawback when already settled) — they hear the outcome
-    // too, in their own words.
     try {
       const Notification = require("../models/Notification");
       const ref = String(settled._id).slice(-6).toUpperCase();
@@ -672,7 +548,6 @@ exports.approveRefund = async (req, res, next) => {
           (clawback && hadSettledPayout ? " (it was already settled — our team will contact you about recovery)." : "."),
       });
     } catch {
-      // non-fatal
     }
 
     res.json(settled);
@@ -681,9 +556,6 @@ exports.approveRefund = async (req, res, next) => {
   }
 };
 
-// Admin: reject a queued refund — the customer keeps no refund for this
-// booking. An optional reason is stored in history and shared with the
-// customer.
 exports.rejectRefund = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id);
@@ -694,9 +566,6 @@ exports.rejectRefund = async (req, res, next) => {
       return res.status(400).json({ message: "Only refunds awaiting approval can be rejected" });
     }
     const reason = String(req.body?.reason || "").trim().slice(0, 200);
-    // Atomic claim (not read-modify-save): a concurrent approval settling or
-    // processing this refund must win outright instead of being clobbered by
-    // a stale save. Loser re-reads below for an accurate message.
     const rejected = await Booking.findOneAndUpdate(
       { _id: booking._id, "payment.refundStatus": "pending" },
       {
@@ -747,10 +616,7 @@ exports.rejectRefund = async (req, res, next) => {
         message: `Your refund request for ₹${rejected.payment?.refundAmount || rejected.amount} was declined by our team${reason ? `: ${reason}` : ""}. Please contact support if you need help.`,
       });
     } catch {
-      // non-fatal
     }
-    // Declining unblocks the cook leg (a rejected refund never gates payout)
-    // — the cook hears the request is closed.
     try {
       const Notification = require("../models/Notification");
       const ref = String(rejected._id).slice(-6).toUpperCase();
@@ -761,7 +627,6 @@ exports.rejectRefund = async (req, res, next) => {
         message: `The refund request for booking #${ref} was declined — the cook payout for this booking is no longer blocked.`,
       });
     } catch {
-      // non-fatal
     }
 
     res.json(rejected);
@@ -770,9 +635,6 @@ exports.rejectRefund = async (req, res, next) => {
   }
 };
 
-// Admin: reject a pending cook payout — the cook is not paid for this
-// booking (e.g. service not rendered to satisfaction). Recorded as
-// "not_applicable" so it leaves the queue without looking payable.
 exports.rejectPayout = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id);
@@ -785,17 +647,10 @@ exports.rejectPayout = async (req, res, next) => {
     if (booking.payout?.status === "not_applicable") {
       return res.json(booking); // already rejected — idempotent success
     }
-    // Rows predating the payout subdoc behave as pending (same rule as the
-    // queue and settlement), so legacy money can be decided, not stuck.
     if ((booking.payout?.status || "pending") !== "pending") {
       return res.status(400).json({ message: "Only pending payouts can be rejected" });
     }
     const reason = String(req.body?.reason || "").trim().slice(0, 200);
-    // Atomic claim (not read-modify-save): a concurrent settlement committing
-    // between the read above and this write must win outright instead of
-    // being clobbered by a stale save (money moved, state says declined).
-    // Rows predating the payout subdoc claim as pending. Loser re-reads for
-    // an accurate idempotent/409 answer.
     const declined = await Booking.findOneAndUpdate(
       { _id: booking._id, ...PAYOUT_PENDING_OR_MISSING },
       {
@@ -839,7 +694,6 @@ exports.rejectPayout = async (req, res, next) => {
         } session was declined by our team${reason ? `: ${reason}` : ""}. Please contact support if you need help.`,
       });
     } catch {
-      // non-fatal
     }
 
     res.json(declined);
@@ -848,16 +702,6 @@ exports.rejectPayout = async (req, res, next) => {
   }
 };
 
-// Admin: mark a failed gateway refund as manually settled (the money left
-// via bank/UPI outside Razorpay). Also the recovery path for a "processing"
-// row stuck by a crashed approval: the admin verifies the gateway dashboard
-// by hand, then closes it here. An optional amount must exactly match the
-// approved figure — manual settlement can never exceed it.
-// Shared: close a non-terminal refund row as "processed" because the refund
-// already exists at the gateway (found by a pre-create lookup, a manual-
-// settlement verification or the reconciliation endpoint). The atomic filter
-// is the one every closer uses, so exactly one caller can win. Returns the
-// updated booking, or null when another writer got there first.
 const adoptGatewayRefund = async (booking, match, { historyNote, adminNote }) =>
   Booking.findOneAndUpdate(
     { _id: booking._id, "payment.refundStatus": { $in: ["processing", "failed", "manual"] } },
@@ -902,11 +746,6 @@ exports.markRefundSettled = async (req, res, next) => {
         return res.status(400).json({ message: `Settled amount must equal the approved ₹${approved}` });
       }
     }
-    // Gateway verification BEFORE recording a manual settlement: the refund
-    // may already exist at Razorpay (a crash/timeout left the row in
-    // processing/failed while the money actually left). Adopt it instead of
-    // paying the customer twice; when the gateway cannot be reached, refuse
-    // to guess — the admin verifies in the dashboard and retries.
     if (booking.payment?.razorpayPaymentId && razorpayConfigured && razorpayClient) {
       const gw = await lookupGatewayRefunds(booking.payment.razorpayPaymentId);
       if (!gw.ok) {
@@ -953,15 +792,10 @@ exports.markRefundSettled = async (req, res, next) => {
             message: `Your refund of ₹${adopted.payment.refundAmount || adopted.amount} has been processed.`,
           });
         } catch {
-          // non-fatal
         }
         return res.json({ ...(adopted.toObject ? adopted.toObject() : adopted), adopted: true, refundId: match.id });
       }
     }
-    // One transfer, one refund: a reference already recorded against another
-    // payout or refund is a double-entry until proven otherwise. Runs only on
-    // a live connection (unit tests run disconnected; there the unique index
-    // `uniq_refund_reference_key` is still the final, atomic guard).
     let dup = null;
     if (mongoose.connection?.readyState === 1) {
       dup = await Booking.findOne({
@@ -975,8 +809,6 @@ exports.markRefundSettled = async (req, res, next) => {
       return res.status(409).json({ message: "This reference already settled another payout or refund — use the unique UPI/bank transaction id", code: "DUPLICATE_PAYOUT_REFERENCE" });
     }
     const prevStatus = booking.payment.refundStatus;
-    // Atomic close (not read-modify-save): a concurrent approval/retry
-    // committing first must win instead of being clobbered. Loser re-reads.
     let closed;
     try {
       closed = await Booking.findOneAndUpdate(
@@ -998,8 +830,6 @@ exports.markRefundSettled = async (req, res, next) => {
         { new: true }
       );
     } catch (e) {
-      // Unique-index collision on the reference key: another refund (or a
-      // concurrent double-click) recorded the same transfer first.
       if (e?.code === 11000) {
         return res.status(409).json({ message: "This reference already settled another payout or refund — use the unique UPI/bank transaction id", code: "DUPLICATE_PAYOUT_REFERENCE" });
       }
@@ -1039,7 +869,6 @@ exports.markRefundSettled = async (req, res, next) => {
         message: `Your refund of ₹${closed.payment.refundAmount || closed.amount} has been processed.`,
       });
     } catch {
-      // non-fatal
     }
 
     res.json(closed);
@@ -1048,17 +877,6 @@ exports.markRefundSettled = async (req, res, next) => {
   }
 };
 
-// Admin: reconcile a refund stuck mid-approval ("processing") or left
-// "failed" by an ambiguous gateway error. Razorpay is asked what actually
-// exists for this payment, and then:
-//   - a matching refund exists → the row is closed as processed with the
-//     gateway id recorded; the ledger row is written under the SAME key the
-//     original approval would have used, so reconciliation can never
-//     double-record one economic event;
-//   - no refund exists → the row returns to "pending" so an admin can decide
-//     again, now with certainty that nothing was refunded;
-//   - the gateway is unreachable → 503 and nothing changes. Never guess with
-//     money: a lost gateway response must not become a second refund.
 exports.reconcileRefund = async (req, res, next) => {
   try {
     const booking = await Booking.findById(req.params.id);
@@ -1121,12 +939,9 @@ exports.reconcileRefund = async (req, res, next) => {
           message: `Your refund of ₹${approved} has been processed — it reaches your account in 5–7 business days.`,
         });
       } catch {
-        // non-fatal
       }
       return res.json({ adopted: true, refundId: match.id, booking: closed });
     }
-    // Gateway answered and holds no refund for this payment: the approval
-    // never moved money, so the request goes back to the decision queue.
     const reset = await Booking.findOneAndUpdate(
       { _id: booking._id, "payment.refundStatus": { $in: ["processing", "failed"] } },
       {
@@ -1152,9 +967,6 @@ exports.reconcileRefund = async (req, res, next) => {
   }
 };
 
-// Admin reconciliation: booking-aggregate money truth (source of record)
-// cross-checked against ledger entry counts. Any mismatch surfaces here for
-// manual review — the console never silently drifts from the books.
 exports.getLedgerSummary = async (req, res, next) => {
   try {
     const REAL_MONEY = { $ne: ["$payment.testMode", true] };
@@ -1239,8 +1051,6 @@ exports.getLedgerSummary = async (req, res, next) => {
     const ledgerCounts = await LedgerEntry.aggregate([
       { $group: { _id: "$type", n: { $sum: 1 }, total: { $sum: "$amount" } } },
     ]);
-    // Settled bookings with no payout.settled ledger row need a look
-    // (e.g. settled before the ledger existed, or a failed ledger write).
     const settledIds = await Booking.find({ "payout.status": "settled" }).select("_id").lean();
     const logged = await LedgerEntry.find({
       type: "payout.settled",
@@ -1253,10 +1063,6 @@ exports.getLedgerSummary = async (req, res, next) => {
       .map((b) => String(b._id))
       .filter((id) => !loggedSet.has(id))
       .slice(0, 50);
-    // Blocked payable-looking money: completed + paid real + unsettled share
-    // but missing service evidence (never OTP-started / arrival unrecorded /
-    // hours incomplete) or a live refund. Never auto-paid, never auto-denied
-    // — surfaced here so it cannot silently disappear from accounting.
     const blockedRows = await Booking.find({
       status: "completed",
       "payment.status": "paid",
@@ -1301,8 +1107,6 @@ exports.getLedgerSummary = async (req, res, next) => {
         ].filter(Boolean),
       })),
     };
-    // Same settled reference on two bookings = one transfer recorded twice.
-    // The unique indexes should make this impossible; non-empty means look.
     const duplicateReferences = await Booking.aggregate([
       {
         $match: {
@@ -1315,7 +1119,6 @@ exports.getLedgerSummary = async (req, res, next) => {
       { $limit: 10 },
       { $project: { _id: 0, reference: "$_id", count: "$n", bookings: 1 } },
     ]);
-    // Processed refunds with no refund.approved or refund.settled ledger row
     const processedRefundsForSummary = await Booking.find({
       "payment.refundStatus": "processed",
       "payment.testMode": { $ne: true },
@@ -1355,12 +1158,6 @@ exports.getLedgerSummary = async (req, res, next) => {
   }
 };
 
-// Admin: backfill missing payout.settled / refund.approved ledger rows
-// (pre-ledger history or a failed ledger write — see the summaries above).
-// Reconstructs each row from booking truth (amount/reference/settler/ids)
-// under the SAME idempotencyKey the original operation used, so reruns are
-// safe: existing keys collide and are skipped, never duplicated. Bounded
-// (100/call per family); repeat until the reconciled lists are empty.
 exports.reconcileMissingPayoutLedger = async (req, res, next) => {
   try {
     const LedgerEntry = require("../models/LedgerEntry");
@@ -1391,11 +1188,6 @@ exports.reconcileMissingPayoutLedger = async (req, res, next) => {
       if (r?.recorded || r?.duplicate) out.reconciled.push(String(b._id));
       else out.failed.push(String(b._id));
     }
-    // Refunds get the same backfill: a processed refund whose refund.approved
-    // ledger row never landed (crash between the state commit and the ledger
-    // write, or pre-ledger history). Reconstructed from booking truth under
-    // the same `refund-approve:<id>` key, so reruns collide instead of
-    // duplicating the economic event.
     const processedRefunds = await Booking.find({
       "payment.refundStatus": "processed",
       "payment.testMode": { $ne: true },

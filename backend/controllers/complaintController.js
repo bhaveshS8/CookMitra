@@ -5,9 +5,6 @@ const Booking = require("../models/Booking");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
 
-// Customer-facing service reasons (§19, SNAKE_UPPER in the API) mapped to
-// the stored lowercase enum. Legacy lowercase values pass through. Returns
-// null for an unrecognized customer reason (refused, never auto-refunded).
 const CUSTOMER_REASON_MAP = {
   COOK_DID_NOT_ARRIVE: "cook_did_not_arrive",
   MAJOR_SERVICE_DEVIATION: "major_service_deviation",
@@ -29,8 +26,6 @@ const normalizeComplaintCategory = (raw, isCustomer) => {
   return isCustomer ? null : "other";
 };
 
-// Complaints are preferably filed within 24h of completion (§19). Late
-// reports are accepted but flagged for the reviewer.
 const isLateComplaint = (booking) => {
   try {
     if (!booking || booking.status !== "completed") return false;
@@ -42,12 +37,6 @@ const isLateComplaint = (booking) => {
   }
 };
 
-// Either side files a complaint about the other, always anchored to one of
-// their own bookings so the counterparty is derived server-side (nobody can
-// file against a stranger by guessing ids):
-// - cook → about the customer of their booking (customer id optional for
-//   legacy standalone filings backed by a real past booking);
-// - customer → about the cook of their booking (booking required).
 exports.createComplaint = async (req, res, next) => {
   try {
     const { booking: bookingId, customer: customerId, category, message } = req.body;
@@ -62,7 +51,6 @@ exports.createComplaint = async (req, res, next) => {
         return res.status(404).json({ message: "Booking not found" });
       }
       if (isCustomer) {
-        // A customer can only complain about their own booking's cook.
         if (booking.customer.toString() !== req.user.id) {
           return res.status(403).json({ message: "Not authorized" });
         }
@@ -86,9 +74,6 @@ exports.createComplaint = async (req, res, next) => {
     if (!cook) {
       return res.status(400).json({ message: "A cook is required" });
     }
-    // Standalone customer ids must belong to someone this cook actually served
-    // — otherwise a cook could file complaints against strangers by guessing
-    // user ids (the booking path above already enforces the link).
     if (!isCustomer && !booking) {
       if (!mongoose.Types.ObjectId.isValid(String(customer))) {
         return res.status(400).json({ message: "Invalid customer id" });
@@ -101,14 +86,10 @@ exports.createComplaint = async (req, res, next) => {
       }
     }
 
-    // Customer service-complaint reasons (§19) are validated server-side;
-    // unsupported reasons are refused (never auto-refunded — §21).
     const mappedCategory = normalizeComplaintCategory(category, isCustomer);
     if (isCustomer && category && !mappedCategory) {
       return res.status(400).json({ message: "Please choose a valid complaint reason." });
     }
-    // Duplicate guard (§33): one open/in-review complaint per booking per
-    // filer — a second filing on the same booking returns the existing one.
     if (booking) {
       try {
         const dup = await Complaint.findOne({
@@ -120,7 +101,6 @@ exports.createComplaint = async (req, res, next) => {
           return res.status(409).json({ message: "A complaint for this booking is already under review.", code: "DUPLICATE_COMPLAINT" });
         }
       } catch {
-        // non-fatal: fall through and create
       }
     }
 
@@ -134,9 +114,7 @@ exports.createComplaint = async (req, res, next) => {
       reportedLate: isLateComplaint(booking),
     });
 
-    // Alert every admin (non-fatal — the complaint itself already succeeded).
     try {
-      // Match both UPPERCASE (spec) and legacy lowercase stored roles.
       const admins = await User.find({ role: { $in: ["ADMIN", "admin"] } }).select("_id");
       const filerUser = await User.findById(req.user.id).select("name");
       await Notification.create(
@@ -151,10 +129,7 @@ exports.createComplaint = async (req, res, next) => {
         }))
       );
     } catch {
-      // non-fatal
     }
-    // Receipt for the filer (best-effort) — otherwise filing feels like a
-    // black hole until an admin resolves it.
     try {
       await Notification.create({
         user: req.user.id,
@@ -163,10 +138,7 @@ exports.createComplaint = async (req, res, next) => {
         message: "Your complaint has been received — our team will review it shortly.",
       });
     } catch {
-      // non-fatal
     }
-    // The other side is informed that a complaint was raised (§27) — cooks
-    // hear about customer complaints on their bookings and vice versa.
     try {
       const otherId = isCustomer ? cook : customer;
       if (otherId && String(otherId) !== String(req.user.id)) {
@@ -180,9 +152,7 @@ exports.createComplaint = async (req, res, next) => {
         });
       }
     } catch {
-      // non-fatal
     }
-    // Audit trail (§26).
     try {
       const { logCancellationAudit } = require("../utils/cancellationAudit");
       await logCancellationAudit({
@@ -196,7 +166,6 @@ exports.createComplaint = async (req, res, next) => {
         reason: `${complaint.category}: ${String(complaint.message || "").slice(0, 200)}`,
       });
     } catch {
-      // non-fatal
     }
 
     res.status(201).json(complaint);
@@ -205,7 +174,6 @@ exports.createComplaint = async (req, res, next) => {
   }
 };
 
-// Complaints the logged-in user filed (either role).
 exports.getMyComplaints = async (req, res, next) => {
   try {
     const filter = {
@@ -217,8 +185,6 @@ exports.getMyComplaints = async (req, res, next) => {
       filter.cook = req.user.id;
     }
     const pg = paginationParams(req);
-    // Await here (not inside sendList): the phone strip below must run on the
-    // resolved documents in both paged and unpaged modes.
     const complaints = await applyPagination(
       Complaint.find(filter)
         .populate(filter.filedBy === "customer" ? "cook" : "customer", "name phone")
@@ -226,11 +192,6 @@ exports.getMyComplaints = async (req, res, next) => {
         .sort({ createdAt: -1 }),
       pg
     );
-    // Phone privacy (S-06): the booking API hides counterparty phones while a
-    // booking is still "requested" (pre-accept). A complaint anchored to such
-    // a booking must not leak the number through this endpoint — strip it
-    // unless the linked booking reached an accepted-or-later state. Legacy
-    // standalone filings (no booking populated) fail closed as well.
     const rows = Array.isArray(complaints) ? complaints : [];
     for (const c of rows) {
       const status = c?.booking?.status;
@@ -241,7 +202,6 @@ exports.getMyComplaints = async (req, res, next) => {
         try {
           other.phone = undefined;
         } catch {
-          // non-fatal: leave the document untouched
         }
       }
     }
@@ -251,7 +211,6 @@ exports.getMyComplaints = async (req, res, next) => {
   }
 };
 
-// Every complaint, newest first (admin triage queue).
 exports.getAllComplaints = async (req, res, next) => {
   try {
     const filter = {};
@@ -273,8 +232,6 @@ exports.getAllComplaints = async (req, res, next) => {
   }
 };
 
-// Admin moves a complaint through open → in_review → resolved/rejected,
-// optionally leaving an internal note (also shared back with the cook).
 exports.updateComplaintStatus = async (req, res, next) => {
   try {
     const complaint = await Complaint.findById(req.params.id);
@@ -289,7 +246,6 @@ exports.updateComplaintStatus = async (req, res, next) => {
     if (adminNote !== undefined) complaint.adminNote = String(adminNote || "").trim().slice(0, 2000);
     await complaint.save();
 
-    // Tell the filer when their complaint is resolved or rejected.
     if (["resolved", "rejected"].includes(complaint.status)) {
       try {
         const notifyUserId = complaint.filedBy === "customer" ? complaint.customer : complaint.cook;
@@ -303,7 +259,6 @@ exports.updateComplaintStatus = async (req, res, next) => {
               : "Your complaint was reviewed and closed. Contact support if you need more help.",
         });
       } catch {
-        // non-fatal
       }
       try {
         const { logCancellationAudit } = require("../utils/cancellationAudit");
@@ -318,7 +273,6 @@ exports.updateComplaintStatus = async (req, res, next) => {
           reason: String(complaint.adminNote || complaint.status).slice(0, 500),
         });
       } catch {
-        // non-fatal
       }
     }
 

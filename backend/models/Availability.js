@@ -29,7 +29,6 @@ const availabilitySchema = new mongoose.Schema(
 );
 
 availabilitySchema.index({ cook: 1, date: 1, startTime: 1 }, { unique: true });
-// Hot read: Availability.find({ cook, status, date: $gte/$lte }).sort(date, startTime)
 availabilitySchema.index({ cook: 1, status: 1, date: 1 });
 
 module.exports = mongoose.model("Availability", availabilitySchema);

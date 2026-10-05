@@ -1,14 +1,3 @@
-// state-claim.test.js — regression tests for production-hardening claims.
-// Run:  node backend/state-claim.test.js — exits non-zero on failure.
-//
-// Covers (no DB, no network, no ₹1 anywhere):
-//  - webhook dedup-store outage fails CLOSED (500 + retry, never ack-as-done)
-//  - webhook duplicate delivery acknowledged without re-confirming
-//  - webhook atomic confirm (accepted+unpaid -> confirmed exactly once)
-//  - rejectBooking atomic claim: winner rejects, loser gets 409 + code
-//  - completeBooking atomic claim: winner completes, concurrent cancel wins out
-//  - upload content validation: magic bytes enforced, polyglots deleted+refused
-//  - financial index ensure: all uniqueness indexes created at boot
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 process.env.RAZORPAY_WEBHOOK_SECRET = "wh_test_secret_abc123";
 
@@ -37,8 +26,6 @@ const restoreBooking = () => {
   Booking.findById = savedBookingFindById;
   Booking.findOneAndUpdate = savedBookingFindOneAndUpdate;
 };
-// Force the production (atomic) branches: unit tests run disconnected, so
-// stub the driver state like the suite convention (dbReady reads readyState).
 const savedReadyState = mongoose.connection.readyState;
 const setDbReady = (on) => {
   try {
@@ -59,7 +46,6 @@ const makeRes = () => {
 
 (async () => {
   try {
-    // ══ webhook: fail-closed dedup + atomic confirm ══
     const paymentCtrl = require("./controllers/paymentController");
     const WebhookEvent = require("./models/WebhookEvent");
     const savedWECreate = WebhookEvent.create;
@@ -77,7 +63,6 @@ const makeRes = () => {
       body: Buffer.from(rawPayload),
     });
 
-    // 1. dedup store outage -> 500 (retry), booking untouched
     {
       WebhookEvent.create = async () => { throw new Error("mongo down"); };
       let touched = false;
@@ -88,7 +73,6 @@ const makeRes = () => {
       check("W-FC booking untouched on dedup outage", touched === false, `touched=${touched}`);
     }
 
-    // 2. duplicate delivery -> 200 duplicate, no confirm
     {
       WebhookEvent.create = async () => { const e = new Error("dup"); e.code = 11000; throw e; };
       let confirmed = false;
@@ -100,7 +84,6 @@ const makeRes = () => {
       check("W-DUP no confirm attempted", confirmed === false, `confirmed=${confirmed}`);
     }
 
-    // 3. atomic confirm: accepted+unpaid + exact amount -> confirmed once
     {
       WebhookEvent.create = async (e) => e;
       WebhookEvent.updateOne = async () => ({});
@@ -129,12 +112,10 @@ const makeRes = () => {
     WebhookEvent.create = savedWECreate;
     WebhookEvent.updateOne = savedWEUpdate;
 
-    // ══ reject/complete atomic claims (production branches) ══
     const bookingCtrl = require("./controllers/bookingController");
     const next = (e) => { if (e) throw e; };
     setDbReady(true);
 
-    // 4. reject winner
     {
       const doc = {
         _id: "br1", customer: "c1", cook: "cook1", status: "requested", statusHistory: [],
@@ -146,7 +127,6 @@ const makeRes = () => {
       Booking.findById = async () => doc;
       const { expireBookingIfNeeded } = bookingCtrl;
       const r = makeRes();
-      // bypass expiry: requested without requestExpiresAt -> no transition
       await bookingCtrl.rejectBooking(
         { params: { id: "br1" }, user: { id: "cook1", role: "cook" }, body: {} },
         r, next
@@ -154,9 +134,6 @@ const makeRes = () => {
       check("R-ATOMIC reject wins via claim", r.statusCode === 200, `s=${r.statusCode}`);
     }
 
-    // 5. reject loser (accept won concurrently) -> 409 + code, no overwrite.
-    // First read sees "requested" (passes the guard); the claim loses and
-    // the re-read sees the accept win.
     {
       const stale = { _id: "br2", customer: "c1", cook: "cook1", status: "requested", statusHistory: [], payment: { status: "pending" }, save: async function () { this.saved = true; return this; } };
       let reads = 0;
@@ -172,7 +149,6 @@ const makeRes = () => {
       check("R-ATOMIC loser never saves stale doc", stale.saved !== true, `saved=${stale.saved}`);
     }
 
-    // 6. complete winner
     {
       const doc = {
         _id: "bc1", customer: "c1", cook: "cook1", status: "confirmed", statusHistory: [],
@@ -194,8 +170,6 @@ const makeRes = () => {
       check("C-ATOMIC complete wins via claim", r.statusCode === 200, `s=${r.statusCode}`);
     }
 
-    // 7. complete loser (cancel won): first read confirmed, claim loses,
-    // re-read sees cancelled -> 409 + code
     {
       const doc = { _id: "bc2", customer: "c1", cook: "cook1", status: "confirmed", statusHistory: [], payment: { status: "paid" }, serviceStartedAt: new Date(), save: async function () { this.saved = true; return this; } };
       let reads = 0;
@@ -209,7 +183,6 @@ const makeRes = () => {
     setDbReady(false);
     restoreBooking();
 
-    // ══ upload content validation ══
     const { validateUploadedContent } = require("./middleware/upload");
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cookmitra-upload-"));
     const mk = (name, bytes) => { const p = path.join(tmp, name); fs.writeFileSync(p, Buffer.from(bytes)); return p; };
@@ -218,13 +191,11 @@ const makeRes = () => {
       const res = { statusCode: 200, body: null, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; } };
       validateUploadedContent(req, res, () => resolve({ next: true, res }));
     });
-    // genuine PNG
     const png = mk("a.png", [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]);
     {
       const out = await runVal({ photo: [{ path: png, originalname: "a.png", size: 10 }] });
       check("U-OK genuine PNG passes", out.next === true, JSON.stringify(out.next));
     }
-    // HTML polyglot named .jpg
     const evil = mk("b.jpg", Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.from("<html><script>alert(1)</script>")]));
     {
       const before = fs.existsSync(evil);
@@ -234,7 +205,6 @@ const makeRes = () => {
       check("U-POLYGLOT html-in-jpg refused", res.statusCode === 400 && res.body?.code === "INVALID_FILE_CONTENT" && !nexted, `s=${res.statusCode}`);
       check("U-POLYGLOT file deleted from disk", before && !fs.existsSync(evil), "deleted");
     }
-    // text file with .pdf ext
     const fake = mk("c.pdf", Buffer.from("hello, this is not a pdf file at all"));
     {
       const res = { statusCode: 200, body: null, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; } };
@@ -242,7 +212,6 @@ const makeRes = () => {
       validateUploadedContent({ files: { pan: [{ path: fake, originalname: "c.pdf", size: 36 }] } }, res, () => { nexted = true; });
       check("U-FKEPDF wrong magic refused + deleted", res.statusCode === 400 && !nexted && !fs.existsSync(fake), `s=${res.statusCode}`);
     }
-    // genuine PDF header
     const pdf = mk("d.pdf", Buffer.from("%PDF-1.7 fake body"));
     {
       const out = await runVal({ pan: [{ path: pdf, originalname: "d.pdf", size: 17 }] });
@@ -250,8 +219,6 @@ const makeRes = () => {
     }
     fs.rmSync(tmp, { recursive: true, force: true });
 
-    // ══ admin authorization on money routes (static regression guard) ══
-    // Route statements can span lines — split on router.METHOD( boundaries.
     const payoutsSrc = fs.readFileSync(path.join(__dirname, "routes", "payouts.js"), "utf8");
     const routeChunks = payoutsSrc
       .split(/(?=router\.(get|post|patch|put|delete)\()/)
@@ -288,7 +255,6 @@ const makeRes = () => {
       );
     }
 
-    // ══ financial index ensure ══
     const { ensurePayoutIndexesOnce } = require("./utils/payoutIndexes");
     {
       const created = [];

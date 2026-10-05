@@ -1,6 +1,3 @@
-/* ==========================================================================
-   Home — Hero (part 1: banner, left column, enterprise)
-   ========================================================================== */
 
 .home-container { overflow: hidden; }
 
@@ -15,7 +12,6 @@
     linear-gradient(155deg, #FFFBEB 0%, #FFF7ED 38%, #FFEDD5 72%, #FEF3C7 100%);
   color: #431407;
 }
-/* Subtle rangoli-dot texture over the festive backdrop */
 .hero-v2::before {
   content: "";
   position: absolute;
@@ -38,7 +34,6 @@
 .hero-v2-glow-2 { width: 460px; height: 460px; right: -80px; top: 22%; background: rgba(251, 146, 60, 0.25); }
 .hero-v2-glow-3 { width: 330px; height: 330px; left: 36%; bottom: -110px; background: rgba(253, 186, 116, 0.32); }
 
-/* Marigold toran garland across the top of the hero */
 .hero-toran {
   position: absolute;
   top: 0;
@@ -87,7 +82,6 @@
 
 .hero-v2-left { display: flex; flex-direction: column; gap: 1.15rem; align-items: flex-start; }
 
-/* Brand logo mark at the top of the hero — gold-framed round logo + wordmark */
 .hero-v2-brand {
   display: flex;
   align-items: center;
@@ -117,7 +111,6 @@
   .hero-v2-brand > span { font-size: 1.2rem; }
 }
 
-/* Festive chip that kicks off the left column */
 .hero-v2-chip {
   display: inline-flex;
   align-items: center;
@@ -161,7 +154,6 @@
   to { box-shadow: 0 0 14px rgba(251, 146, 60, 0.45); }
 }
 
-/* Devotional overline */
 .hero-devotional {
   margin: 0;
   font-size: 0.95rem;
@@ -181,7 +173,6 @@
   text-wrap: balance;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
 }
-/* Solid festive accent — bright orange */
 .hero-v2-accent {
   color: #F97316;
 }
@@ -209,7 +200,6 @@
 }
 .hero-v2-btn-secondary:hover { color: #431407; background: #FFF7ED; }
 
-/* Ghost CTA — deep orange outline on the soft festive backdrop */
 .hero-v2-btn-ghost {
   background: rgba(255, 255, 255, 0.7);
   border: 1.5px solid rgba(194, 65, 12, 0.55);
@@ -224,7 +214,6 @@
   box-shadow: 0 8px 26px rgba(234, 88, 12, 0.35);
 }
 
-/* Mini perks row under the trust badges */
 .hero-v2-perks {
   display: flex;
   align-items: center;
@@ -293,7 +282,6 @@
 .hero-v2-avatars > span:nth-child(1) { background: linear-gradient(135deg, #f97316, #c2410c); }
 .hero-v2-avatars > span:nth-child(2) { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
 .hero-v2-avatars > span:nth-child(3) { background: linear-gradient(135deg, #059669, #047857); }
-/* Count pill — higher specificity so it overrides the span rule */
 .hero-v2-avatars > span.hero-v2-avatars-more {
   width: auto;
   height: 32px;
@@ -312,7 +300,6 @@
   border-radius: 50%;
   display: block;
 }
-/* ---- Small phones: compact hero brand + chip ------------------------ */
 @media (max-width: 375px) {
   .hero-v2-brand-logo { width: 42px; height: 42px; }
   .hero-v2-brand > span { font-size: 1.1rem; }

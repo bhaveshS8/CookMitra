@@ -1,19 +1,3 @@
-// Standalone regression test for the review → cook-rating sync path.
-// Run:  node backend/review-rating.test.js  — exits non-zero on any failure.
-//
-// It stubs the mongoose statics createReview touches (Booking, Review,
-// CookProfile) and drives the REAL controller with fake req/res objects.
-//
-// Two real bugs are pinned here:
-//  1. Duplicate reviews. `Review.booking` is uniquely indexed, so the second of
-//     two fast double-submits fails with E11000. That used to fall through to
-//     the error handler as a 500; it must be the same 409 the pre-check returns.
-//  2. Lost rating updates. The old code read every review of the cook, computed
-//     an average in Node and $set it. Two reviews landing together both wrote an
-//     average derived from a stale snapshot, so one silently erased the other.
-//     Now the counters are $inc'd and the average is derived from them
-//     server-side in one atomic pipeline update — and the O(N) Review scan is
-//     gone from the request path entirely.
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 
@@ -49,13 +33,10 @@ const makeRes = () => {
   };
   return r;
 };
-// createReview must never hand an unexpected error to next() in these cases —
-// if it does, fail loudly rather than silently continuing.
 const next = (err) => {
   if (err) throw err instanceof Error ? err : new Error(String(err));
 };
 
-// Thenable query stub: createReview chains `.select()` before awaiting.
 const Q = (doc) => ({
   select: () => Q(doc),
   populate: () => Q(doc),
@@ -64,7 +45,6 @@ const Q = (doc) => ({
 });
 
 const Models = { Booking, Review, CookProfile };
-// Swap model statics for the duration of `fn`, restoring them afterwards.
 const withStubs = async (stubs, fn) => {
   const saved = [];
   for (const [path, impl] of Object.entries(stubs)) {
@@ -88,12 +68,9 @@ const ownedBooking = (overrides = {}) => ({
   customer: CUSTOMER_ID,
   cook: COOK_ID,
   status: "completed",
-  // A completed service implies captured payment — reviews require it.
   payment: { status: "paid" },
   ...overrides,
 });
-// Drives the controller and hands back the fake response so each case can
-// assert on status/body. `body` lets a case override the payload.
 const postReview = async (body = {}) => {
   const res = makeRes();
   await reviewCtrl.createReview(
@@ -106,7 +83,6 @@ const postReview = async (body = {}) => {
   );
   return res;
 };
-// ── 1. Pure aggregate math (utils/ratings.js) ───────────────────────────────
 const testRatingHelpers = () => {
   check("normalizeRating accepts 1 and 5", normalizeRating(1) === 1 && normalizeRating(5) === 5);
   check(
@@ -164,7 +140,6 @@ const testRatingHelpers = () => {
   );
 };
 
-// ── 2. Happy path: counters + server-side average, no Review scan ───────────
 const testHappyPath = async () => {
   const updateCalls = [];
   await withStubs(
@@ -172,7 +147,6 @@ const testHappyPath = async () => {
       "Booking.findById": async () => ownedBooking(),
       "Review.findOne": async () => null,
       "Review.create": async (doc) => ({ _id: "r1", ...doc }),
-      // The O(N) scan is exactly what was removed — using it must fail loudly.
       "Review.find": () => {
         throw new Error("Review.find must not be used to aggregate ratings");
       },
@@ -229,9 +203,6 @@ const testHappyPath = async () => {
   );
 };
 
-// ── 3. Legacy profile: counters seeded from the REAL reviews ────────────────
-// A count-without-sum row must be seeded from the reviews table, not from
-// average × count (which would re-import whatever drift the old code left).
 const testBackfill = async () => {
   const updateCalls = [];
   let aggregateFilter = null;
@@ -242,7 +213,6 @@ const testBackfill = async () => {
       "Review.create": async (doc) => ({ _id: "r2", ...doc }),
       "Review.aggregate": async (pipeline) => {
         aggregateFilter = pipeline?.[0]?.$match;
-        // Two earlier reviews (4 + 5) exist; the stored average (4) was stale.
         return [{ _id: null, sum: 9, count: 2 }];
       },
       "CookProfile.findOne": () => Q({ rating: { average: 4, count: 2, sum: 0 } }),
@@ -276,7 +246,6 @@ const testBackfill = async () => {
   );
 };
 
-// ── 4. Guard rails + failure tolerance ──────────────────────────────────────
 const runCase = async (name, { booking, create, profileUpdate, expectStatus, expectMessage }) => {
   await withStubs(
     {
@@ -310,7 +279,6 @@ const testGuardRails = async () => {
     expectMessage: "Review already exists",
   });
 
-  // The cheap path: a pre-existing review is rejected before any write.
   await withStubs(
     {
       "Booking.findById": async () => ownedBooking(),
@@ -329,8 +297,6 @@ const testGuardRails = async () => {
     }
   );
 
-  // An unexpected DB error must reach next() (the error handler), not be
-  // swallowed into a fake 201.
   let propagated = false;
   try {
     await runCase("unexpected create failure reaches the error handler", {
@@ -351,8 +317,6 @@ const testGuardRails = async () => {
     expectStatus: 400,
   });
 
-  // Unpaid holds are not rendered service — no review even after the slot
-  // time passes. The create must never run.
   await runCase("review on an unpaid booking -> 400 with no write", {
     booking: ownedBooking({ status: "confirmed", payment: { status: "pending" } }),
     create: async () => {
@@ -367,7 +331,6 @@ const testGuardRails = async () => {
     expectStatus: 403,
   });
 
-  // The review row is already saved — a profile write failure must not 500.
   await runCase("profile sync failure is non-fatal -> review still 201", {
     booking: ownedBooking(),
     create: async (doc) => ({ _id: "r5", ...doc }),
@@ -378,7 +341,6 @@ const testGuardRails = async () => {
   });
 };
 
-// ── Runner ──────────────────────────────────────────────────────────────────
 const main = async () => {
   testRatingHelpers();
   await testHappyPath();

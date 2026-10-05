@@ -11,8 +11,6 @@ const {
   deleteLead,
 } = require("../controllers/leadController");
 
-// Public PII intake (S-09): own tight bucket so one IP cannot spam the lead
-// store with rotating numbers. Genuine users submit once; 20/15min is ample.
 const leadLimiter = rateLimit({
   standardHeaders: false,
   legacyHeaders: false,

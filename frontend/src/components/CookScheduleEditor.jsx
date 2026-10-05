@@ -3,13 +3,7 @@ import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
 import { Save, CalendarDays, Trash2, Plus, Info } from "lucide-react";
 
-// Cook's working-week editor: which days they take bookings, the hours of
-// each open day, and any dates fully blocked (leave/travel). Saved to
-// CookProfile.schedule — the slot engine (utils/slots.js) only offers start
-// times inside these windows, so publishing this actually restricts bookings.
-// Empty schedule = legacy behaviour (bookable 08:00–20:00 every day).
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-// Monday-first display order of the JS day indexes.
 const ORDER = [1, 2, 3, 4, 5, 6, 0];
 
 const toMin = (t) => {
@@ -48,7 +42,6 @@ const CookScheduleEditor = ({ profile, onSaved }) => {
 
   const handleSave = async () => {
     setError("");
-    // An enabled day needs a start before its end.
     for (const w of weekly) {
       if (!w.enabled) continue;
       const s = toMin(w.startTime);

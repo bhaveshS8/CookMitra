@@ -3,8 +3,6 @@ import { useShowToast } from "../store/hooks";
 import { formatDate } from "../utils/constants";
 import { Star, User } from "lucide-react";
 
-// Reviews received from customers — star rating + words.
-// Shared by the all-reviews page (full list).
 const CookReviewsBlock = ({ reviews, loading, error }) => {
   const showToast = useShowToast();
   const list = reviews || [];
@@ -30,7 +28,6 @@ const CookReviewsBlock = ({ reviews, loading, error }) => {
 
   return (
     <div>
-      {/* Summary */}
       <div className="cook-rating-hero">
         <div className="cook-rating-hero-row">
           <div
@@ -59,7 +56,6 @@ const CookReviewsBlock = ({ reviews, loading, error }) => {
         </div>
       </div>
 
-      {/* Review cards */}
       {list.length > 0 ? (
         <div className="bookings-list-modern">
           {list.map((rev) => (

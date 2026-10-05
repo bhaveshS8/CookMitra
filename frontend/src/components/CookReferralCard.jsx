@@ -5,7 +5,6 @@ import { useShowToast } from "../store/hooks";
 import { formatCurrency } from "../utils/constants";
 import { Share2, Copy, Wallet } from "lucide-react";
 
-// Cook profile referral + totals card (§17).
 const CookReferralCard = () => {
   const showToast = useShowToast();
   const [referral, setReferral] = useState(null);

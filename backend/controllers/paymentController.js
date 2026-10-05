@@ -18,13 +18,6 @@ const {
   istNowMinutes,
 } = require("../utils/time");
 
-// POST /api/payments/order — create a Razorpay order for a booking window.
-// Body: { cook, date, startTime, endTime, durationHours?, bookingId? }.
-// With bookingId (the real checkout path) the order charges the booking's
-// stored payable (launch slab minus coupon). Returns the order for Checkout.
-//
-// In-flight mint guard (F-03 backend half): concurrent taps for one booking
-// share a single mint promise so only one gateway order is created.
 const inflightOrderMints = new Map();
 exports.createOrder = async (req, res, next) => {
   try {
@@ -43,7 +36,6 @@ exports.createOrder = async (req, res, next) => {
     if (!cookProfile) {
       return res.status(400).json({ message: "Cook not found or not approved" });
     }
-    // Suspended accounts take no money either (mirrors createBooking).
     try {
       const User = require("../models/User");
       const cookAccount = await User.findById(cook).select("status");
@@ -54,9 +46,6 @@ exports.createOrder = async (req, res, next) => {
       return res.status(400).json({ message: "Cook not found or not approved" });
     }
 
-    // Same window guards as booking so users can't pay for unavailable time.
-    // Strict time/date shape (full HH:MM, real calendar day, 30-min grid)
-    // so malformed slots never reach the gateway.
     const strictStart = parseTimeStrict(startTime);
     const strictEnd = parseTimeStrict(endTime);
     if (strictStart == null || strictEnd == null || strictEnd <= strictStart) {
@@ -65,7 +54,6 @@ exports.createOrder = async (req, res, next) => {
     if (!isOnGrid(strictStart) || !isOnGrid(strictEnd)) {
       return res.status(400).json({ message: "Start and end times must be on 30-minute intervals" });
     }
-    // Normalize date: accepts strict "YYYY-MM-DD" or an ISO date string (extracts IST day)
     let orderDay = typeof date === "string" ? date.trim() : "";
     if (date instanceof Date && !Number.isNaN(date.getTime())) {
       orderDay = istDayString(date);
@@ -86,8 +74,6 @@ exports.createOrder = async (req, res, next) => {
       return res.status(400).json({ message: "Cook is not available for the selected time" });
     }
     const activeBookings = await getDayBookings(cook, orderDay);
-    // Post-acceptance checkout: the customer's own held request occupies this
-    // window — exclude it so paying for your own hold isn't a "conflict".
     const othersBookings = bookingId
       ? activeBookings.filter((b) => String(b._id) !== String(bookingId))
       : activeBookings;
@@ -101,9 +87,6 @@ exports.createOrder = async (req, res, next) => {
       return res.status(400).json({ message: "Invalid time slot" });
     }
     const hours = (endMin - startMin) / 60;
-    // Generic (pre-booking) orders must use the same whole-hour launch slabs
-    // as booking creation — otherwise the gateway charges rate x hours while
-    // the booking later settles a flat slab price (e.g. 2h = 349).
     if (!Number.isInteger(hours) || hours < 1 || hours > 4) {
       return res.status(400).json({ message: "Sessions run 1–4 whole hours" });
     }
@@ -114,13 +97,6 @@ exports.createOrder = async (req, res, next) => {
       }
     }
 
-    // Post-acceptance checkout must be for the customer's own live booking:
-    // it must exist, belong to them, still await payment, and match this
-    // window. A bare order without bookingId is refused — a captured payment
-    // with no booking to attach to has no reconciliation path (the webhook
-    // matches by the order id stored on the booking), so it would be
-    // orphaned money. The gateway always charges the booking's stored
-    // payable (slab price minus any coupon) — never a recomputed rack rate.
     if (!bookingId) {
       return res.status(400).json({
         message: "bookingId is required — the payment order belongs to your accepted booking.",
@@ -138,19 +114,13 @@ exports.createOrder = async (req, res, next) => {
     if (bookingForOrder.status !== "accepted" || bookingForOrder.payment?.status === "paid") {
       return res.status(400).json({ message: "This booking is not awaiting payment" });
     }
-    // Find-Cook invariant: payment is only possible for a server-assigned
-    // cook. A REQUESTED (unassigned) booking must never reach the gateway.
     if (!bookingForOrder.cook) {
       return res.status(400).json({ message: "No cook has accepted this request yet — payment unlocks after a cook accepts." });
     }
-    // The payment window may have elapsed while the customer sat on the
-    // payment page — never mint an order for a dead window (they'd pay in
-    // Checkout and land on a 410 with captured money).
     try {
       const { expireBookingIfNeeded } = require("./bookingController");
       await expireBookingIfNeeded(bookingForOrder);
     } catch {
-      // non-fatal: the checks below still apply
     }
     if (
       bookingForOrder.status !== "accepted" ||
@@ -169,10 +139,6 @@ exports.createOrder = async (req, res, next) => {
     }
     const fullFee = Math.round(Number(bookingForOrder.amount) || 0);
 
-    // Fully-discounted session (100% coupon): nothing to charge. Return a
-    // zero-amount "free" order so Checkout skips the gateway and the confirm
-    // call records a no-money payment — never mint a ₹1 order for a ₹0 fee
-    // (Razorpay amounts must match the booking's payable exactly).
     if (fullFee <= 0) {
       return res.status(201).json({
         free: true,
@@ -188,24 +154,15 @@ exports.createOrder = async (req, res, next) => {
     const amountPaise = fullFee * 100;
     const wantCurrency = process.env.RAZORPAY_CURRENCY || "INR";
 
-    // F-03/F-04: a refresh or double-tap must not mint a second gateway order.
-    // First the stored-order reuse below (refresh recovery), then the
-    // in-flight guard (concurrent double-tap): the loser awaits the winner's
-    // mint and receives the same order id.
     const mintKey = `order:${bookingForOrder._id}`;
     if (inflightOrderMints.has(mintKey)) {
       try {
         const prior = await inflightOrderMints.get(mintKey);
         return res.status(200).json({ ...prior, reused: true });
       } catch {
-        // Winner failed — fall through and attempt the mint ourselves.
       }
     }
     const mintTask = (async () => {
-      // Idempotent reuse: a retry/refresh while the window is still live must
-      // NOT mint a second gateway order. If this booking already has a stored
-      // order that still charges exactly this fee, hand it back instead of
-      // creating another one (the confirm call accepts it either way).
       const storedOrderId = String(bookingForOrder.payment?.razorpayOrderId || "");
       if (storedOrderId) {
         try {
@@ -225,12 +182,7 @@ exports.createOrder = async (req, res, next) => {
               reused: true,
             };
           }
-          // Stored order is stale (amount/currency drifted after a coupon
-          // change) — fall through and mint a fresh one below.
         } catch {
-          // Unreadable order (deleted/expired at the gateway or gateway down):
-          // fall through and mint a fresh one. A fetch failure here must not
-          // block payment — the confirm path re-verifies whatever is paid.
         }
       }
 
@@ -250,8 +202,6 @@ exports.createOrder = async (req, res, next) => {
           },
         });
       } catch (gwErr) {
-        // Gateway rejection (bad keys, network, etc.) maps to a clear 502
-        // instead of leaking a raw 500 — the frontend shows this message.
         const status =
           gwErr?.statusCode || gwErr?.error?.status_code || gwErr?.error?.http_status_code;
         const detail =
@@ -268,11 +218,6 @@ exports.createOrder = async (req, res, next) => {
         };
       }
 
-      // Persist the gateway order id on the booking so the webhook can match a
-      // captured payment back to it even if the customer closes the browser
-      // before the confirm call fires. History is kept so an overwritten order
-      // can never orphan captured money. Atomic $set+$push (not read-modify-
-      // save) so two concurrent order creations cannot lose each other's id.
       if (bookingForOrder) {
         try {
           await Booking.updateOne(
@@ -283,7 +228,6 @@ exports.createOrder = async (req, res, next) => {
             }
           );
         } catch {
-          // non-fatal: the confirm call carries the same order id
         }
       }
 
@@ -314,24 +258,12 @@ exports.createOrder = async (req, res, next) => {
   }
 };
 
-// POST /api/payments/webhook — Razorpay event webhook (NO auth; verified by
-// HMAC signature instead). server.js mounts express.raw() for this path so
-// req.body is the raw Buffer Razorpay signed.
-//
-// Why it exists: if the customer closes the browser after paying in Checkout
-// but before PATCH /bookings/:id/pay fires, money is captured while the
-// booking still awaits payment (and would later expire). On
-// `payment.captured` we reconcile: confirm the still-payable booking, or
-// flag the customer for manual refund when the window already closed.
-// Always responds 200 quickly — Razorpay retries anything slower/5xx.
 exports.handleWebhook = async (req, res) => {
   try {
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET || "";
     const signature = req.headers["x-razorpay-signature"];
     const raw = req.body && Buffer.isBuffer(req.body) ? req.body : null;
     if (!secret || !signature || !raw) {
-      // Can't verify — acknowledge without acting (avoids retry storms and
-      // never mutates bookings on unverified calls).
       return res.status(200).json({ received: false });
     }
     let expected;
@@ -361,14 +293,9 @@ exports.handleWebhook = async (req, res) => {
     if (!orderId || !paymentId) {
       return res.status(200).json({ received: true, handled: false });
     }
-    // Only captured money reconciles — authorized/failed/refunded events
-    // never flip a booking to paid.
     if (String(entity.status || "").toLowerCase() !== "captured") {
       return res.status(200).json({ received: true, handled: false });
     }
-    // Event de-duplication: identical deliveries carry identical payloads,
-    // so a content key admits exactly one processing — concurrent redeliveries
-    // race on the unique index instead of on the booking.
     const webhookKey = crypto
       .createHash("sha256")
       .update(`${event?.event || ""}|${orderId}|${paymentId}|${entity.amount ?? ""}`)
@@ -385,10 +312,6 @@ exports.handleWebhook = async (req, res) => {
       if (e?.code === 11000) {
         return res.status(200).json({ received: true, handled: "duplicate" });
       }
-      // Dedup store unavailable: FAIL CLOSED. Acknowledging now would
-      // permanently mark a valid money event as processed while a concurrent
-      // redelivery could double-confirm below. A non-2xx makes Razorpay
-      // retry; the content-key dedup then admits exactly one processing.
       console.error(`WEBHOOK DEDUP STORE FAILED order=${orderId} pay=${paymentId}: ${e?.message || e}`);
       return res.status(500).json({ received: true, handled: false, retry: true });
     }
@@ -400,7 +323,6 @@ exports.handleWebhook = async (req, res) => {
       ],
     });
     if (!booking) return res.status(200).json({ received: true, handled: false });
-    // Idempotent: the confirm call already recorded this payment.
     if (booking.payment?.status === "paid") {
       return res.status(200).json({ received: true, handled: true });
     }
@@ -411,9 +333,6 @@ exports.handleWebhook = async (req, res) => {
       return res.status(200).json({ received: true, handled: false });
     }
     if (booking.status === "accepted" && Number(entity.amount) === expectedPaise) {
-      // Atomic confirm: only one concurrent writer (checkout verify vs
-      // webhook redelivery) flips accepted+unpaid to confirmed. The loser
-      // re-reads below and is acknowledged as already-handled.
       const now = new Date();
       const claimed = await Booking.findOneAndUpdate(
         {
@@ -447,8 +366,6 @@ exports.handleWebhook = async (req, res) => {
         { new: true }
       );
       if (!claimed) {
-        // Lost the race (checkout confirmed concurrently) or the booking
-        // moved: re-read the truth instead of overwriting it.
         let latest = null;
         try {
           latest = await Booking.findOne({
@@ -470,7 +387,6 @@ exports.handleWebhook = async (req, res) => {
         const WebhookEvent = require("../models/WebhookEvent");
         await WebhookEvent.updateOne({ key: webhookKey }, { $set: { booking: booking._id } });
       } catch {
-        // non-fatal: the event row already exists for tracing
       }
       const { recordLedger } = require("../utils/finance");
       await recordLedger({
@@ -502,13 +418,9 @@ exports.handleWebhook = async (req, res) => {
           message: "Booking confirmed — your payment was received!",
         });
       } catch {
-        // non-fatal
       }
       return res.status(200).json({ received: true, handled: true });
     }
-    // Money captured but the booking can no longer take it (expired /
-    // cancelled / amount mismatch): queue a refund for admin approval AND
-    // tell the customer, instead of silently keeping the payment.
     try {
       const pay = booking.payment || {};
       if (
@@ -532,12 +444,10 @@ exports.handleWebhook = async (req, res) => {
           try {
             await booking.save();
           } catch {
-            // non-fatal: notification below still fires
           }
         }
       }
     } catch {
-      // non-fatal
     }
     try {
       await Notification.create({
@@ -547,21 +457,13 @@ exports.handleWebhook = async (req, res) => {
         message: `We received your payment (${paymentId}) but booking ${booking._id} is ${booking.status}. A refund has been queued for admin approval — please keep this payment ID for support.`,
       });
     } catch {
-      // non-fatal
     }
     return res.status(200).json({ received: true, handled: false });
   } catch {
-    // Never 500 a webhook — that triggers gateway retries.
     return res.status(200).json({ received: true, handled: false });
   }
 };
 
-// POST /api/payments/verify — verify a Razorpay payment signature FOR ONE
-// BOOKING. HMAC-only "is this triple genuine?" answers are misleading (a
-// genuine triple for another booking also verifies), so this endpoint binds
-// the triple to the caller's booking: ownership, stored order id, and the
-// gateway order amount must all match. It never confirms a booking —
-// PATCH /bookings/:id/pay remains the only confirm path.
 exports.verifyPayment = async (req, res, next) => {
   try {
     if (!isConfigured) {

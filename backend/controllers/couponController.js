@@ -3,15 +3,10 @@ const Booking = require("../models/Booking");
 const { normalizeCode, rejectionReason, computeDiscount } = require("../utils/coupons");
 const { paginationParams, applyPagination, sendList } = require("../utils/pagination");
 
-// POST /api/coupons/validate — preview a coupon against an order amount.
-// Auth required (per-user limits need the user). Never mutates usage.
-// Body: { code, amount, serviceType? }.
 exports.validateCoupon = async (req, res, next) => {
   try {
     const { code, amount, serviceType } = req.body;
     const coupon = await Coupon.findOne({ code: normalizeCode(code) });
-    // First-booking check only runs for coupons that need it, so plain
-    // coupons never pay the extra query.
     let isFirstBooking;
     if (coupon?.firstBookingOnly && req.user?.id) {
       isFirstBooking =
@@ -46,8 +41,6 @@ exports.validateCoupon = async (req, res, next) => {
   }
 };
 
-// GET /api/coupons/active — public list of currently usable offers
-// (codes are promos meant to be shared; per-user state is checked at apply).
 exports.listActiveCoupons = async (req, res, next) => {
   try {
     const now = new Date();
@@ -67,14 +60,11 @@ exports.listActiveCoupons = async (req, res, next) => {
         ],
       })
         .select(
-          // perUserLimit is customer-facing ("one per customer") — keep it
-          // in the public list alongside the other enforced terms.
           "code description discountType percent flatAmount maxDiscount minOrder firstBookingOnly perUserLimit validTo"
         )
         .sort({ percent: -1 }),
       pg
     );
-    // Total must count the whole active set, not just the returned page.
     const countActive = () =>
       Coupon.countDocuments({
         active: true,
@@ -95,7 +85,6 @@ exports.listActiveCoupons = async (req, res, next) => {
   }
 };
 
-// GET /api/coupons — admin: every coupon with usage stats.
 exports.listCoupons = async (req, res, next) => {
   try {
     const pg = paginationParams(req);
@@ -106,9 +95,6 @@ exports.listCoupons = async (req, res, next) => {
   }
 };
 
-// Phase 12: explicit write-allowlist (mass assignment). Only these fields may
-// ever reach the Coupon model — usage accounting (usedCount/usedBy/createdBy)
-// is server-owned, and $-prefixed keys can never become update operators.
 const COUPON_WRITABLE = [
   "code",
   "description",
@@ -136,9 +122,6 @@ const pickCouponWritable = (obj) => {
   return out;
 };
 
-// POST /api/coupons — admin: create a coupon. Usage accounting is
-// server-owned: usedCount/usedBy can never be set at creation (update strips
-// them too) — otherwise promo history could be forged.
 exports.createCoupon = async (req, res, next) => {
   try {
     const body = pickCouponWritable(req.body);
@@ -156,8 +139,6 @@ exports.createCoupon = async (req, res, next) => {
   }
 };
 
-// PATCH /api/coupons/:id — admin: edit a coupon (incl. active toggle).
-// usedCount/usedBy history is append-only: edits can never rewrite it.
 exports.updateCoupon = async (req, res, next) => {
   try {
     const editable = pickCouponWritable(req.body);
@@ -178,8 +159,6 @@ exports.updateCoupon = async (req, res, next) => {
   }
 };
 
-// DELETE /api/coupons/:id — admin: delete a coupon that was never used.
-// Used coupons are history (bookings reference them), so deactivate instead.
 exports.deleteCoupon = async (req, res, next) => {
   try {
     const coupon = await Coupon.findById(req.params.id);

@@ -3,8 +3,6 @@ import { Link } from "react-router-dom";
 import { LogIn, UserPlus, X, ChevronRight } from "lucide-react";
 
 const LoginPromptModal = ({ open, onClose, returnTo }) => {
-  // Where to send the customer after they sign in/up, so an interrupted
-  // booking resumes instead of restarting. Must be an app-relative path.
   const loginTo = returnTo ? `/login?next=${encodeURIComponent(returnTo)}` : "/login";
   const registerTo = returnTo ? `/register?next=${encodeURIComponent(returnTo)}` : "/register";
   useEffect(() => {

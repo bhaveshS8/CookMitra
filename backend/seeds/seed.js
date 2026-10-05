@@ -13,10 +13,6 @@ const { INITIAL_COUPONS, RETIRED_COUPON_CODES } = require("../utils/couponCatalo
 
 dotenv.config();
 
-// Production guard: demo seeding wipes collections and creates publicly
-// guessable credentials (admin@festivecook.com / admin123). It must never
-// run against production — refuse unless an explicit escape hatch is set.
-// The --coupons-only path below is non-destructive and stays allowed.
 const isCouponsOnly = process.argv.includes("--coupons-only");
 if (process.env.NODE_ENV === "production" && !isCouponsOnly && process.env.ALLOW_PROD_SEED !== "true") {
   console.error(
@@ -27,15 +23,10 @@ if (process.env.NODE_ENV === "production" && !isCouponsOnly && process.env.ALLOW
 }
 
 const seedData = async () => {
-// Promo coupons now live in ../utils/couponCatalog (pure data, so the pricing
-// tests can assert every live code is redeemable against the launch slabs).
-// See that file for the ladder design and the rationale per code.
   try {
     await mongoose.connect(process.env.MONGODB_URI);
     console.log("MongoDB connected for seeding");
 
-    // DANGER: seeding wipes every collection. Refuse when the database
-    // already holds real data unless --force is passed explicitly.
     const existingUsers = await User.countDocuments();
     if (existingUsers > 0 && !process.argv.includes("--force")) {
       console.error(
@@ -54,8 +45,6 @@ const seedData = async () => {
     await Review.deleteMany({});
     await Notification.deleteMany({});
     await Coupon.deleteMany({});
-    // Complaints/leads hold cook/customer refs — wiping without them leaves
-    // dangling references after every reseed.
     await Complaint.deleteMany({});
     await Lead.deleteMany({});
 
@@ -95,7 +84,6 @@ const seedData = async () => {
     console.log("Seeded accounts: admin@festivecook.com, neha@example.com, priya@example.com, sunita@example.com");
     console.log("(Passwords are demo-only defaults — change them immediately and never use them in production.)");
 
-    // Cook profiles: one approved (bookable), one pending (admin approval demo)
     await CookProfile.create({
       user: cook1._id,
       bio: "Experienced in Diwali Faral and traditional Maharashtrian sweets with 8 years of home cooking experience.",
@@ -118,10 +106,6 @@ const seedData = async () => {
       approvalStatus: "pending",
     });
 
-    // Availability windows for the approved cook (next 7 days, 3 broad
-    // windows/day covering the whole 08:00–20:00 service day). Windows must
-    // comfortably exceed the app's default 3-hour session — narrow windows
-    // can never fit it and the date shows "no slots".
     const slots = [];
     for (let d = 1; d <= 7; d++) {
       const date = new Date();
@@ -136,14 +120,10 @@ const seedData = async () => {
     await Availability.insertMany(slots);
     console.log(`Seeded 1 approved + 1 pending cook profile and ${slots.length} availability slots`);
 
-    // Initial promo coupons — up to 20% off festive bookings. Admin-managed
-    // from the admin dashboard (Coupons tab) at any time afterwards.
     await Coupon.create(INITIAL_COUPONS.map((c) => ({ ...c, createdBy: admin._id })));
     console.log(
       `Seeded ${INITIAL_COUPONS.length} promo coupons (${INITIAL_COUPONS.map((c) => c.code).join(", ")})`
     );
-    // Disconnect first so buffered writes flush — exiting mid-flush can
-    // truncate the seed on slow connections.
     await mongoose.disconnect();
     process.exit(0);
   } catch (error) {
@@ -152,12 +132,6 @@ const seedData = async () => {
   }
 };
 
-// Safe, non-destructive coupon sync for an existing database. Three things,
-// none of which ever delete a record or touch usedCount/usedBy history:
-//   1. create catalogue codes that are missing
-//   2. sync the terms of existing catalogue codes (e.g. WELCOME50's min order)
-//   3. deactivate retired codes so dead/false-promise offers stop being served
-// Run: npm run seed:coupons
 const seedCouponsOnly = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
@@ -173,14 +147,12 @@ const seedCouponsOnly = async () => {
         created += 1;
         continue;
       }
-      // Only the offer terms are synced — usage counters stay append-only.
       const terms = { ...coupon };
       delete terms.code;
       await Coupon.updateOne({ _id: existing._id }, { $set: terms });
       updated += 1;
     }
 
-    // Retired codes are deactivated, never deleted: bookings reference them.
     const retired = await Coupon.updateMany(
       { code: { $in: RETIRED_COUPON_CODES }, active: true },
       { $set: { active: false } }

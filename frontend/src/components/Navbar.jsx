@@ -18,8 +18,6 @@ import cookMitraLogo from "../assets/logo.png";
 import { resolveFileUrl } from "./CookDocUploads";
 import LocationPicker from "./LocationPicker";
 
-// Avatar showing the cook's uploaded profile photo when available,
-// falling back to the name initial (also when the URL is stale/broken).
 const NavAvatar = ({ name, photo }) => {
   const [imgOk, setImgOk] = useState(true);
   useEffect(() => setImgOk(true), [photo]);
@@ -41,8 +39,6 @@ const Navbar = () => {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  // Interval handle for the unread-notifications poll (cleared on unmount and
-  // while the tab is hidden).
   const pollRef = useRef(null);
   const [scrolled, setScrolled] = useState(false);
 
@@ -52,9 +48,6 @@ const Navbar = () => {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-  // Cook profile photo lives on CookProfile (not the auth user), so the
-  // navbar loads it separately and refreshes on the "cook-photo-updated"
-  // event fired by the profile editors after a successful save.
   const [cookPhoto, setCookPhoto] = useState("");
 
   useEffect(() => {
@@ -80,7 +73,6 @@ const Navbar = () => {
     };
   }, [user]);
 
-  // Unread badge for customer + cook + admin inboxes.
   useEffect(() => {
     if (!user || !["customer", "cook", "admin"].includes(user.role)) {
       setUnreadCount(0);
@@ -94,15 +86,9 @@ const Navbar = () => {
           setUnreadCount(data.filter((n) => !n.read).length);
         }
       } catch {
-        // badge is best-effort; page shows the full error state
       }
     };
     fetchUnread();
-    // Deduplicated polling (Phase 16): the global NotificationPopup already
-    // polls every 30s and dispatches "notifications-updated" on arrivals, and
-    // the Notifications page nudges on reads — so the badge needs no fast
-    // poll of its own. Refresh on event + visibility/focus + a slow 5-minute
-    // safety net (hidden-tab aware). Cuts steady-state inbox polling in half.
     const startPoll = () => {
       stopPoll();
       pollRef.current = setInterval(() => {
@@ -126,9 +112,6 @@ const Navbar = () => {
     startPoll();
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onFocus);
-    // Refresh the badge immediately when a new-notification popup fires
-    // (or a popup tap / Notifications page marks one as read) instead of
-    // waiting for the safety poll.
     window.addEventListener("notifications-updated", fetchUnread);
     return () => {
       cancelled = true;
@@ -151,15 +134,12 @@ const Navbar = () => {
   const isAdmin = user?.role === "admin";
   const isCook = user?.role === "cook";
   const hideCustomerPages = isAdmin || isCook;
-  // Avatar / user chip links to the role's own profile page.
   const profilePath =
     user?.role === "customer"
       ? "/dashboard/profile"
       : user?.role === "cook"
         ? "/dashboard/cook-profile"
         : "/admin";
-  // Brand logo lands each role on its own home: cooks/admins go straight
-  // to their dashboard instead of the marketing home page.
   const brandPath =
     user?.role === "admin"
       ? "/admin"
@@ -170,7 +150,6 @@ const Navbar = () => {
   return (
     <nav className={`navbar ${scrolled ? "is-scrolled" : ""}`}>
       <div className="navbar-inner">
-        {/* Brand Logo */}
         <Link to={brandPath} className="navbar-brand" onClick={closeMobile}>
           <img
             src={cookMitraLogo}
@@ -182,7 +161,6 @@ const Navbar = () => {
           </span>
         </Link>
 
-        {/* Desktop Navigation */}
         <div className="navbar-nav">
           <LocationPicker />
           {!hideCustomerPages && (
@@ -266,7 +244,6 @@ const Navbar = () => {
 
               <div className="nav-divider"></div>
 
-              {/* User Profile Pill — clicking goes to the profile page */}
               <Link
                 to={profilePath}
                 className="navbar-user-chip navbar-profile-link"
@@ -301,7 +278,6 @@ const Navbar = () => {
           )}
         </div>
 
-        {/* Mobile actions: avatar + bell + menu toggle (small screens only) */}
         <div className="navbar-mobile-actions">
           {user && (
             <Link
@@ -344,7 +320,6 @@ const Navbar = () => {
         </div>
       </div>
 
-      {/* Mobile Dropdown Drawer */}
       {mobileMenuOpen && (
         <div className="mobile-menu open">
           <LocationPicker />

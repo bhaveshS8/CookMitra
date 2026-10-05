@@ -26,8 +26,6 @@ const AddCookModal = ({ open, onClose, onCreated }) => {
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
   const [created, setCreated] = useState(null);
-  // Login credentials to show the admin (password is hashed server-side,
-  // so this success screen is the only place it is ever visible).
   const [createdCreds, setCreatedCreds] = useState(null);
   const [copied, setCopied] = useState("");
   const [saving, setSaving] = useState(false);
@@ -53,7 +51,6 @@ const AddCookModal = ({ open, onClose, onCreated }) => {
       try {
         document.execCommand("copy");
       } catch {
-        // clipboard unavailable — admin can still select the text manually
       }
       ta.remove();
     }

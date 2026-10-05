@@ -1,5 +1,3 @@
-// Cook-facing earnings APIs: GET/POST only, no financial authority.
-// Every amount is computed server-side from bookings/leads/referrals.
 
 const Booking = require("../models/Booking");
 const CookProfile = require("../models/CookProfile");
@@ -32,7 +30,6 @@ const startOfWeekMonday = (now = new Date()) => {
   return d;
 };
 
-// GET /api/cook/earnings — overview + per-booking rows (§4).
 exports.getEarnings = async (req, res, next) => {
   try {
     const cookId = req.user.id;
@@ -45,13 +42,11 @@ exports.getEarnings = async (req, res, next) => {
       .populate("customer", "name")
       .sort({ createdAt: -1 })
       .lean();
-    // Backfill missing snapshots (write-once; historical never recomputed).
     for (const b of rows || []) {
       if (!(b?.payoutInfo?.finalCustomerPrice > 0)) {
         try {
           await ensureBookingPayoutSnapshot(b);
         } catch {
-          // non-fatal
         }
       }
     }
@@ -111,7 +106,6 @@ exports.getEarnings = async (req, res, next) => {
                 : String(snap.payoutStatus || "pending_weekly").replace("eligible", "pending_weekly"),
       };
     });
-    // Bonuses: approved/paid incentives + referrals (server records only).
     const incentives = await CookIncentive.find({ cook: cookId, status: { $in: ["approved", "paid"] } })
       .select("reward status")
       .lean();
@@ -137,7 +131,6 @@ exports.getEarnings = async (req, res, next) => {
   }
 };
 
-// GET /api/cook/payouts — weekly payout cycles (§5).
 exports.getPayouts = async (req, res, next) => {
   try {
     const cycles = await CookPayout.find({ cook: req.user.id })
@@ -161,7 +154,6 @@ exports.getPayoutById = async (req, res, next) => {
   }
 };
 
-// GET /api/cook/incentives + /progress — server-computed (§8/§9).
 exports.getIncentives = async (req, res, next) => {
   try {
     const list = await refreshIncentiveEligibility(req.user.id);
@@ -203,7 +195,6 @@ exports.getIncentiveProgress = async (req, res, next) => {
 
 const LEAD_SERVICES = ["cook_for_me", "cook_with_me", "teach_me", "preparation_help", "other"];
 
-// POST /api/cook/leads (§7).
 exports.createLead = async (req, res, next) => {
   try {
     const cookId = req.user.id;
@@ -217,8 +208,6 @@ exports.createLead = async (req, res, next) => {
     if (!location) return res.status(400).json({ message: "Location is required" });
     const normalized = normalizePhone(mobileRaw);
     if (!normalized) return res.status(400).json({ message: "Enter a valid 10-digit mobile number" });
-    // Fraud guard (§15): same phone already claimed by ANY cook (verified or
-    // pending) cannot be claimed again; same cook+phone unique index backs this.
     const clash = await CookLead.findOne({ normalizedPhone: normalized })
       .select("cook status")
       .lean();
@@ -279,7 +268,6 @@ exports.getLead = async (req, res, next) => {
   }
 };
 
-// GET /api/cook/referral — code, link, stats (§12/§17).
 exports.getReferralInfo = async (req, res, next) => {
   try {
     const me = await User.findById(req.user.id).select("name").lean();
@@ -288,7 +276,6 @@ exports.getReferralInfo = async (req, res, next) => {
       .populate("referredCook", "name")
       .sort({ createdAt: -1 })
       .lean();
-    // Live verified-booking counts (server-computed).
     for (const r of referrals) {
       try {
         r.liveVerifiedBookings = await countVerifiedBookings(r.referredCook?._id || r.referredCook);
@@ -330,8 +317,6 @@ exports.listReferrals = async (req, res, next) => {
   }
 };
 
-// POST /api/cook/referral/regenerate — allowed only before any referral exists
-// (ownership can never change after the first claim, §12).
 exports.regenerateReferral = async (req, res, next) => {
   try {
     const used = await CookReferral.countDocuments({ referrer: req.user.id });

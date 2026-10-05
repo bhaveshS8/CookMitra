@@ -1,6 +1,3 @@
-// Per-cook incentive enrollment for one slab (§9/§10).
-// Each slab has its own eligibility, window, verification + approval state.
-// Non-cumulative by default — slabs never auto-combine.
 const mongoose = require("mongoose");
 
 const cookIncentiveSchema = new mongoose.Schema(
@@ -16,7 +13,6 @@ const cookIncentiveSchema = new mongoose.Schema(
     reward: { type: Number, required: true, min: 0 },
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
-    // Server-computed (§9) — never written by the cook client.
     verifiedLeadCount: { type: Number, default: 0, min: 0 },
     eligible: { type: Boolean, default: false },
     status: {

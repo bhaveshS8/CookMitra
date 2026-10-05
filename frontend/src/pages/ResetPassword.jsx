@@ -5,8 +5,6 @@ import { useShowToast } from "../store/hooks";
 import { Lock, AlertCircle, Loader2, CheckCircle2, Eye, EyeOff } from "lucide-react";
 import cookMitraLogo from "../assets/logo.png";
 
-// Reset password: consumes ?token= with a new password via
-// POST /auth/reset-password. Invalid/expired tokens surface the API message.
 const ResetPassword = () => {
   const [searchParams] = useSearchParams();
   const [token] = useState(searchParams.get("token") || "");

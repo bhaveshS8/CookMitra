@@ -13,8 +13,6 @@ const app = (
   </React.StrictMode>
 );
 
-// GoogleOAuthProvider requires a real client ID — only wrap when configured
-// so local dev without Google keys still runs on email/password auth.
 root.render(
   googleClientId && !googleClientId.includes("your_google_client_id_here") ? (
     <GoogleOAuthProvider clientId={googleClientId}>{app}</GoogleOAuthProvider>

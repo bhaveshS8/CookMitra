@@ -1,12 +1,6 @@
-// Shared coupon pricing — pure functions over a coupon record so both the
-// validate endpoint and the payment flow compute identical discounts.
-// Nothing here touches the DB, which keeps it unit-testable.
 
 const normalizeCode = (code) => String(code || "").trim().toUpperCase();
 
-// Returns null when usable, otherwise a human-readable rejection reason.
-// Options: amount (pre-discount fee), userId, serviceType, isFirstBooking
-// (whether the customer has no prior bookings), now.
 const rejectionReason = (
   coupon,
   { amount, userId, serviceType, isFirstBooking, now = new Date() } = {}
@@ -46,17 +40,12 @@ const rejectionReason = (
   return null;
 };
 
-// Rupee discount for a usable coupon (caller must check rejectionReason).
-// Flat coupons take flatAmount; percent coupons take percent capped by
-// maxDiscount. Never exceeds the order value.
 const computeDiscount = (coupon, amount) => {
   const fullFee = Math.round(Number(amount));
   let raw = 0;
   if (coupon.discountType === "flat") {
     raw = Math.round(Number(coupon.flatAmount) || 0);
   } else {
-    // Guard corrupt data (missing percent → NaN → falsy checks pass and the
-    // booking settles ₹0): treat unparseable percent as no discount.
     raw = Math.round((fullFee * Number(coupon.percent)) / 100) || 0;
   }
   const capped =

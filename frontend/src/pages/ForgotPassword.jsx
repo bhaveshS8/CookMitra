@@ -5,10 +5,6 @@ import { useShowToast } from "../store/hooks";
 import { Mail, AlertCircle, ArrowLeft, Loader2, KeyRound } from "lucide-react";
 import cookMitraLogo from "../assets/logo.png";
 
-// Forgot password: asks for the account email, calls
-// POST /auth/forgot-password (always a generic reply — no enumeration).
-// Outside production the API returns a dev-only resetToken, which we surface
-// as a direct link so the flow is testable without SMTP email delivery.
 const ForgotPassword = () => {
   const [searchParams] = useSearchParams();
   const [email, setEmail] = useState(searchParams.get("email") || "");

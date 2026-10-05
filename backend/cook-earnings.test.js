@@ -1,5 +1,3 @@
-// Cook Partner earnings system tests (pure functions + schema guards, no DB).
-// Run:  node backend/cook-earnings.test.js  — exits non-zero on failure.
 
 const {
   computeCookPayout,
@@ -19,7 +17,6 @@ const check = (name, ok, detail) => {
   if (!ok) failures++;
 };
 
-// ── §1 Payout: 85% of FINAL price, 2-decimal ─────────────────────────────
 {
   const t = computeCookPayout(199);
   check("1h: 199 → 169.15", t.cookPayoutAmount === 169.15 && t.platformDeductionAmount === 29.85, JSON.stringify(t));
@@ -29,7 +26,6 @@ const check = (name, ok, detail) => {
   check("2h: 349 → 296.65", t.cookPayoutAmount === 296.65 && t.platformDeductionAmount === 52.35, JSON.stringify(t));
 }
 {
-  // 3h with ₹50 coupon: slab 499 − 50 = 449 final (never from regular price).
   const snap = buildPayoutSnapshot({ regularPrice: 499, discountAmount: 50, finalCustomerPrice: 449 });
   check("3h coupon: 449 → 381.65", snap.cookPayoutAmount === 381.65 && snap.platformDeductionAmount === 67.35, JSON.stringify(snap));
   check("3h coupon: snapshot keeps regular+discount", snap.regularPrice === 499 && snap.discountAmount === 50 && snap.finalCustomerPrice === 449);
@@ -44,14 +40,11 @@ const check = (name, ok, detail) => {
   check("zero/negative guarded", computeCookPayout(0).cookPayoutAmount === 0 && computeCookPayout(-5).cookPayoutAmount === 0);
 }
 {
-  // §2 snapshot immutability: building twice from the same inputs is stable,
-  // and the snapshot carries its own status/eligibility timestamps.
   const a = buildPayoutSnapshot({ regularPrice: 499, discountAmount: 50, finalCustomerPrice: 449 });
   const b = buildPayoutSnapshot({ regularPrice: 499, discountAmount: 50, finalCustomerPrice: 449 });
   check("snapshot deterministic", a.cookPayoutAmount === b.cookPayoutAmount && a.payoutStatus === "eligible" && Boolean(a.payoutEligibleAt));
 }
 
-// ── §3 Weekly eligibility ─────────────────────────────────────────────────
 const baseBooking = {
   status: "completed",
   amount: 449,
@@ -68,14 +61,12 @@ check("incomplete (not completed) held", !payoutEligibleForCycle({ ...baseBookin
 check("already-paid excluded (no double pay)", !payoutEligibleForCycle({ ...baseBooking, payout: { status: "settled" } }).eligible);
 check("test money excluded", !payoutEligibleForCycle({ ...baseBooking, payment: { status: "paid", testMode: true } }).eligible);
 
-// ── §7/§15 Leads: phone normalization + duplicate semantics ──────────────
 check("normalize +91 spaced", normalizePhone("+91 98765 43210") === "9876543210");
 check("normalize 91-prefix", normalizePhone("919876543210") === "9876543210");
 check("normalize 0-prefix", normalizePhone("09876543210") === "9876543210");
 check("fake/invalid rejected", normalizePhone("12345") === "" && normalizePhone("abd") === "" && normalizePhone("5876543210") === "");
 check("same phone one core (two cooks collide)", normalizePhone("+91-98765-43210") === normalizePhone("9876543210"));
 
-// ── §6 Incentives: slabs, expiry, non-cumulative ─────────────────────────
 check("config slabs exact", JSON.stringify(cfg.incentives.map((i) => [i.targetLeads, i.days, i.reward])) === JSON.stringify([[10, 7, 500], [20, 10, 1000], [30, 15, 1500], [50, 30, 2500]]));
 check("non-cumulative default", cfg.cumulative === false);
 {
@@ -88,7 +79,6 @@ check("non-cumulative default", cfg.cumulative === false);
   check("50/30 champion needs 50", incentiveProgress({ incentive: mk("CHAMPION", 50, "2026-10-01", "2026-10-31"), verifiedLeadCount: 49, now }).remaining === 1);
 }
 
-// ── §11/§12 Referrals ────────────────────────────────────────────────────
 {
   const code = generateReferralCode("Bhavesh");
   check("referral code shape CM-NAME-XXXX", /^CM-[A-Z]{1,12}-[0-9A-F]{4}$/.test(code), code);
@@ -100,7 +90,6 @@ check("non-cumulative default", cfg.cumulative === false);
   check("config reward/target", cfg.referralReward === 250 && cfg.referralBookingTarget === 10);
 }
 
-// ── §5/§20 Idempotency + unique constraints (schema-level) ───────────────
 {
   const CookPayout = require("./models/CookPayout");
   const idx = CookPayout.schema.indexes().map((x) => x[1]?.name || JSON.stringify(x[0]));

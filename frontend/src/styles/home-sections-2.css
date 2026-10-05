@@ -1,8 +1,4 @@
-/* ==========================================================================
-   Home — how it works, testimonials, CTA, lead capture
-   ========================================================================== */
 
-/* How it works */
 .how-it-works-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
@@ -50,7 +46,6 @@
 .how-card h3 { font-size: 1.05rem; margin: 0 0 0.4rem; }
 .how-card p { color: var(--slate-600); font-size: 0.9rem; margin: 0; }
 
-/* Testimonials (dark band) */
 .testimonials-section .section-title { color: #fff; }
 .testimonials-section .section-description { color: rgba(255, 255, 255, 0.7); }
 .testimonials-grid {
@@ -90,7 +85,6 @@
 .testimonial-info h4 { color: #fff; margin: 0; font-size: 0.95rem; }
 .testimonial-info p { color: rgba(255, 255, 255, 0.6); font-size: 0.8rem; margin: 0; }
 
-/* CTA banner — base */
 .cta-banner {
   position: relative;
   overflow: hidden;
@@ -102,7 +96,6 @@
 .cta-cook-wrap { padding: 0 1.5rem; }
 .cta-cook-wrap .cta-banner { margin-left: auto; margin-right: auto; }
 
-/* Cook CTA — modern split card: copy left, earnings proof right */
 .cta-cook {
   text-align: left;
   background:
@@ -237,9 +230,6 @@
   .cta-cook-actions .btn { width: 100%; justify-content: center; }
 }
 
-/* Phones: compact cook CTA — less vertical height.
-   High-specificity banner selector beats the generic responsive.css
-   `.cta-banner` padding/margin (that layer loads later). */
 @media (max-width: 640px) {
   .cta-cook-wrap { padding: 0 1rem; }
   .cta-cook-wrap .cta-banner.cta-cook { margin-top: 2rem; padding: 0; }
@@ -260,7 +250,6 @@
   .cta-cook-glow { animation: none !important; }
 }
 
-/* Lead capture */
 .lead-section { max-width: 1200px; margin: 0 auto; padding: 4.2rem 1.5rem; }
 .lead-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2.6rem; align-items: center; }
 .lead-benefits { list-style: none; padding: 0; margin: 1.4rem 0 0; display: flex; flex-direction: column; gap: 0.7rem; }
@@ -281,7 +270,6 @@
   margin-bottom: 1rem;
 }
 
-/* Home registration form */
 .home-registration-form .role-segmented-control {
   display: flex;
   gap: 0.5rem;
@@ -364,7 +352,6 @@
 .home-registration-form .btn-block {
   margin-top: 0.5rem;
 }
-/* ---- Small phones: how-it-works + testimonial cards ------------------ */
 @media (max-width: 375px) {
   .how-card { padding: 1.25rem 1.15rem; }
   .how-card h3 { font-size: 1rem; }

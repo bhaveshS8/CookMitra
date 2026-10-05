@@ -1,10 +1,4 @@
-/* ==========================================================================
-   Review & rating UI — ReviewForm (customer) + customer-rating card (cook).
-   Design tokens come from base.css. Mobile rules stay at the bottom of this
-   file so they win the cascade over the base rules above.
-   ========================================================================== */
 
-/* ---------- Rating form (not yet rated) ---------- */
 .review-form-container { margin-top: 1rem; }
 .review-form-container--bare { margin-top: 0.5rem; }
 
@@ -46,7 +40,6 @@
   font-weight: 600;
 }
 
-/* Star picker — horizontal pill card: stars left, live rating pill right. */
 .rf-rate {
   display: flex;
   align-items: center;
@@ -94,7 +87,6 @@
 .rf-rate-pill.tone-good { background: var(--accent-emerald-light); border-style: solid; border-color: #a7f3d0; color: var(--accent-emerald); }
 .rf-rate-pill.tone-great { background: var(--primary-100); border-style: solid; border-color: #fed7aa; color: var(--primary-700); }
 
-/* Comment + quick tags */
 .rf-field { display: flex; flex-direction: column; gap: 0.45rem; }
 
 .rf-label { font-size: 0.85rem; font-weight: 700; color: var(--slate-700); }
@@ -123,7 +115,6 @@
   color: var(--primary-700);
 }
 
-/* Small meta chips (home rating cards): service / date / time. */
 .rf-chipmeta {
   display: inline-flex;
   align-items: center;
@@ -148,10 +139,8 @@
 }
 .rf-count { font-size: 0.75rem; font-weight: 600; color: var(--slate-400); white-space: nowrap; }
 
-/* Submit row */
 .rf-actions { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .rf-actions .btn { display: inline-flex; align-items: center; gap: 0.4rem; }
-/* Bare embeds (cards supply the chrome): full-width submit, centered hint. */
 .review-form-container--bare .rf-actions { flex-direction: column; align-items: stretch; }
 .review-form-container--bare .rf-actions .btn { width: 100%; justify-content: center; padding: 0.7rem 1rem; }
 .review-form-container--bare .rf-hint { text-align: center; }
@@ -160,7 +149,6 @@
 .rf-spin { animation: rf-spin 0.8s linear infinite; }
 @keyframes rf-spin { to { transform: rotate(360deg); } }
 
-/* ---------- Read-only review card (submitted / existing / cook view) ---------- */
 .review-card {
   margin-top: 0.75rem;
   padding: 1.05rem 1.15rem;
@@ -230,7 +218,6 @@
 .review-card-comment svg { flex-shrink: 0; margin-top: 2px; color: var(--slate-400); }
 .review-card-comment p { margin: 0; overflow-wrap: anywhere; }
 
-/* ---------- Mobile ---------- */
 @media (max-width: 640px) {
   .review-form-container:not(.review-form-container--bare) .review-form { padding: 0.95rem; }
   .rf-star { padding: 0.3rem; }
@@ -240,11 +227,6 @@
   .rf-hint { text-align: center; }
 }
 
-/* ==========================================================================
-   Home "Rate your cook" section redesign (hrc-*).
-   Dark festive-slate panel with amber glow; white rating cards with a warm
-   accent bar. Uses the same ReviewForm (bare) + rf-chipmeta as elsewhere.
-   ========================================================================== */
 .hrc-section {
   position: relative;
   max-width: 1200px;
@@ -428,8 +410,6 @@
   .hrc-card { padding: 1rem 1rem 1.1rem; }
 }
 
-/* Small phones: a 320px grid floor overflows ~360px viewports once the
-   shell padding is subtracted — drop to a single fluid column. */
 @media (max-width: 430px) {
   .hrc-grid { grid-template-columns: 1fr; }
   .hrc-section { border-radius: var(--radius-lg); }
@@ -440,17 +420,14 @@
   .rf-rate-pill { font-size: 0.75rem; }
 }
 
-/* Tablets / small laptops: cap at two comfortable columns and tighten. */
 @media (min-width: 641px) and (max-width: 1024px) {
   .hrc-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
   .hrc-section { padding: 1.35rem 1.25rem 1.45rem; }
 }
 
-/* Touch + motion accessibility. */
 @media (pointer: coarse) {
   .hrc-x { width: 36px; height: 36px; }
   .rf-tag { padding: 0.42rem 0.8rem; }
-  /* iOS Safari auto-zooms on focus when inputs are < 16px — keep 16px. */
   .rf-textarea { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -459,7 +436,6 @@
   .rf-star:focus-visible { transform: none; }
   .hrc-dismiss, .hrc-x, .rf-tag { transition: none; }
 }
-/* ---- Small phones: review header + star row ------------------------- */
 @media (max-width: 375px) {
   .hrc-section { margin: 1.1rem 0.6rem 0; padding: 1.05rem 0.9rem 1.15rem; }
   .hrc-card { padding: 0.9rem 0.85rem 1rem; }

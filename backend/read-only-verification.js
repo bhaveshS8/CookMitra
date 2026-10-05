@@ -1,6 +1,3 @@
-// read-only-verification.js — Strictly READ-ONLY live inspection
-// Queries MongoDB directly to inspect indexes, state distribution, anomalies, and reconciliation.
-// Does NOT modify any records.
 
 const mongoose = require('mongoose');
 const path = require('path');

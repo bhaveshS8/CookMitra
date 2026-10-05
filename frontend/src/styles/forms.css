@@ -1,6 +1,3 @@
-/* ==========================================================================
-   Forms — controls
-   ========================================================================== */
 
 .form-group { display: flex; flex-direction: column; gap: 0.4rem; }
 
@@ -53,8 +50,6 @@ select.form-control {
 }
 textarea.form-control { min-height: 92px; resize: vertical; }
 
-/* Hide number-input spinners (stepper arrows) — all numeric entry is typed.
-   Covers Chrome / Safari / Edge (WebKit) + Firefox. */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none !important;
@@ -68,7 +63,6 @@ input[type="number"] {
   appearance: textfield !important;
 }
 
-/* Input with a leading icon */
 .input-with-icon { position: relative; }
 .input-with-icon .form-control { padding-left: 2.6rem; }
 .input-icon-prefix {
@@ -80,8 +74,6 @@ input[type="number"] {
   pointer-events: none;
 }
 
-/* Password reveal — reserve the full 40px toggle footprint (+ its offset)
-   so the last typed chars never slide underneath the eye button. */
 .password-input-wrapper .form-control { padding-right: 3.2rem; }
 .password-toggle-btn {
   position: absolute;
@@ -102,11 +94,9 @@ input[type="number"] {
 .password-toggle-btn:hover { color: #2d1b12; background: rgba(184, 115, 51, 0.1); }
 
 @media (max-width: 640px) {
-  /* 16px inputs prevent iOS auto-zoom on login/register and all forms. */
   .form-control { font-size: 16px; }
 }
 
-/* Phone with prefix */
 .phone-input-group { display: flex; gap: 0.5rem; align-items: stretch; }
 .phone-prefix {
   display: inline-flex;
@@ -120,13 +110,11 @@ input[type="number"] {
   white-space: nowrap;
 }
 
-/* Field feedback */
 .field-error { color: var(--accent-rose); font-size: 0.82rem; font-weight: 600; margin-top: 0.3rem; }
 .field-hint { color: var(--slate-500); font-size: 0.82rem; }
 .form-control[aria-invalid="true"] { border-color: var(--accent-rose); }
 .form-control[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-rose) 20%, transparent); }
 
-/* Password strength meter (register form) */
 .password-strength { margin-top: 0.45rem; }
 .password-strength-bar {
   height: 6px;
@@ -145,7 +133,6 @@ input[type="number"] {
 .password-strength-bar.strength-3 > span { background: #059669; }
 .password-strength-bar.strength-4 > span { background: #059669; }
 .password-strength-label { display: block; margin-top: 0.3rem; color: var(--slate-500); font-size: 0.78rem; }
-/* ---- Small phones: reclaim horizontal padding inside controls --------- */
 @media (max-width: 375px) {
   .form-control { padding: 0.62rem 0.8rem; border-radius: 11px; }
   .input-with-icon .form-control { padding-left: 2.4rem; }
