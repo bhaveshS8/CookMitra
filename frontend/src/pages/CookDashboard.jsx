@@ -13,7 +13,6 @@ import BookingRequestModal from "../components/BookingRequestModal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CookScheduleEditor from "../components/CookScheduleEditor";
 import CookPayoutPanel from "../components/CookPayoutPanel";
-import CookReferralCard from "../components/CookReferralCard";
 import { Check, XCircle, BellRing, ArrowRight, Star, MapPin, Navigation, CalendarDays, CalendarCheck, CalendarClock, Inbox, History, UserRound, Users, Soup, Wallet, ChefHat, AlertCircle, ShieldCheck } from "lucide-react";
 
 const customerLocationLabel = (booking) => {
@@ -892,7 +891,6 @@ const CookDashboard = () => {
             <CookScheduleEditor profile={cookProfile} onSaved={() => refetchCookProfile()} />
           )}
           {cookProfile && <CookPayoutPanel />}
-          {cookProfile && <CookReferralCard />}
           <RecentReviewsPreview reviews={myReviews} loading={loadingReviews} />
         </div>
       )}
