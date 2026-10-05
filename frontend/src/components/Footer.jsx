@@ -104,6 +104,7 @@ const Footer = () => {
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
             <Link to="/refunds">Refunds</Link>
+            <Link to="/customer-cancellation-refund-policy">Cancellation Policy</Link>
             <Link to="/contact">Contact</Link>
           </div>
         </div>

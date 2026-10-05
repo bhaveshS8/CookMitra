@@ -26,12 +26,13 @@ import Notifications from "./pages/Notifications";
 import CookDashboard from "./pages/CookDashboard";
 import CookSetup from "./pages/CookSetup";
 import CookReviews from "./pages/CookReviews";
+import CookEarnings from "./pages/CookEarnings";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminCookProfile from "./pages/AdminCookProfile";
 import AdminComplaints from "./pages/AdminComplaints";
 import BookingWaiting from "./pages/BookingWaiting";
 import BookingPayment from "./pages/BookingPayment";
-import { TermsConditions, PrivacyPolicy, RefundPolicy, ContactUs } from "./pages/Legal";
+import { TermsConditions, PrivacyPolicy, RefundPolicy, ContactUs, CancellationRefundPolicy } from "./pages/Legal";
 import "./App.css";
 
 // Customer-only pages (Find Cooks / Book a Cook).
@@ -116,6 +117,7 @@ function App() {
               <Route path="/terms" element={<TermsConditions />} />
               <Route path="/privacy" element={<PrivacyPolicy />} />
               <Route path="/refunds" element={<RefundPolicy />} />
+              <Route path="/customer-cancellation-refund-policy" element={<CancellationRefundPolicy />} />
               <Route path="/contact" element={<ContactUs />} />
               {/* Find Cooks listing removed — all discovery goes through
                   Book a Cook. Old /cooks URLs land there too. */}
@@ -208,6 +210,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={["cook"]}>
                     <CookReviews />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/cook/earnings"
+                element={
+                  <ProtectedRoute roles={["cook"]}>
+                    <CookEarnings />
                   </ProtectedRoute>
                 }
               />

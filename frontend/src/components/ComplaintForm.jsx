@@ -19,12 +19,11 @@ const CATEGORIES = {
     { value: "other", label: "Something else" },
   ],
   customer: [
-    { value: "quality", label: "Food quality / taste issues" },
-    { value: "hygiene", label: "Cleanliness / hygiene concerns" },
-    { value: "behaviour", label: "Unprofessional behaviour" },
-    { value: "no_show", label: "Cook did not arrive" },
-    { value: "safety", label: "Safety concern" },
-    { value: "other", label: "Something else" },
+    { value: "COOK_DID_NOT_ARRIVE", label: "Cook did not arrive" },
+    { value: "MAJOR_SERVICE_DEVIATION", label: "Service very different from confirmed" },
+    { value: "SERVICE_QUALITY_ISSUE", label: "Food quality / taste issues" },
+    { value: "UNPROFESSIONAL_BEHAVIOR", label: "Unprofessional behaviour" },
+    { value: "OTHER", label: "Something else" },
   ],
 };
 
@@ -128,7 +127,8 @@ const ComplaintForm = ({
       </button>
       <p className="bd-mini-note" style={{ marginTop: "0.5rem" }}>
         <ShieldAlert size={13} style={{ display: "inline", verticalAlign: "-2px" }} /> Only our admin
-        team sees this — never the {filedBy === "cook" ? "customer" : "cook"}.
+        team sees this — never the {filedBy === "cook" ? "customer" : "cook"}. Please report
+        within 24 hours of the service where possible — every report is reviewed, none is refunded automatically.
       </p>
     </form>
   );

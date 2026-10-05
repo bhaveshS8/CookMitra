@@ -6,7 +6,7 @@ import { useShowToast } from "../store/hooks";
 import ReviewForm, { ReviewStars } from "../components/ReviewForm";
 import ComplaintForm from "../components/ComplaintForm";
 import CookAvatar from "../components/CookAvatar";
-import ConfirmDialog from "../components/ConfirmDialog";
+import CancelBookingModal, { NoShowModal } from "../components/CancelBookingModal";
 import RescheduleModal from "../components/RescheduleModal";
 import RefundRequestModal from "../components/RefundRequestModal";
 import {
@@ -64,8 +64,11 @@ const BookingDetails = () => {
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [cancelling, setCancelling] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [noShowOpen, setNoShowOpen] = useState(false);
+  // Backend-computed cancellation preview (§15) — the only source for the
+  // charge/refund figures shown on this page.
+  const [cancelPreview, setCancelPreview] = useState(null);
   const [now, setNow] = useState(Date.now());
   // Cook enters the customer's OTP to start the service clock.
   const [otpInput, setOtpInput] = useState("");
@@ -157,20 +160,39 @@ const BookingDetails = () => {
     }
   };
 
-  const handleCancel = async () => {
-    if (cancelling) return;
-    setConfirmCancel(false);
-    setCancelling(true);
-    try {
-      const res = await API.patch(`/bookings/${bookingId}/cancel`);
-      setBooking((prev) => ({ ...prev, ...res.data }));
-      showToast("Booking cancelled successfully", "info");
-    } catch (err) {
-      showToast(err.response?.data?.message || "Failed to cancel booking", "error");
-    } finally {
-      setCancelling(false);
+  // The Cancel dialog (CancelBookingModal) performs the API call itself with
+  // the chosen reason — this just merges the cancelled booking into state.
+  const handleCancelled = (updated) => {
+    if (updated && typeof updated === "object") {
+      setBooking((prev) => ({ ...prev, ...updated }));
+    } else {
+      fetchDetails();
     }
+    setCancelPreview(null);
   };
+
+  // Cancellation preview for the info card below (customer, active booking
+  // only — the modal re-fetches fresh numbers at confirm time).
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      setCancelPreview(null);
+      if (!booking?._id) return;
+      if (user?.role !== "customer") return;
+      if (!["requested", "accepted", "confirmed"].includes(booking.status)) return;
+      if (booking?.serviceStartedAt) return;
+      try {
+        const res = await API.get(`/bookings/${booking._id}/cancellation-preview`);
+        if (alive) setCancelPreview(res.data);
+      } catch {
+        if (alive) setCancelPreview(null);
+      }
+    };
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [booking?._id, booking?.status, booking?.serviceStartedAt, user?.role]);
 
   // Once the cook verifies the OTP the service clock starts — Cancel
   // disappears; it can no longer be called off here.
@@ -884,6 +906,53 @@ const BookingDetails = () => {
         return null;
       })()}
 
+      {/* Cancellation — backend-computed eligibility + estimate (§23).
+          Active bookings show the live preview; cancelled ones show the
+          immutable snapshot recorded at cancellation time. */}
+      {user?.role === "customer" && cancelPreview?.canCancel && (
+        <div className="bd-card bd-cancel-card" role="status">
+          <h3 className="bd-card-head">
+            <XCircle size={18} /> Cancellation
+          </h3>
+          <p className="bd-note-hint">You can cancel this booking.</p>
+          <dl className="cancel-breakdown">
+            <div><dt>Cancellation charge ({cancelPreview.cancellationChargePercent}%)</dt><dd>{formatCurrency(cancelPreview.bookingAmount - cancelPreview.grossRefund)}</dd></div>
+            <div className="cancel-total"><dt>Estimated refund</dt><dd>{formatCurrency(cancelPreview.finalRefund)}</dd></div>
+          </dl>
+          <p className="bd-mini-note">
+            Non-refundable payment charges may apply.{" "}
+            <Link to="/customer-cancellation-refund-policy">Cancellation & Refund Policy</Link>
+          </p>
+        </div>
+      )}
+      {user?.role === "customer" && cancelPreview && !cancelPreview.canCancel && ["requested", "accepted", "confirmed"].includes(booking.status) && (
+        <div className="bd-card bd-cancel-card" role="status">
+          <h3 className="bd-card-head">
+            <XCircle size={18} /> Cancellation unavailable
+          </h3>
+          <p className="bd-note-hint">{cancelPreview.message || "The service has already started."}</p>
+        </div>
+      )}
+      {booking.status === "cancelled" && booking.cancellationInfo?.cancelledAt && (
+        <div className="bd-card bd-cancel-card" role="status">
+          <h3 className="bd-card-head">
+            <XCircle size={18} /> Cancellation details
+          </h3>
+          <dl className="cancel-breakdown">
+            <div><dt>Booking amount</dt><dd>{formatCurrency(booking.cancellationInfo.bookingAmount)}</dd></div>
+            <div><dt>Cancellation charge ({booking.cancellationInfo.cancellationChargePercentage}%)</dt><dd>{formatCurrency(booking.cancellationInfo.bookingAmount - booking.cancellationInfo.grossRefundAmount)}</dd></div>
+            <div className="cancel-total"><dt>Refund</dt><dd>{formatCurrency(booking.cancellationInfo.finalRefundAmount)}</dd></div>
+            <div><dt>Refund status</dt><dd>{String(booking.cancellationInfo.refundStatus || "").replace(/_/g, " ")}</dd></div>
+            {booking.cancellationInfo.refundReference && (
+              <div><dt>Refund reference</dt><dd>{booking.cancellationInfo.refundReference}</dd></div>
+            )}
+          </dl>
+          <p className="bd-mini-note">
+            <Link to="/customer-cancellation-refund-policy">Cancellation & Refund Policy</Link>
+          </p>
+        </div>
+      )}
+
       {/* Actions — reschedule + cancel. Rendered only when it applies, so
           completed/cancelled/expired bookings never show an empty bar.
           Inside 30 minutes of the start (or past the 2-move cap) the move
@@ -903,13 +972,16 @@ const BookingDetails = () => {
             </button>
           )}
           {canCancel && (
-            <button className="btn btn-danger-outline btn-sm" onClick={() => setConfirmCancel(true)} disabled={cancelling}>
+            <button className="btn btn-danger-outline btn-sm" onClick={() => setConfirmCancel(true)}>
               <XCircle size={16} />{" "}
-              {cancelling
-                ? "Cancelling..."
-                : booking.status === "requested"
-                  ? "Cancel Request"
-                  : "Cancel Booking"}
+              {booking.status === "requested"
+                ? "Cancel Request"
+                : "Cancel Booking"}
+            </button>
+          )}
+          {user?.role === "cook" && String(booking.cook?._id || booking.cook) === String(user?._id || user?.id) && ["accepted", "confirmed", "in_progress"].includes(booking.status) && !serviceStarted && (
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => setNoShowOpen(true)}>
+              <AlertCircle size={16} /> Mark customer no-show
             </button>
           )}
           {!canCancel && cancelLocked && (
@@ -997,15 +1069,23 @@ const BookingDetails = () => {
           )}
         </div>
       )}
-      <ConfirmDialog
-        open={confirmCancel}
-        title={booking.status === "requested" ? "Cancel this request?" : "Cancel this booking?"}
-        message="The other party will be notified and the slot will be released. This cannot be undone."
-        confirmLabel="Yes, cancel it"
-        tone="danger"
-        onCancel={() => setConfirmCancel(false)}
-        onConfirm={handleCancel}
-      />
+      {confirmCancel && (
+        <CancelBookingModal
+          bookingId={booking._id}
+          onClose={() => setConfirmCancel(false)}
+          onCancelled={handleCancelled}
+        />
+      )}
+      {noShowOpen && (
+        <NoShowModal
+          bookingId={booking._id}
+          onClose={() => setNoShowOpen(false)}
+          onMarked={(updated) => {
+            if (updated && typeof updated === "object") setBooking((prev) => ({ ...prev, ...updated }));
+            else fetchDetails();
+          }}
+        />
+      )}
       {rescheduleOpen && (
         <RescheduleModal
           booking={booking}

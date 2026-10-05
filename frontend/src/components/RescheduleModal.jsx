@@ -573,6 +573,11 @@ const RescheduleModal = ({ booking, onClose, onRescheduled }) => {
               <li>The session length stays the same — the price does not change.</li>
               <li>The other side is notified the moment you confirm.</li>
               <li>Moves close 30 minutes before the start time.</li>
+              <li>
+                Can&apos;t find a suitable time? You can cancel under our{" "}
+                <a href="/customer-cancellation-refund-policy" target="_blank" rel="noreferrer">Cancellation & Refund Policy</a>{" "}
+                and book afresh.
+              </li>
               {usedMoves > 0 ? (
                 <li>
                   This booking has already been moved {usedMoves} of {MAX_RESCHEDULES} times.

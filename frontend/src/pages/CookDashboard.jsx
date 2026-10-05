@@ -13,6 +13,7 @@ import BookingRequestModal from "../components/BookingRequestModal";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CookScheduleEditor from "../components/CookScheduleEditor";
 import CookPayoutPanel from "../components/CookPayoutPanel";
+import CookReferralCard from "../components/CookReferralCard";
 import { Check, XCircle, BellRing, ArrowRight, Star, MapPin, Navigation, CalendarDays, CalendarCheck, CalendarClock, Inbox, History, UserRound, Users, Soup, Wallet, ChefHat, AlertCircle, ShieldCheck } from "lucide-react";
 
 // Customer location summary for a cook's booking card: prefer the structured
@@ -551,6 +552,9 @@ const CookDashboard = () => {
               <Link className="cook-glass-btn" to="/dashboard/cook-reviews">
                 <Star size={15} /> Reviews
               </Link>
+              <Link className="cook-glass-btn" to="/cook/earnings">
+                <Wallet size={15} /> Earnings
+              </Link>
             </div>
           </div>
         </div>
@@ -578,9 +582,10 @@ const CookDashboard = () => {
         </button>
         {/* Earned is a read-only figure, not a shortcut — deliberately not a
             button, so it cannot navigate anywhere; it just shows money earned. */}
-        <div
+        <Link
           className="cook-stat-card cook-stat-static"
-          aria-label={`Earned ${formatCurrency(totalEarned)} from ${completedCount} completed ${completedCount === 1 ? "session" : "sessions"}`}
+          to="/cook/earnings"
+          aria-label={`Earned ${formatCurrency(totalEarned)} from ${completedCount} completed ${completedCount === 1 ? "session" : "sessions"} — open earnings`}
         >
           <div className="cook-stat-icon emerald">
             <Wallet size={24} />
@@ -589,7 +594,7 @@ const CookDashboard = () => {
             <div className="cook-stat-num small-amount">{formatCurrency(totalEarned)}</div>
             <div className="cook-stat-label">Earned · {completedCount} done</div>
           </div>
-        </div>
+        </Link>
         <Link className="cook-stat-card cook-stat-mob-hide" to="/dashboard/cook-reviews">
           <div className="cook-stat-icon brand">
             <Star size={24} />
@@ -1002,6 +1007,7 @@ const CookDashboard = () => {
             <CookScheduleEditor profile={cookProfile} onSaved={() => refetchCookProfile()} />
           )}
           {cookProfile && <CookPayoutPanel />}
+          {cookProfile && <CookReferralCard />}
           <RecentReviewsPreview reviews={myReviews} loading={loadingReviews} />
         </div>
       )}

@@ -1,0 +1,29 @@
+/* Cook earnings page — responsive, no horizontal overflow at 320px+. */
+.ce-page { max-width: 1080px; }
+.ce-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.ce-head h1 { margin: 0; font-size: 1.5rem; }
+.ce-sub { color: var(--slate-500, #64748b); margin: 0.25rem 0 0; font-size: 0.92rem; }
+.ce-h2 { font-size: 1.1rem; margin: 1.5rem 0 0.6rem; }
+.ce-grid { display: grid; gap: 0.75rem; }
+.ce-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ce-slabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.ce-card { background: var(--card, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 12px; padding: 0.85rem 1rem; min-width: 0; overflow-wrap: anywhere; }
+.ce-label { display: block; font-size: 0.78rem; color: var(--slate-500, #64748b); margin-bottom: 0.2rem; }
+.ce-card strong { font-size: 1.02rem; }
+.ce-list { display: grid; gap: 0.75rem; }
+.ce-row-top { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.ce-kv { font-size: 0.88rem; color: var(--slate-600, #475569); margin: 0.3rem 0; overflow-wrap: anywhere; }
+.ce-money { display: grid; gap: 0.2rem; font-size: 0.9rem; }
+.ce-earn strong { color: var(--emerald-700, #047857); }
+.ce-bar { height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden; margin: 0.4rem 0; }
+.ce-bar > span { display: block; height: 100%; background: var(--brand-500, #f59e0b); border-radius: 999px; }
+.ce-empty { color: var(--slate-500, #64748b); font-size: 0.9rem; }
+.ce-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.5rem; }
+.ce-form input, .ce-form select, .ce-form textarea { width: 100%; max-width: 100%; box-sizing: border-box; border: 1px solid var(--border, #e2e8f0); border-radius: 8px; padding: 0.5rem 0.6rem; font-size: 0.9rem; }
+.ce-btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.ce-slab { text-align: center; font-size: 0.85rem; }
+@media (max-width: 768px) {
+  .ce-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ce-slabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ce-form-grid { grid-template-columns: minmax(0, 1fr); }
+}

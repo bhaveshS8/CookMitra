@@ -438,6 +438,33 @@ exports.createCookProfile = async (req, res, next) => {
       approvalStatus: "pending",
       ...body,
     });
+    // Mint the cook's referral identity + enrollment anchor (§12, §6).
+    // Best-effort: profile creation never fails on referral bookkeeping.
+    try {
+      const { generateReferralCode } = require("../utils/cookEarnings");
+      const CookReferral = require("../models/CookReferral");
+      const me = await User.findById(req.user.id).select("name").lean();
+      for (let i = 0; i < 3; i++) {
+        try {
+          profile.referralCode = generateReferralCode(me?.name || "COOK");
+          profile.incentiveEnrolledAt = profile.incentiveEnrolledAt || new Date();
+          const ref = await CookReferral.findOne({ referredCook: req.user.id }).select("referrer").lean();
+          if (ref?.referrer) profile.referredBy = ref.referrer;
+          await profile.save();
+          break;
+        } catch (e) {
+          if (e?.code !== 11000) break;
+        }
+      }
+      try {
+        const { ensureIncentives } = require("../utils/cookEarningsService");
+        await ensureIncentives(req.user.id);
+      } catch {
+        // non-fatal
+      }
+    } catch {
+      // non-fatal
+    }
     res.status(201).json(profile);
   } catch (error) {
     next(error);

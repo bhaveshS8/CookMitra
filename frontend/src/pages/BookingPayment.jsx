@@ -616,8 +616,9 @@ const BookingPayment = () => {
               {phase === "processing" ? "Starting payment…" : `Pay ${formatCurrency(amount)} & Confirm`}
             </button>
             <p className="bf-consent">
-              By paying you agree to our <Link to="/terms">Terms</Link> and{" "}
-              <Link to="/refunds">Refund Policy</Link>. Payments are processed
+              By paying you agree to our <Link to="/terms">Terms</Link>,{" "}
+              <Link to="/refunds">Refund Policy</Link> and{" "}
+              <Link to="/customer-cancellation-refund-policy">Cancellation Policy</Link>. Payments are processed
               securely by Razorpay.
             </p>
             <div className="bf-secure"><ShieldCheck size={14} /> 256-bit encrypted • Instant confirmation</div>

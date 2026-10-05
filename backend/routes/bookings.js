@@ -26,6 +26,8 @@ const {
   startService,
   payBooking,
   markCookArrived,
+  getCancellationPreview,
+  markNoShow,
 } = require("../controllers/bookingController");
 const {
   getRefundEligibility,
@@ -124,6 +126,19 @@ router.patch(
   startService
 );
 router.patch("/:id/cancel", auth, cancelBooking);
+// Backend-computed cancellation preview for the Cancel dialog (must sit
+// before nothing conflicting — GET with a distinct suffix, safe anywhere).
+router.get("/:id/cancellation-preview", auth, getCancellationPreview);
+// Customer no-show: cook (own booking) or admin only — customers can never
+// mark their own booking as no-show.
+router.post(
+  "/:id/no-show",
+  auth,
+  authorize("cook", "admin"),
+  [body("reason").trim().notEmpty().withMessage("Please describe what happened at the venue.")],
+  validate,
+  markNoShow
+);
 // Customers may permanently remove bookings the cook never accepted
 // (requested / rejected / expired) or ones they already cancelled.
 router.delete("/:id", auth, authorize("customer"), deleteBooking);

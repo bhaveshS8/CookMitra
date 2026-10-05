@@ -14,6 +14,8 @@ import CouponManagement from "../components/CouponManagement";
 import VisitStats from "../components/VisitStats";
 import AnalyticsPanel from "../components/AnalyticsPanel";
 import AdminPayoutsPanel from "../components/AdminPayoutsPanel";
+import AdminCancellationPanel from "../components/AdminCancellationPanel";
+import AdminIncentivesPanel from "../components/AdminIncentivesPanel";
 import ConfirmDialog from "../components/ConfirmDialog";
 import {
   ShieldAlert,
@@ -132,6 +134,18 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("book
           <Wallet size={17} /> Refunds
         </button>
         <button
+          className={`tab-btn ${activeTab === "cancellations" ? "active" : ""}`}
+          onClick={() => setActiveTab("cancellations")}
+        >
+          <XCircle size={17} /> Cancellations
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "incentives" ? "active" : ""}`}
+          onClick={() => setActiveTab("incentives")}
+        >
+          <Star size={17} /> Cook Incentives
+        </button>
+        <button
           className={`tab-btn ${activeTab === "analytics" ? "active" : ""}`}
           onClick={() => setActiveTab("analytics")}
         >
@@ -147,6 +161,8 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("book
       {activeTab === "coupons" && <CouponManagement />}
       {activeTab === "payouts" && <AdminPayoutsPanel view="payouts" />}
       {activeTab === "refunds" && <AdminPayoutsPanel view="refunds" />}
+      {activeTab === "cancellations" && <AdminCancellationPanel />}
+      {activeTab === "incentives" && <AdminIncentivesPanel />}
       {activeTab === "visits" && <VisitStats />}
       {activeTab === "analytics" && <AnalyticsPanel />}
     </div>

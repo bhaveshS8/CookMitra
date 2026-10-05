@@ -134,13 +134,21 @@ const normalizeRescheduleReason = (raw) => {
 // "pending") for an admin to approve or reject in the Payouts tab.
 // Test payments carry no real money, so they queue nothing. Returns the
 // queued amount (0 when there is nothing refundable).
-const queueRefundForApproval = (booking, reason) => {
+// amountOverride (optional): policy-computed final refund (e.g. a 75%
+// time-slab figure from utils/cancellationPolicy). When omitted the full
+// captured amount is queued (legacy paths: expiry, reject, race refunds).
+const queueRefundForApproval = (booking, reason, amountOverride) => {
   const pay = booking.payment || {};
   if (pay.status !== "paid" || pay.testMode) return 0;
   // Idempotent: a queued/processed/failed/manual/rejected refund is never
   // re-queued by a retry or a second terminal transition.
   if (pay.refundStatus && pay.refundStatus !== "none") return 0;
-  const amount = Math.round(Number(pay.paidAmount || booking.amount || 0));
+  let amount;
+  if (amountOverride != null) {
+    amount = Math.round(Number(amountOverride) * 100) / 100;
+  } else {
+    amount = Math.round(Number(pay.paidAmount || booking.amount || 0));
+  }
   if (!(amount > 0)) return 0;
   booking.payment.refundStatus = "pending";
   booking.payment.refundAmount = amount;
@@ -1080,6 +1088,20 @@ exports.createBooking = async (req, res, next) => {
         discount,
         commission,
         cookPayout,
+        // Immutable payout snapshot (§2): precise 85/15 split of the FINAL
+        // price (coupon-aware). Stored at creation, never recomputed.
+        payoutInfo: (() => {
+          try {
+            const { buildPayoutSnapshot } = require("../utils/cookEarnings");
+            return buildPayoutSnapshot({
+              regularPrice: slabPrice,
+              discountAmount: discount,
+              finalCustomerPrice: expectedAmount,
+            });
+          } catch {
+            return undefined;
+          }
+        })(),
         payment: hasPayment
           ? {
               razorpayOrderId,
@@ -2994,6 +3016,37 @@ exports.cancelBooking = async (req, res, next) => {
       return res.status(400).json({ message: "Booking cannot be cancelled" });
     }
 
+    // Cancellation reasons are structured (§22) and money fields are NEVER
+    // read from the client (§16/§29): refundPercent/refundAmount/
+    // cancellationCharge/refundStatus sent in the body are ignored — the
+    // backend policy engine computes everything.
+    const cancelledByValue = isAdmin ? "admin" : isCook ? "cook" : "customer";
+    const { CUSTOMER_CANCELLATION_REASONS } = require("../utils/cancellationPolicy");
+    let cancelReason = "";
+    let cancelReasonNote = "";
+    if (!isAdmin) {
+      cancelReason = String(req.body?.reason || "").trim().toUpperCase().slice(0, 60);
+      if (cancelledByValue === "customer") {
+        if (cancelReason && !CUSTOMER_CANCELLATION_REASONS.includes(cancelReason)) {
+          return res.status(400).json({ message: "Please choose a valid cancellation reason." });
+        }
+        cancelReason = cancelReason || "OTHER";
+        if (cancelReason === "OTHER") {
+          cancelReasonNote = String(req.body?.reasonNote || req.body?.note || "").trim().slice(0, 500);
+          if (!cancelReasonNote) {
+            return res.status(400).json({ message: "Please describe your reason for cancelling." });
+          }
+        } else {
+          cancelReasonNote = String(req.body?.reasonNote || req.body?.note || "").trim().slice(0, 500);
+        }
+      } else if (cancelReason) {
+        cancelReasonNote = String(req.body?.reasonNote || req.body?.note || "").trim().slice(0, 500);
+      }
+    } else {
+      cancelReason = String(req.body?.reason || "").trim().toUpperCase().slice(0, 60) || "ADMIN_CANCELLED";
+      cancelReasonNote = String(req.body?.reasonNote || req.body?.note || "").trim().slice(0, 500);
+    }
+
     // OTP-verified start is the proof of presence: it sets cookArrived via
     // markArrivedIfNeeded, so the self-serve cancel path closes from here on.
     // (Manual arrival taps are disabled — see markCookArrived.)
@@ -3019,7 +3072,18 @@ exports.cancelBooking = async (req, res, next) => {
     // winner while the booking is still live and unstarted; the loser re-reads
     // and gets the truthful terminal code. Skipped without a DB connection
     // (unit-test path keeps the legacy flow).
-    const cancelledByValue = isAdmin ? "admin" : isCook ? "cook" : "customer";
+    // Policy pre-check (§2): the centralized engine derives the category from
+    // server-side truth BEFORE the claim, so a refused cancellation (e.g. a
+    // customer cancelling after the cook arrived) never flips the status.
+    const { evaluateCancellation } = require("../utils/cancellationPolicy");
+    const policy = evaluateCancellation({
+      booking,
+      currentTime: Date.now(),
+      actorRole: cancelledByValue,
+    });
+    if (!policy.allowed) {
+      return res.status(400).json({ message: policy.message || "This booking cannot be cancelled." });
+    }
     let cancelClaimed = false;
     if (dbReady()) {
       try {
@@ -3078,19 +3142,95 @@ exports.cancelBooking = async (req, res, next) => {
       booking.statusHistory.push({ status: "cancelled" });
     }
 
-    // Paid bookings queue a refund for admin approval on cancel — captured
-    // money for a cancelled session is never kept or moved automatically.
-    // A queued refund never blocks the cancellation itself.
+    // Policy-computed cancellation snapshot (§1–§12): charge/refund split from
+    // the pre-claim evaluation above. The snapshot is immutable: written once
+    // here, never recalculated on policy changes. Paid bookings queue the
+    // POLICY refund amount (not the full captured sum) for admin approval —
+    // captured money for a cancelled session is never kept or moved
+    // automatically. A queued refund never blocks the cancellation itself.
+    const snap = {
+      cancelledBy: cancelledByValue,
+      cancelledAt: new Date(),
+      cancellationReason: cancelReason || (cancelledByValue === "cook" ? "COOK_CANCELLED" : "OTHER"),
+      cancellationReasonNote: cancelReasonNote || "",
+      cancellationCategory: policy.cancellationCategory,
+      policyVersion: policy.policyVersion,
+      bookingAmount: policy.bookingAmount,
+      refundPercentage: policy.refundPercent,
+      cancellationChargePercentage: policy.cancellationChargePercent,
+      grossRefundAmount: policy.grossRefund,
+      nonRefundableCharges: policy.nonRefundableCharges,
+      finalRefundAmount: policy.finalRefund,
+      refundStatus: policy.finalRefund > 0 ? "PENDING" : "NOT_APPLICABLE",
+      refundRequestedAt: policy.finalRefund > 0 ? new Date() : undefined,
+    };
+    booking.cancellationInfo = { ...(booking.cancellationInfo || {}), ...snap };
+    booking.statusHistory.push({
+      status: "cancelled",
+      note: `Cancelled by ${cancelledByValue} (${snap.cancellationCategory}, policy ${snap.policyVersion}): charge ${snap.cancellationChargePercentage}%, refund ${snap.refundPercentage}% → ₹${snap.finalRefundAmount}${snap.nonRefundableCharges ? ` (incl. ₹${snap.nonRefundableCharges} non-refundable charges)` : ""}${cancelReasonNote ? ` — ${cancelReasonNote}` : ""}`,
+    });
     let refundNote = "";
     try {
-      const queued = queueRefundForApproval(booking, "booking_cancelled");
+      const queued = queueRefundForApproval(booking, `booking_cancelled:${snap.cancellationCategory}`, snap.finalRefundAmount);
       if (queued > 0) {
-        refundNote = ` A refund of ₹${queued} has been requested — our team will review it shortly.`;
+        refundNote = ` A refund of ₹${queued} (${snap.refundPercentage}% of ₹${snap.bookingAmount}) has been requested — our team will review it shortly.`;
+      } else if (snap.finalRefundAmount === 0 && booking.payment?.status === "paid" && !booking.payment?.testMode) {
+        refundNote = ` No refund is applicable for this cancellation (${snap.cancellationCategory}).`;
       } else if (booking.payment?.testMode && booking.payment?.status === "paid") {
         refundNote = " (Test payment — no real money moved.)";
       }
     } catch {
       // non-fatal: cancellation itself must always succeed
+    }
+    // Audit: request + calculation (best-effort, never blocks cancel).
+    try {
+      const CancellationAudit = require("../models/CancellationAudit");
+      await CancellationAudit.create([
+        {
+          actor: req.user.id,
+          actorRole: String(req.user.role || "").toUpperCase(),
+          bookingId: booking._id,
+          event: "CANCELLATION_REQUESTED",
+          previousStatus: booking.status === "cancelled" ? "" : booking.status,
+          newStatus: "cancelled",
+          amount: snap.bookingAmount,
+          reason: `${cancelReason}${cancelReasonNote ? `: ${cancelReasonNote}` : ""}`,
+          metadata: { category: snap.cancellationCategory, policyVersion: snap.policyVersion },
+        },
+        {
+          actor: req.user.id,
+          actorRole: String(req.user.role || "").toUpperCase(),
+          bookingId: booking._id,
+          event: "REFUND_CALCULATED",
+          previousStatus: "",
+          newStatus: snap.refundStatus,
+          amount: snap.finalRefundAmount,
+          reason: `${snap.refundPercentage}% of ₹${snap.bookingAmount} → gross ₹${snap.grossRefundAmount}, charges ₹${snap.nonRefundableCharges}`,
+          metadata: { category: snap.cancellationCategory, policyVersion: snap.policyVersion },
+        },
+      ]);
+    } catch {
+      // non-fatal
+    }
+    // Cook-caused cancellation is its own audit event (§9) — never
+    // classified as CUSTOMER_CANCELLED.
+    if (!isAdmin && isCook) {
+      try {
+        const CancellationAudit = require("../models/CancellationAudit");
+        await CancellationAudit.create({
+          actor: req.user.id,
+          actorRole: "COOK",
+          bookingId: booking._id,
+          event: "COOK_CANCELLED",
+          previousStatus: "",
+          newStatus: "cancelled",
+          amount: snap.finalRefundAmount,
+          reason: "Cook cancelled — alternative cook to be attempted; 100% refund queued if no replacement",
+          metadata: { category: snap.cancellationCategory },
+        });
+      } catch {
+        // non-fatal
+      }
     }
     await booking.save();
     // Cook reliability signal: a cook cancelling after accepting is tracked
@@ -3115,7 +3255,9 @@ exports.cancelBooking = async (req, res, next) => {
     // nothing on unpaid bookings, and the other side got a vague message.)
     const customerMsg = isCustomer
       ? `Your booking has been cancelled.${refundNote}`
-      : `Cook cancelled your booking.${refundNote}`;
+      : isCook
+        ? `Your cook had to cancel this booking — we are trying to find you an alternative cook.${refundNote}`
+        : `Your booking was cancelled by our team.${refundNote}`;
     const cookMsg = isCustomer
       ? "Customer cancelled a booking."
       : "You cancelled a booking.";
@@ -3150,6 +3292,182 @@ exports.cancelBooking = async (req, res, next) => {
     });
 
     res.json(stripServiceOtp(booking));
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/bookings/:id/cancellation-preview (§15) — the values the Cancel
+// dialog shows. Backend-computed; the frontend must not calculate its own
+// refund. Own customer or admin only.
+exports.getCancellationPreview = async (req, res, next) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+    const isCustomer = booking.customer.toString() === req.user.id;
+    const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
+    if (!isCustomer && !isAdmin) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+    const { evaluateCancellation, isWithin30MinCutoff } = require("../utils/cancellationPolicy");
+    const policy = evaluateCancellation({
+      booking,
+      currentTime: Date.now(),
+      actorRole: isAdmin ? "admin" : "customer",
+    });
+    if (!policy.allowed) {
+      return res.json({ canCancel: false, reason: policy.reasonCode || "NOT_CANCELLABLE", message: policy.message });
+    }
+    // Existing 30-minute self-serve cutoff still applies (non-admin).
+    if (!isAdmin && isWithin30MinCutoff(booking)) {
+      return res.json({
+        canCancel: false,
+        reason: "INSIDE_CUTOFF",
+        message: "Bookings can only be cancelled until 30 minutes before the service start time. Please contact support for help.",
+      });
+    }
+    res.json({
+      canCancel: true,
+      category: policy.cancellationCategory,
+      cancellationChargePercent: policy.cancellationChargePercent,
+      refundPercent: policy.refundPercent,
+      bookingAmount: policy.bookingAmount,
+      grossRefund: policy.grossRefund,
+      nonRefundableCharges: policy.nonRefundableCharges,
+      finalRefund: policy.finalRefund,
+      message: policy.message,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/bookings/:id/no-show (§8) — cook (own booking) or admin records
+// that the cook reached the venue but the customer was a genuine no-show.
+// Result: cancelled with 100% charge / 0% refund, no refund queued. A
+// customer can NEVER mark their own booking as no-show (§29).
+exports.markNoShow = async (req, res, next) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+    const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
+    const isOwnCook =
+      booking.cook != null && String(booking.cook) === String(req.user.id) &&
+      String(req.user.role).toUpperCase() === "COOK";
+    if (!isAdmin && !isOwnCook) {
+      return res.status(403).json({ message: "Not authorized" });
+    }
+    if (["cancelled", "completed", "rejected", "expired", "unattended"].includes(booking.status)) {
+      return res.status(400).json({ message: "Booking cannot be marked as no-show" });
+    }
+    if (!booking.cook) {
+      return res.status(400).json({ message: "No cook is assigned to this booking" });
+    }
+    const reason = String(req.body?.reason || "").trim().slice(0, 500);
+    if (!reason) {
+      return res.status(400).json({ message: "Please describe what happened at the venue." });
+    }
+    const { evaluateCancellation } = require("../utils/cancellationPolicy");
+    const policy = evaluateCancellation({
+      booking,
+      currentTime: Date.now(),
+      actorRole: isAdmin ? "admin" : "cook",
+      noShow: true,
+    });
+    // Atomic claim: exactly one terminal transition wins (§17).
+    let claimed = false;
+    try {
+      if (dbReady()) {
+        const claim = await Booking.updateOne(
+          {
+            _id: booking._id,
+            status: { $in: ["requested", "accepted", "confirmed", "in_progress"] },
+          },
+          {
+            $set: {
+              status: "cancelled",
+              cancelledBy: "customer",
+              "noShow.marked": true,
+              "noShow.markedBy": req.user.id,
+              "noShow.markedByRole": isAdmin ? "ADMIN" : "COOK",
+              "noShow.markedAt": new Date(),
+              "noShow.reason": reason,
+            },
+          }
+        );
+        claimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
+      } else {
+        claimed = true;
+      }
+    } catch {
+      claimed = false;
+    }
+    if (!claimed) {
+      return res.status(409).json({ message: "This booking was just updated — please refresh to see its current status." });
+    }
+    const fresh = (await Booking.findById(req.params.id)) || booking;
+    fresh.cancellationInfo = {
+      ...(fresh.cancellationInfo || {}),
+      cancelledBy: "customer",
+      cancelledAt: new Date(),
+      cancellationReason: "CUSTOMER_NO_SHOW",
+      cancellationReasonNote: reason,
+      cancellationCategory: "CUSTOMER_NO_SHOW",
+      policyVersion: policy.policyVersion,
+      bookingAmount: policy.bookingAmount,
+      refundPercentage: 0,
+      cancellationChargePercentage: 100,
+      grossRefundAmount: 0,
+      nonRefundableCharges: 0,
+      finalRefundAmount: 0,
+      refundStatus: "NOT_APPLICABLE",
+    };
+    fresh.statusHistory.push({ status: "cancelled", note: `Customer no-show recorded (${reason}) — 0% refund` });
+    await fresh.save();
+    try {
+      const CancellationAudit = require("../models/CancellationAudit");
+      await CancellationAudit.create({
+        actor: req.user.id,
+        actorRole: isAdmin ? "ADMIN" : "COOK",
+        bookingId: fresh._id,
+        event: "NO_SHOW_MARKED",
+        previousStatus: booking.status,
+        newStatus: "cancelled",
+        amount: 0,
+        reason,
+        metadata: { category: "CUSTOMER_NO_SHOW" },
+      });
+    } catch {
+      // non-fatal
+    }
+    try {
+      await Notification.create({
+        user: fresh.customer,
+        type: "booking_cancelled",
+        booking: fresh._id,
+        message: "Your booking was marked as a no-show — the cook reached the venue but could not reach you. No refund is applicable. Please contact support if this is a mistake.",
+      });
+    } catch {
+      // non-fatal
+    }
+    if (fresh.cook) {
+      try {
+        await Notification.create({
+          user: fresh.cook,
+          type: "no_show_marked",
+          booking: fresh._id,
+          message: "Customer no-show recorded for this booking.",
+        });
+      } catch {
+        // non-fatal
+      }
+    }
+    notifyWhatsApp("cancelled", fresh, { cancelledBy: "no_show" });
+    res.json(stripServiceOtp(fresh));
   } catch (error) {
     next(error);
   }

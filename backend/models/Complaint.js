@@ -41,9 +41,18 @@ const complaintSchema = new mongoose.Schema(
         "quality",
         "hygiene",
         "other",
+        // Customer service-complaint reasons (§19, additive — old values kept).
+        "cook_did_not_arrive",
+        "major_service_deviation",
+        "service_quality_issue",
+        "unprofessional_behavior",
       ],
       default: "other",
     },
+    // True when a post-completion complaint arrives more than 24h after the
+    // service ended (§19: preferably reported within 24h). Late reports are
+    // still accepted but flagged for the reviewer — never auto-refunded.
+    reportedLate: { type: Boolean, default: false },
     message: {
       type: String,
       required: [true, "Please describe the issue"],

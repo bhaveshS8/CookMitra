@@ -4180,3 +4180,28 @@
   .od-bookbox { padding: 0.6rem; }
   .od-bookslot { font-size: 0.8rem; }
 }
+
+/* ---- Cancellation & refund (policy slabs, preview modal, info cards) ---- */
+.cancel-breakdown { display: grid; gap: 0.35rem; margin: 0.75rem 0; }
+.cancel-breakdown > div { display: flex; justify-content: space-between; gap: 0.75rem; font-size: 0.92rem; }
+.cancel-breakdown dt { color: var(--slate-600, #475569); }
+.cancel-breakdown dd { margin: 0; font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+.cancel-breakdown .cancel-total { border-top: 1px solid var(--border-subtle, #e2e8f0); padding-top: 0.4rem; font-size: 1rem; }
+.cancel-breakdown .cancel-total dd { color: var(--emerald-700, #047857); }
+.bd-cancel-card .cancel-breakdown { margin-bottom: 0.5rem; }
+.cf-card.cancel-modal { max-width: 460px; }
+.cf-card.cancel-modal .cf-field { display: grid; gap: 0.3rem; margin: 0.6rem 0; text-align: left; }
+.cf-card.cancel-modal .cf-field span { font-size: 0.85rem; font-weight: 600; }
+.cf-card.cancel-modal .cf-input,
+.cf-card.cancel-modal select.cf-input,
+.cf-card.cancel-modal textarea { width: 100%; max-width: 100%; box-sizing: border-box; }
+@media (max-width: 480px) {
+  .cf-card.cancel-modal { max-width: calc(100vw - 2rem); }
+}
+
+/* ---- Admin cancellations console ---- */
+.admin-cancel-list { display: grid; gap: 0.6rem; }
+.admin-cancel-card { padding: 0.75rem 0.9rem; min-width: 0; }
+.admin-cancel-card .cb-note { overflow-wrap: anywhere; }
+.admin-cancel-detail { min-width: 0; }
+.admin-cancel-detail .cb-note { overflow-wrap: anywhere; }

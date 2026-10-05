@@ -5,6 +5,43 @@ const Booking = require("../models/Booking");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
 
+// Customer-facing service reasons (§19, SNAKE_UPPER in the API) mapped to
+// the stored lowercase enum. Legacy lowercase values pass through. Returns
+// null for an unrecognized customer reason (refused, never auto-refunded).
+const CUSTOMER_REASON_MAP = {
+  COOK_DID_NOT_ARRIVE: "cook_did_not_arrive",
+  MAJOR_SERVICE_DEVIATION: "major_service_deviation",
+  SERVICE_QUALITY_ISSUE: "service_quality_issue",
+  UNPROFESSIONAL_BEHAVIOR: "unprofessional_behavior",
+  OTHER: "other",
+};
+const normalizeComplaintCategory = (raw, isCustomer) => {
+  const s = String(raw || "").trim();
+  if (!s) return "other";
+  if (CUSTOMER_REASON_MAP[s]) return CUSTOMER_REASON_MAP[s];
+  const lower = s.toLowerCase();
+  const allowed = [
+    "behaviour", "payment", "address", "no_show", "safety", "quality",
+    "hygiene", "other", "cook_did_not_arrive", "major_service_deviation",
+    "service_quality_issue", "unprofessional_behavior",
+  ];
+  if (allowed.includes(lower)) return lower;
+  return isCustomer ? null : "other";
+};
+
+// Complaints are preferably filed within 24h of completion (§19). Late
+// reports are accepted but flagged for the reviewer.
+const isLateComplaint = (booking) => {
+  try {
+    if (!booking || booking.status !== "completed") return false;
+    const end = booking.serviceEndsAt ? new Date(booking.serviceEndsAt) : null;
+    const ref = end && !Number.isNaN(end.getTime()) ? end.getTime() : new Date(booking.updatedAt || booking.createdAt).getTime();
+    return Date.now() - ref > 24 * 60 * 60 * 1000;
+  } catch {
+    return false;
+  }
+};
+
 // Either side files a complaint about the other, always anchored to one of
 // their own bookings so the counterparty is derived server-side (nobody can
 // file against a stranger by guessing ids):
@@ -64,13 +101,37 @@ exports.createComplaint = async (req, res, next) => {
       }
     }
 
+    // Customer service-complaint reasons (§19) are validated server-side;
+    // unsupported reasons are refused (never auto-refunded — §21).
+    const mappedCategory = normalizeComplaintCategory(category, isCustomer);
+    if (isCustomer && category && !mappedCategory) {
+      return res.status(400).json({ message: "Please choose a valid complaint reason." });
+    }
+    // Duplicate guard (§33): one open/in-review complaint per booking per
+    // filer — a second filing on the same booking returns the existing one.
+    if (booking) {
+      try {
+        const dup = await Complaint.findOne({
+          booking: booking._id,
+          filedBy: isCustomer ? "customer" : "cook",
+          status: { $in: ["open", "in_review"] },
+        }).select("_id");
+        if (dup) {
+          return res.status(409).json({ message: "A complaint for this booking is already under review.", code: "DUPLICATE_COMPLAINT" });
+        }
+      } catch {
+        // non-fatal: fall through and create
+      }
+    }
+
     const complaint = await Complaint.create({
       filedBy: isCustomer ? "customer" : "cook",
       cook,
       customer,
       booking: booking ? booking._id : null,
-      category: category || "other",
+      category: mappedCategory || "other",
       message: String(message || "").trim(),
+      reportedLate: isLateComplaint(booking),
     });
 
     // Alert every admin (non-fatal — the complaint itself already succeeded).
@@ -97,9 +158,42 @@ exports.createComplaint = async (req, res, next) => {
     try {
       await Notification.create({
         user: req.user.id,
-        type: "general",
+        type: "complaint_received",
         booking: booking ? booking._id : null,
         message: "Your complaint has been received — our team will review it shortly.",
+      });
+    } catch {
+      // non-fatal
+    }
+    // The other side is informed that a complaint was raised (§27) — cooks
+    // hear about customer complaints on their bookings and vice versa.
+    try {
+      const otherId = isCustomer ? cook : customer;
+      if (otherId && String(otherId) !== String(req.user.id)) {
+        await Notification.create({
+          user: otherId,
+          type: "complaint_received",
+          booking: booking ? booking._id : null,
+          message: isCustomer
+            ? "A customer raised a service complaint on one of your bookings — our team will review it and contact you if needed."
+            : "A cook raised an issue on one of your bookings — our team will review it and contact you if needed.",
+        });
+      }
+    } catch {
+      // non-fatal
+    }
+    // Audit trail (§26).
+    try {
+      const { logCancellationAudit } = require("../utils/cancellationAudit");
+      await logCancellationAudit({
+        actor: req.user.id,
+        actorRole: isCustomer ? "CUSTOMER" : "COOK",
+        bookingId: booking ? booking._id : complaint.booking,
+        event: "COMPLAINT_SUBMITTED",
+        previousStatus: "",
+        newStatus: "open",
+        amount: 0,
+        reason: `${complaint.category}: ${String(complaint.message || "").slice(0, 200)}`,
       });
     } catch {
       // non-fatal
@@ -201,12 +295,27 @@ exports.updateComplaintStatus = async (req, res, next) => {
         const notifyUserId = complaint.filedBy === "customer" ? complaint.customer : complaint.cook;
         await Notification.create({
           user: notifyUserId,
-          type: "general",
+          type: "complaint_resolved",
           booking: complaint.booking || null,
           message:
             complaint.status === "resolved"
               ? "Your complaint has been resolved by our team. Thank you for reporting."
               : "Your complaint was reviewed and closed. Contact support if you need more help.",
+        });
+      } catch {
+        // non-fatal
+      }
+      try {
+        const { logCancellationAudit } = require("../utils/cancellationAudit");
+        await logCancellationAudit({
+          actor: req.user.id,
+          actorRole: "ADMIN",
+          bookingId: complaint.booking || undefined,
+          event: "COMPLAINT_RESOLVED",
+          previousStatus: "",
+          newStatus: complaint.status,
+          amount: 0,
+          reason: String(complaint.adminNote || complaint.status).slice(0, 500),
         });
       } catch {
         // non-fatal

@@ -19,6 +19,7 @@ const {
   parseRupeeAmount,
   recordLedger,
 } = require("../utils/finance");
+const { logCancellationAudit, syncCancellationRefundStatus } = require("../utils/cancellationAudit");
 
 // Test payments carry no real money — they must never enter the payout
 // queue. Real gateway/webhook payments (paid + not testMode) do — but only
@@ -499,6 +500,12 @@ exports.approveRefund = async (req, res, next) => {
       if (conflict) {
         return res.status(409).json({ message: "This refund was just updated — please refresh to see its current state." });
       }
+      await syncCancellationRefundStatus(claimed._id, { refundStatus: "PROCESSED", processedAt: new Date() });
+      await logCancellationAudit({
+        actor: req.user.id, actorRole: "ADMIN", bookingId: claimed._id,
+        event: "REFUND_PROCESSED", previousStatus: "PENDING", newStatus: "PROCESSED",
+        amount: 0, reason: "Test payment — no money moved",
+      });
       await recordLedger({
         idempotencyKey: `refund-approve:${fresh._id}`,
         booking: fresh._id,
@@ -578,6 +585,41 @@ exports.approveRefund = async (req, res, next) => {
       return res.status(409).json({ message: "This refund was just updated — please refresh to see its current state." });
     }
     const settled = fresh;
+
+    // Mirror the outcome onto the cancellation workflow tracker (§13/§26).
+    try {
+      const workflow =
+        settled.payment.refundStatus === "processed"
+          ? "PROCESSED"
+          : settled.payment.refundStatus === "failed"
+            ? "FAILED"
+            : "APPROVED";
+      await syncCancellationRefundStatus(settled._id, {
+        refundStatus: workflow,
+        ...(settled.payment.refundStatus === "processed" ? { processedAt: new Date() } : {}),
+      });
+      await logCancellationAudit({
+        actor: req.user.id, actorRole: "ADMIN", bookingId: settled._id,
+        event: "REFUND_APPROVED", previousStatus: "PENDING", newStatus: workflow,
+        amount: refundAmount, reason: adoptedNote || (clawback && hadSettledPayout ? "Approved with clawback" : "Admin-approved refund"),
+      });
+      if (settled.payment.refundStatus === "processed") {
+        await logCancellationAudit({
+          actor: req.user.id, actorRole: "ADMIN", bookingId: settled._id,
+          event: "REFUND_PROCESSED", previousStatus: workflow, newStatus: "PROCESSED",
+          amount: refundAmount, reason: settled.payment?.refundId ? `Gateway refund ${settled.payment.refundId}` : "Refund processed",
+        });
+      }
+      if (settled.payment.refundStatus === "failed") {
+        await logCancellationAudit({
+          actor: req.user.id, actorRole: "ADMIN", bookingId: settled._id,
+          event: "REFUND_FAILED", previousStatus: "APPROVED", newStatus: "FAILED",
+          amount: refundAmount, reason: "Gateway error — queued for follow-up",
+        });
+      }
+    } catch {
+      // non-fatal: money + ledger already committed
+    }
 
     await recordLedger({
       idempotencyKey: `refund-approve:${settled._id}`,
@@ -688,6 +730,12 @@ exports.rejectRefund = async (req, res, next) => {
       actor: `admin:${req.user.id}`,
       source: "admin",
       reason: reason || "Declined by admin",
+    });
+    await syncCancellationRefundStatus(rejected._id, { refundStatus: "REJECTED", adminNote: reason || "Declined by admin" });
+    await logCancellationAudit({
+      actor: req.user.id, actorRole: "ADMIN", bookingId: rejected._id,
+      event: "REFUND_REJECTED", previousStatus: "PENDING", newStatus: "REJECTED",
+      amount: Math.round(Number(rejected.payment?.refundAmount || 0)), reason: reason || "Declined by admin",
     });
 
     try {
@@ -890,6 +938,12 @@ exports.markRefundSettled = async (req, res, next) => {
           razorpayRefundId: match.id,
           reason: "Existing gateway refund adopted — no manual transfer recorded",
         });
+        await syncCancellationRefundStatus(adopted._id, { refundStatus: "PROCESSED", processedAt: new Date() });
+        await logCancellationAudit({
+          actor: req.user.id, actorRole: "ADMIN", bookingId: adopted._id,
+          event: "REFUND_PROCESSED", previousStatus: String(booking.payment.refundStatus || "").toUpperCase() || "PENDING",
+          newStatus: "PROCESSED", amount: approved, reason: `Gateway refund ${match.id} adopted`,
+        });
         try {
           const Notification = require("../models/Notification");
           await Notification.create({
@@ -969,6 +1023,12 @@ exports.markRefundSettled = async (req, res, next) => {
       relatedKey: key,
       reason: "Manual settlement recorded",
     });
+    await syncCancellationRefundStatus(closed._id, { refundStatus: "PROCESSED", reference: reference.slice(0, 120), processedAt: new Date() });
+    await logCancellationAudit({
+      actor: req.user.id, actorRole: "ADMIN", bookingId: closed._id,
+      event: "REFUND_PROCESSED", previousStatus: String(prevStatus || "").toUpperCase() || "PENDING",
+      newStatus: "PROCESSED", amount: approved, reason: `Manual settlement (ref: ${reference.slice(0, 120)})`,
+    });
 
     try {
       const Notification = require("../models/Notification");
@@ -1045,6 +1105,12 @@ exports.reconcileRefund = async (req, res, next) => {
         razorpayPaymentId: paymentId,
         razorpayRefundId: match.id,
         reason: "Gateway reconciliation confirmed an existing refund",
+      });
+      await syncCancellationRefundStatus(closed._id, { refundStatus: "PROCESSED", processedAt: new Date() });
+      await logCancellationAudit({
+        actor: req.user.id, actorRole: "ADMIN", bookingId: closed._id,
+        event: "REFUND_PROCESSED", previousStatus: "PENDING", newStatus: "PROCESSED",
+        amount: approved, reason: `Reconciliation confirmed gateway refund ${match.id}`,
       });
       try {
         const Notification = require("../models/Notification");

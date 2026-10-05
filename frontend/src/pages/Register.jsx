@@ -41,6 +41,7 @@ import GoogleSignInButton from "../components/GoogleSignInButton";
 const Register = () => {
   const [searchParams] = useSearchParams();
   const initialRole = searchParams.get("role") === "cook" ? "cook" : "customer";
+  const initialRef = searchParams.get("ref") || "";
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -48,6 +49,7 @@ const Register = () => {
     password: "",
     confirmPassword: "",
     role: initialRole,
+    referralCode: initialRef,
   });
 
   const [showPassword, setShowPassword] = useState(false);
@@ -156,6 +158,9 @@ const Register = () => {
         phone: normalizePhone(formData.phone),
         password: formData.password,
         role: formData.role,
+        ...(formData.role === "cook" && formData.referralCode?.trim()
+          ? { referralCode: String(formData.referralCode).trim().toUpperCase() }
+          : {}),
       };
       const { user } = await dispatch(registerUser(payload)).unwrap();
       showToast(`Welcome to Cook Mitra, ${user.name}!`, "success");
@@ -488,7 +493,28 @@ const Register = () => {
                     required
                     minLength={8}
                   />
-                  <button
+            {isCook && (
+              <div className="booking-form-group">
+                <label htmlFor="reg-referral">Referral code (optional)</label>
+                <div className="input-with-icon">
+                  <Users size={18} className="input-icon-prefix" />
+                  <input
+                    id="reg-referral"
+                    type="text"
+                    name="referralCode"
+                    className="form-control register-input"
+                    placeholder="CM-NAME-XXXX"
+                    value={formData.referralCode || ""}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, referralCode: e.target.value.toUpperCase().slice(0, 24) }))}
+                    autoComplete="off"
+                    maxLength={24}
+                  />
+                </div>
+                <div className="field-hint">Joining through another cook? Enter their referral code.</div>
+              </div>
+            )}
+
+            <button
                     type="button"
                     className="password-toggle-btn"
                     onClick={() => setShowPassword(!showPassword)}
@@ -585,6 +611,7 @@ const Register = () => {
             text="signup_with"
             onError={setError}
             next={next}
+            referralCode={formData.referralCode || ""}
           />
 
           <div className="auth-footer-prompt">

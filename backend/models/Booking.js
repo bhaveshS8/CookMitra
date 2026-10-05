@@ -105,6 +105,29 @@ const bookingSchema = new mongoose.Schema(
     // Platform 15% of the final amount; the cook earns the rest (85%).
     commission: { type: Number, default: 0 },
     cookPayout: { type: Number, default: 0 },
+    // Immutable payout snapshot for the Cook Partner earnings system (§2).
+    // Written once when the booking becomes payout-eligible; never recomputed
+    // from today's pricing config. Legacy bookings predate this subdoc.
+    payoutInfo: {
+      regularPrice: { type: Number, default: 0 },
+      discountAmount: { type: Number, default: 0 },
+      finalCustomerPrice: { type: Number, default: 0 },
+      platformDeductionPercent: { type: Number, default: 15 },
+      platformDeductionAmount: { type: Number, default: 0 },
+      cookPayoutAmount: { type: Number, default: 0 },
+      payoutStatus: {
+        type: String,
+        enum: ["eligible", "pending_weekly", "approved", "paid", "held", "rejected"],
+        default: "eligible",
+      },
+      payoutEligibleAt: { type: Date },
+      payoutProcessedAt: { type: Date },
+      payoutHoldReason: { type: String, default: "", trim: true, maxlength: 300 },
+      // Cycle + verification flags (§3): held bookings rejoin a later cycle.
+      payoutCycleRef: { type: String, default: "", trim: true },
+      disputed: { type: Boolean, default: false },
+      underVerification: { type: Boolean, default: false },
+    },
     // Idempotency key for booking creation (client-generated UUID per
     // attempt). Unique + sparse so retries with the same key return the
     // existing hold instead of double-booking; bookings without a key are
@@ -143,6 +166,64 @@ const bookingSchema = new mongoose.Schema(
     // Who ended the booking ("customer" | "cook" | "admin" | ""), recorded so
     // cook-side reliability can be tracked instead of only the status flip.
     cancelledBy: { type: String, default: "" },
+    // Immutable cancellation/refund snapshot (§12): written once when a
+    // cancellation is confirmed, never recalculated on future policy changes.
+    // payment.refund* remains the money-movement state; this is the policy
+    // decision record (category, percentages, breakdown, workflow status).
+    cancellationInfo: {
+      cancelledBy: { type: String, default: "", trim: true },
+      cancelledAt: { type: Date },
+      cancellationReason: { type: String, default: "", trim: true, maxlength: 200 },
+      cancellationReasonNote: { type: String, default: "", trim: true, maxlength: 500 },
+      cancellationCategory: {
+        type: String,
+        enum: [
+          "BEFORE_ASSIGNMENT",
+          "MORE_THAN_24_HOURS",
+          "WITHIN_24_HOURS",
+          "WITHIN_6_HOURS",
+          "COOK_ARRIVED",
+          "CUSTOMER_NO_SHOW",
+          "COOK_CANCELLED",
+          "COOK_FAILED_SERVICE",
+        ],
+      },
+      policyVersion: { type: String, default: "", trim: true },
+      bookingAmount: { type: Number, default: 0 },
+      refundPercentage: { type: Number, default: 0 },
+      cancellationChargePercentage: { type: Number, default: 0 },
+      grossRefundAmount: { type: Number, default: 0 },
+      nonRefundableCharges: { type: Number, default: 0 },
+      finalRefundAmount: { type: Number, default: 0 },
+      refundStatus: {
+        type: String,
+        enum: [
+          "NOT_APPLICABLE",
+          "PENDING",
+          "UNDER_REVIEW",
+          "APPROVED",
+          "PROCESSING",
+          "PROCESSED",
+          "FAILED",
+          "HELD",
+          "REJECTED",
+        ],
+        default: "NOT_APPLICABLE",
+      },
+      refundReference: { type: String, default: "", trim: true },
+      refundRequestedAt: { type: Date },
+      refundProcessedAt: { type: Date },
+      adminNote: { type: String, default: "", trim: true, maxlength: 500 },
+    },
+    // Customer no-show record (§8): marked by cook/admin only — a customer
+    // can never mark their own booking as no-show (§29).
+    noShow: {
+      marked: { type: Boolean, default: false },
+      markedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      markedByRole: { type: String, default: "", trim: true },
+      markedAt: { type: Date },
+      reason: { type: String, default: "", trim: true, maxlength: 500 },
+    },
     // Payout ledger for the cook's 85%: "pending" until an admin settles it
     // (reference = UPI/bank transfer id). Without this the cook's money had
     // nowhere to live — commission was recorded but never disbursed.
@@ -271,6 +352,8 @@ const bookingSchema = new mongoose.Schema(
 );
 
 bookingSchema.index({ customer: 1, status: 1 });
+bookingSchema.index({ "cancellationInfo.refundStatus": 1, updatedAt: -1 });
+bookingSchema.index({ "payoutInfo.payoutStatus": 1, cook: 1 });
 // "My bookings" sorted by recency + admin analytics paid-revenue scan.
 bookingSchema.index({ customer: 1, createdAt: -1 });
 bookingSchema.index({ "payment.status": 1 });

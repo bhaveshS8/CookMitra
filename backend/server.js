@@ -396,6 +396,10 @@ app.use("/api/leads", require("./routes/leads"));
 app.use("/api/coupons", require("./routes/coupons"));
 app.use("/api/analytics", require("./routes/analytics"));
 app.use("/api/payouts", strictLimiter, require("./routes/payouts"));
+app.use("/api/cook", require("./routes/cookEarnings"));
+app.use("/api/admin/cancellations", require("./routes/cancellations"));
+app.use("/api/admin/cook-incentives", require("./routes/adminCookEarnings"));
+app.use("/api/admin/cook-payouts", require("./routes/adminCookEarnings"));
 // Visit pings fire once per browser session — own lighter bucket so a traffic
 // spike can't eat the general budget (or vice versa).
 app.use("/api/stats/public/visit", visitLimiter);

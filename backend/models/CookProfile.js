@@ -147,6 +147,11 @@ const cookProfileSchema = new mongoose.Schema(
     // Bookings the cook cancelled after accepting (reliability signal shown
     // on the admin dossier). Bumped atomically in cancelBooking.
     cancelledByCookCount: { type: Number, default: 0, min: 0 },
+    // Referral identity (§12): unique code + link, referrer (who invited this
+    // cook), incentive enrollment anchor. Server-managed — never from client.
+    referralCode: { type: String, default: "", trim: true, uppercase: true },
+    referredBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    incentiveEnrolledAt: { type: Date },
     // Rating aggregate, maintained by createReview only (updateCookProfile
     // strips a `rating` payload so a cook can never edit their own score).
     // `sum`/`count` are the authoritative counters, bumped atomically with
@@ -162,6 +167,15 @@ const cookProfileSchema = new mongoose.Schema(
 );
 
 cookProfileSchema.index({ approvalStatus: 1, serviceArea: 1 });
+// Referral-code lookup at registration (unique, sparse — legacy rows empty).
+cookProfileSchema.index(
+  { referralCode: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { referralCode: { $exists: true, $gt: "" } },
+    name: "uniq_cookprofile_referralCode",
+  }
+);
 // Default list sort is { createdAt: -1 } filtered by approvalStatus —
 // covering index avoids the in-memory sort on every browse.
 cookProfileSchema.index({ approvalStatus: 1, createdAt: -1 });

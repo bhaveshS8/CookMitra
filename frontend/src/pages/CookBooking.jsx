@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, Link } from "react-router-dom";
 import {
   Users,
   CalendarCheck,
@@ -1611,6 +1611,10 @@ const CookBooking = () => {
               <ShieldCheck size={13} /> {cooksForSlot.length > 0
                 ? `${cooksForSlot.length} verified cook${cooksForSlot.length > 1 ? "s" : ""} free at this time — the first to accept gets your booking.`
                 : "We'll contact verified cooks free at this time — the first to accept gets your booking."}
+            </p>
+            <p className="od-review-notice">
+              Free cancellation while waiting for a cook. Paid bookings follow our{" "}
+              <Link to="/customer-cancellation-refund-policy">Cancellation & Refund Policy</Link>.
             </p>
             {!user && (
               <p className="od-review-notice od-review-notice-login">

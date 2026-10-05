@@ -503,6 +503,61 @@ td, th { padding: 0.7rem 0.5rem; }
   font-weight: 700;
 }
 
+/* Policy slab table — stacks into cards on small screens, no overflow. */
+.legal-table-wrap {
+  overflow-x: auto;
+  margin: 0.75rem 0 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 10px);
+}
+.legal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  min-width: 0;
+}
+.legal-table th,
+.legal-table td {
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-wrap: anywhere;
+}
+.legal-table thead th {
+  background: var(--bg-soft, #f8fafc);
+  font-weight: 700;
+}
+.legal-table tbody tr:last-child td {
+  border-bottom: none;
+}
+@media (max-width: 480px) {
+  .legal-table thead {
+    display: none;
+  }
+  .legal-table,
+  .legal-table tbody,
+  .legal-table tr,
+  .legal-table td {
+    display: block;
+    width: 100%;
+  }
+  .legal-table tr {
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0.25rem 0;
+  }
+  .legal-table td {
+    border-bottom: none;
+    padding: 0.2rem 0.8rem;
+  }
+  .legal-table td:first-child {
+    font-weight: 700;
+    padding-top: 0.6rem;
+  }
+  .legal-table td:last-child {
+    padding-bottom: 0.6rem;
+  }
+}
+
 .legal-content {
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
