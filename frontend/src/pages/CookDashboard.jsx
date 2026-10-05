@@ -4,7 +4,7 @@ import { useFetch } from "../hooks/useFetch";
 import API from "../api/axios";
 import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
-import { formatCurrency, formatDate, playAlarmSound, localTomorrowStr, mapsNavigateUrl, formatTimeRange12, dayTagLabel, getLocalDateStr, isCancelLocked } from "../utils/constants";
+import { formatDate, playAlarmSound, localTomorrowStr, mapsNavigateUrl, formatTimeRange12, dayTagLabel, getLocalDateStr, isCancelLocked } from "../utils/constants";
 import { useLocalDay } from "../hooks/useLocalDay";
 import CookProfileForm from "../components/CookProfileForm";
 import CookAvailabilityToggle from "../components/CookAvailabilityToggle";
@@ -319,14 +319,6 @@ const CookDashboard = () => {
   const todayCount = scheduledTodayList.length;
   const tomorrowCount = scheduledTomorrowList.length;
   const upcomingCount = (bookings || []).filter((b) => !isPrevious(b)).length;
-  const completedCount = bookings?.filter((b) => b.status === "completed")?.length || 0;
-  const totalEarned = (bookings || []).reduce(
-    (s, b) =>
-      b?.status !== "cancelled" && b.payment?.status === "paid" && b.payment?.razorpayPaymentId
-        ? s + Number(b.payment?.paidAmount || 0)
-        : s,
-    0
-  );
   const ratingCount = cookProfile?.rating?.count ?? myReviews?.length ?? 0;
   const avgRating =
     cookProfile?.rating?.average ||
@@ -478,19 +470,6 @@ const CookDashboard = () => {
             <div className="cook-stat-label">Upcoming</div>
           </div>
         </button>
-        <Link
-          className="cook-stat-card cook-stat-static"
-          to="/cook/earnings"
-          aria-label={`Earned ${formatCurrency(totalEarned)} from ${completedCount} completed ${completedCount === 1 ? "session" : "sessions"} — open earnings`}
-        >
-          <div className="cook-stat-icon emerald">
-            <Wallet size={24} />
-          </div>
-          <div>
-            <div className="cook-stat-num small-amount">{formatCurrency(totalEarned)}</div>
-            <div className="cook-stat-label">Earned · {completedCount} done</div>
-          </div>
-        </Link>
         <Link className="cook-stat-card cook-stat-mob-hide" to="/dashboard/cook-reviews">
           <div className="cook-stat-icon brand">
             <Star size={24} />
