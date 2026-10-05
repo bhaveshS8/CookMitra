@@ -58,6 +58,29 @@ services:
       # not needed. Set this only if you host the frontend elsewhere.
       # - key: CLIENT_URL
       #   sync: false
+      # ---- Password-reset email (required for "forgot password" to send) ----
+      # Without these, /auth/forgot-password answers a generic message and no
+      # email ever leaves the server (production never returns the dev token).
+      # For Gmail use an App Password (Google account → 2-Step Verification →
+      # App passwords), NOT your login password. Defaults PORT=587/SECURE=false
+      # suit Gmail; uncomment to override.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      # - key: SMTP_PORT
+      #   value: "587"
+      # - key: SMTP_SECURE
+      #   value: "false"
+      # Origin used to build the emailed reset link. MUST be your live domain
+      # (same-origin deploys leave CLIENT_URL empty, and the fallback would
+      # otherwise point the link at localhost:3000).
+      - key: FRONTEND_BASE_URL
+        sync: false
       # ---- Scale knobs (optional; sensible defaults ship in code) ----
       # Mongo pool per instance (default 50) and per-IP rate limits
       # (defaults: 300/min general, 100/15min auth, 30/15min payments).
