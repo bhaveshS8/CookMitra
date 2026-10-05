@@ -563,6 +563,9 @@ const CookDashboard = () => {
         >
           <UserRound size={15} /> Profile
         </button>
+        <Link className="cook-tab" to="/cook/earnings">
+          <Wallet size={15} /> Earnings
+        </Link>
       </div>
 
       {view !== "profile" && view !== "reports" && (
