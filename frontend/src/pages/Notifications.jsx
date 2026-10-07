@@ -84,14 +84,24 @@ const Notifications = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [filter, setFilter] = useState("all");
-  const [actioning, setActioning] = useState(null);
 
   const fetchNotifications = async () => {
     try {
       setLoading(true);
       setError(null);
       const { data } = await API.get("/notifications");
-      setNotifications(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      setNotifications(list);
+      // Everything is seen on visit — mark all as read right away.
+      if (list.some((n) => !n.read)) {
+        try {
+          await API.patch("/notifications/read-all");
+          setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+          nudgeBadge();
+        } catch {
+          // Badge/list will sync on the next visit or poll.
+        }
+      }
     } catch (err) {
       setError(err.response?.data?.message || "Could not load notifications");
     } finally {
@@ -115,6 +125,8 @@ const Notifications = () => {
       clearInterval(id);
       document.removeEventListener("visibilitychange", poll);
     };
+    // Mount-only: fetch once, then poll for new arrivals.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const nudgeBadge = () => {
@@ -125,29 +137,12 @@ const Notifications = () => {
   };
 
   const handleMarkRead = async (id) => {
-    setActioning(id);
     try {
       const { data } = await API.patch(`/notifications/${id}/read`);
       setNotifications((prev) => prev.map((n) => (n._id === id ? data : n)));
       nudgeBadge();
     } catch (err) {
       showToast(err.response?.data?.message || "Could not mark as read", "error");
-    } finally {
-      setActioning(null);
-    }
-  };
-
-  const handleMarkAllRead = async () => {
-    setActioning("all");
-    try {
-      await API.patch("/notifications/read-all");
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-      nudgeBadge();
-      showToast("All notifications marked as read", "success");
-    } catch (err) {
-      showToast(err.response?.data?.message || "Could not mark all as read", "error");
-    } finally {
-      setActioning(null);
     }
   };
 
@@ -172,16 +167,6 @@ const Notifications = () => {
         <div>
           <h1 className="notif-page-title">Notifications</h1>
       </div>
-        {unreadCount > 0 && (
-          <button
-            className="btn btn-outline btn-sm"
-            onClick={handleMarkAllRead}
-            disabled={actioning === "all"}
-          >
-            <CheckCheck size={16} />
-            {actioning === "all" ? "Marking..." : "Mark all as read"}
-          </button>
-        )}
       </div>
 
       <div className="tabs-navigation-bar">
@@ -265,20 +250,6 @@ const Notifications = () => {
                     <span className="my-booking-go notif-go" aria-hidden="true" title="Open">
                       <ChevronRight size={18} />
                     </span>
-                  )}
-                  {!n.read && (
-                    <button
-                      className="btn btn-outline btn-sm notif-mark-read"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleMarkRead(n._id);
-                      }}
-                      disabled={actioning === n._id}
-                      title="Mark as read"
-                    >
-                      <CheckCircle2 size={15} />
-                      {actioning === n._id ? "..." : "Mark read"}
-                    </button>
                   )}
                 </div>
               </div>

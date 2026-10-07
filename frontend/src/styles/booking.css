@@ -1016,33 +1016,27 @@
 
 .od-step-3 .ondemand-form-card { max-width: 880px; margin-inline: auto; }
 .od-venue-card { margin: 1rem 0 1.25rem; animation: bkFadeIn 0.24s ease backwards; }
-.od-summary-card { animation: bkFadeIn 0.24s ease backwards; }
 @media (min-width: 1024px) {
   .od-step-3 .ondemand-form-card { max-width: 1080px; padding: 1.75rem 2rem; }
   .od-step-3 .od-stickybar { margin: 0.4rem -2rem -1.75rem; padding-left: 2rem; padding-right: 2rem; }
 }
 
-.od-venue-card .price-row,
-.od-summary-card .price-row { align-items: flex-start; }
-.od-venue-card .price-row > span:first-child,
-.od-summary-card .price-row > span:first-child {
+.od-venue-card .price-row { align-items: flex-start; }
+.od-venue-card .price-row > span:first-child {
   flex: 0 1 auto;
   min-width: 0;
   color: var(--slate-500);
   font-weight: 700;
 }
-.od-venue-card .price-row > span:last-child,
-.od-summary-card .price-row > span:last-child {
+.od-venue-card .price-row > span:last-child {
   flex: 1 1 auto;
   min-width: 0;
   text-align: right;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
-.od-venue-card .price-row.total,
-.od-summary-card .price-row.total { align-items: center; }
-.od-venue-card .price-row.total strong,
-.od-summary-card .price-row.total strong {
+.od-venue-card .price-row.total { align-items: center; }
+.od-venue-card .price-row.total strong {
   flex: 1 1 auto;
   min-width: 0;
   text-align: right;
@@ -1050,12 +1044,9 @@
   font-variant-numeric: tabular-nums;
 }
 @media (max-width: 560px) {
-  .od-venue-card .price-row,
-  .od-summary-card .price-row { gap: 0.45rem; font-size: 0.82rem; }
-  .od-venue-card .price-row.total,
-  .od-summary-card .price-row.total { flex-wrap: wrap; }
-  .od-venue-card .price-row.total strong,
-  .od-summary-card .price-row.total strong { flex: 1 1 100%; font-size: 1.15rem; }
+  .od-venue-card .price-row { gap: 0.45rem; font-size: 0.82rem; }
+  .od-venue-card .price-row.total { flex-wrap: wrap; }
+  .od-venue-card .price-row.total strong { flex: 1 1 100%; font-size: 1.15rem; }
 }
 @media (max-width: 640px) {
   .od-step-3 .form-row { grid-template-columns: 1fr; }
@@ -1068,13 +1059,23 @@
   .od-step-3 .od-stickybar { gap: 0.6rem; }
   .od-step-3 .od-summary { row-gap: 0.25rem; }
   .od-step-3 .od-cta { width: 100%; min-height: 48px; }
-  .od-step-3 .od-sticky-note { text-align: center; }
+  /* Venue selects (incl. City / Area) on phones: grid items must shrink,
+     16px so iOS never zooms on focus, 48px touch target, and selected
+     text ellipsizes instead of spilling past 320px viewports. */
+  .od-step-3 .form-group { min-width: 0; }
+  .od-step-3 .form-group > label { min-width: 0; overflow-wrap: anywhere; }
+  .od-step-3 select.form-control {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    font-size: 16px;
+    text-overflow: ellipsis;
+  }
 }
 @media (max-width: 400px) {
-  .od-venue-card .price-row,
-  .od-summary-card .price-row { font-size: 0.8rem; }
-  .od-venue-card .price-row.total strong,
-  .od-summary-card .price-row.total strong { font-size: 1.08rem; }
+  .od-venue-card .price-row { font-size: 0.8rem; }
+  .od-venue-card .price-row.total strong { font-size: 1.08rem; }
 }
 
 .od-suggest-row {
@@ -1407,13 +1408,21 @@
 }
 .slot-toggle-btn:hover { border-color: var(--primary); background: var(--primary-light); }
 
-@media (max-width: 560px) {
-  .ondemand-page .slot-list-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
+@media (max-width: 768px) {
+  /* NOTE: display:grid is required here — the container also carries the
+     legacy .slot-list class (display:flex from cook-pages.css, which wins
+     the base cascade), so without this the columns below are ignored and
+     the ≤640px flex:1 1 100% rule stacks one chip per row. */
+  .ondemand-page .slot-list-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; align-items: stretch; }
   .ondemand-page .slot-list-pick .slot-chip {
-    flex: 0 0 auto;
-    justify-content: flex-start;
-    text-align: left;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    min-height: 6.75rem;
+    padding: 0.6rem 0.5rem;
   }
+  /* An odd trailing chip spans the full row instead of leaving a half-empty one. */
+  .ondemand-page .slot-list-pick > .slot-chip-pick:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .slot-chip-main { font-size: 0.98rem; }
 }
 @media (max-width: 380px) {
@@ -2294,8 +2303,8 @@
   .od-step-name { font-size: 0.62rem; }
   .od-step-desc { display: none; }
   .od-step-link { margin: 0 0.2rem; min-width: 6px; }
-  .ondemand-page .slot-list-pick { grid-template-columns: 1fr; }
-  .ondemand-page .slot-chip-pick { padding: 0.5rem 0.65rem; }
+  /* Two slots per row even at 320px (~130px per chip — fits the short time + pill content). */
+  .ondemand-page .slot-list-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem; }
   .od-summary-price { font-size: 0.95rem; }
 }
 
@@ -2305,10 +2314,6 @@
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   margin-left: auto;
-}
-.od-sticky-note { margin: 0; font-size: 0.72rem; font-weight: 600; color: var(--slate-400); text-align: center; }
-@media (max-width: 768px) {
-  .od-step-1 .od-sticky-note { display: none; }
 }
 .od-cta { position: relative; overflow: hidden; }
 
@@ -2360,10 +2365,49 @@
   .od-stepper .form-control { min-width: 0; flex: 1 1 auto; }
   .od-bookbtn { width: 100%; min-height: 48px; }
   .od-presets .bk-dur-chip { min-height: 44px; padding: 0.45rem 0.95rem; }
+  .od-date-pick-row .od-presets { flex: 1 1 100%; }
+  .od-date-pick-row .od-presets .bk-dur-chip { flex: 1 1 0; min-width: 0; }
   .bk-price-cell { padding: 0.45rem 0.3rem; }
   .bk-price-cell strong { font-size: 0.92rem; }
   .od-stickybar { gap: 0.5rem; }
   .ondemand-page .od-cta { min-height: 48px; }
+}
+
+/* Small-phone compaction for the booking flow (covers 425px and below):
+   trims vertical chrome while keeping ≥40px tap targets and 16px inputs
+   (inputs must NOT go below 16px — iOS Safari zooms on focus otherwise). */
+@media (max-width: 480px) {
+  .ondemand-page { padding: 1rem 0.75rem 2rem; }
+  .ondemand-page .od-steps-modern { margin-bottom: 0.75rem; }
+  .ondemand-page .od-gobar { margin-bottom: 0.7rem; }
+  .ondemand-page .od-goback { min-height: 40px; padding: 0.35rem 0.8rem 0.35rem 0.6rem; font-size: 0.8rem; }
+  .ondemand-page .ondemand-form-card .ondemand-section-title { margin-top: 1rem; padding-top: 1rem; }
+  .ondemand-form-card > .service-pick-grid,
+  .ondemand-form-card > .form-row,
+  .ondemand-form-card > .form-group,
+  .ondemand-form-card > .bk-price-strip,
+  .ondemand-form-card > .ondemand-locate-box,
+  .ondemand-form-card > .price-rows,
+  .ondemand-form-card > .coupon-apply,
+  .ondemand-form-card > .od-sumbar,
+  .ondemand-form-card > .od-slot-recap { margin-bottom: 0.9rem; }
+  .ondemand-page .od-venue-card { margin: 0.8rem 0 1rem; }
+  .ondemand-page .od-stickybar { padding-top: 0.6rem; padding-bottom: calc(0.7rem + env(safe-area-inset-bottom)); }
+  .ondemand-page .form-row { gap: 0.65rem; }
+  .ondemand-page .od-slot-group { margin-bottom: 0.7rem; }
+  .ondemand-page .bk-price-strip { padding: 0.5rem 0.6rem; gap: 0.4rem; }
+  .ondemand-page textarea.form-control { min-height: 76px; }
+  .coupon-apply-row { flex-wrap: wrap; }
+  .coupon-apply-row .coupon-input { flex: 1 1 100%; }
+  .coupon-apply-btn { width: 100%; min-height: 46px; }
+}
+
+/* No divider above the first section ("Where should the cook come?"). */
+.od-venue-card > .ondemand-section-title:first-of-type {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+  margin-bottom: 0.9rem;
 }
 
 @media (max-width: 560px) {
@@ -3695,111 +3739,7 @@
 @media (min-width: 1024px) {
   .od-step-3 .ondemand-form-card { max-width: 960px; padding: 1.75rem 2rem; }
 }
-.od-summary-card {
-  background: linear-gradient(180deg, #ffffff 0%, #f6fef9 100%);
-  border: 1.5px solid #a7f3d0;
-}
-.od-review-sub { margin: 0 0 0.9rem; font-size: 0.84rem; color: var(--slate-500); }
-.od-review-list { display: flex; flex-direction: column; gap: 0.55rem; margin: 0 0 0.8rem; padding: 0; }
-.od-review-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.35rem 0.75rem;
-  align-items: start;
-  background: #fff;
-  border: 1px solid var(--slate-200);
-  border-radius: 12px;
-  padding: 0.65rem 0.75rem;
-  margin: 0;
-}
-.od-review-row dt {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.72rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--slate-400);
-  white-space: nowrap;
-  padding-top: 0.15rem;
-}
-.od-review-ic {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  background: var(--primary-light);
-  color: var(--primary-700);
-  flex-shrink: 0;
-}
-.od-review-row dd { margin: 0; display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
-.od-review-row dd strong { font-size: 0.9rem; font-weight: 800; color: var(--slate-900); overflow-wrap: anywhere; line-height: 1.4; }
-.od-review-row dd > span { font-size: 0.84rem; font-weight: 600; color: var(--slate-600); overflow-wrap: anywhere; line-height: 1.45; }
-.od-review-meta { font-size: 0.76rem !important; font-weight: 600 !important; color: var(--slate-400) !important; }
-.od-review-addr { line-height: 1.5; }
-.od-review-missing { color: var(--accent-rose) !important; }
-.od-review-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  width: fit-content;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: var(--primary-700);
-  text-decoration: none;
-}
-.od-review-link:hover { text-decoration: underline; }
-.od-review-edit { align-self: center; }
-.od-dish-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-.od-dish-chip {
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: var(--slate-700);
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
-  border-radius: 99px;
-  padding: 0.18rem 0.6rem;
-  overflow-wrap: anywhere;
-}
-.od-review-note {
-  display: inline-flex;
-  align-items: flex-start;
-  gap: 0.3rem;
-  font-style: italic;
-  font-size: 0.82rem !important;
-}
-.od-review-note svg { flex-shrink: 0; margin-top: 0.15em; }
-.od-review-total {
-  background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
-  border: 1px solid #6ee7b7;
-  border-radius: 12px;
-  padding: 0.65rem 0.85rem;
-  margin-bottom: 0.7rem;
-}
-.od-review-total-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.6rem;
-  font-size: 0.86rem;
-  font-weight: 700;
-  color: #065f46;
-}
-.od-review-total-row strong { font-size: 1.3rem; font-weight: 800; color: #047857; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.od-review-total-sub {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 0.7rem;
-  margin-top: 0.15rem;
-  font-size: 0.76rem;
-  font-weight: 600;
-  color: #047857;
-  opacity: 0.85;
-}
-.od-review-coupon { font-weight: 800; }
+/* Guest login notice above the Find Cook button. */
 .od-review-notice {
   display: flex;
   align-items: flex-start;
@@ -3812,11 +3752,6 @@
 }
 .od-review-notice svg { flex-shrink: 0; margin-top: 0.15em; color: var(--accent-emerald); }
 .od-review-notice-login svg { color: var(--primary-700); }
-@media (max-width: 560px) {
-  .od-review-row { grid-template-columns: 1fr auto; }
-  .od-review-row dt { grid-column: 1 / -1; padding-top: 0; }
-  .od-review-total-row strong { font-size: 1.15rem; }
-}
 @media (max-width: 375px) {
   .ondemand-hero { padding: 1.4rem 0.95rem; }
   .ondemand-form-card { --od-pad-x: 0.95rem; --od-pad-b: 1.15rem; padding: 1.15rem var(--od-pad-x) var(--od-pad-b); }
@@ -3827,8 +3762,7 @@
   .od-bookbox { padding: 0.65rem; }
   .od-slot-recap { font-size: 0.78rem; }
   .od-slot-recap strong { flex-basis: 100%; margin-left: 0; text-align: left; }
-  .od-venue-card .price-row.total strong,
-  .od-summary-card .price-row.total strong { flex-basis: 100%; text-align: left; }
+  .od-venue-card .price-row.total strong { flex-basis: 100%; text-align: left; }
   .od-stepper { gap: 0.4rem; }
   .od-step-btn { flex-basis: 44px; }
   .od-date-pick-row { gap: 0.45rem; }
@@ -3847,6 +3781,7 @@
   .bk-price-cell { flex-direction: row; justify-content: space-between; padding: 0.5rem 0.75rem; }
   .od-bookbox { padding: 0.6rem; }
   .od-bookslot { font-size: 0.8rem; }
+  .od-venue-card .form-row { gap: 0.6rem; }
 }
 
 .cancel-breakdown { display: grid; gap: 0.35rem; margin: 0.75rem 0; }

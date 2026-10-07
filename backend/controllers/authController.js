@@ -531,7 +531,10 @@ exports.updateProfile = async (req, res, next) => {
     let phoneVal;
     if (phoneRaw !== undefined) {
       const core = normalizeMobileCore(phoneRaw);
-      phoneVal = /^[6-9]\d{9}$/.test(core) ? core : String(phoneRaw).trim();
+      if (!/^[6-9]\d{9}$/.test(core)) {
+        return res.status(400).json({ message: "Enter a valid 10-digit mobile number" });
+      }
+      phoneVal = core;
     }
     const user = await User.findByIdAndUpdate(
       req.user.id,

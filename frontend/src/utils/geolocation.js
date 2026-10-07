@@ -254,7 +254,9 @@ export const getCurrentPositionRobust = ({ highAccuracyTimeout = 12000 } = {}) =
 
     (async () => {
       try {
-        const best = await bestOfWatch({ watchMs: 7000 });
+        // Watch for up to 10s, settling early on a ≤50m fix, so entry
+        // detection lands on the most precise reading available.
+        const best = await bestOfWatch({ watchMs: 10000 });
         if (best && Number.isFinite(best.lat) && Number.isFinite(best.lng)) {
           resolve(best);
           return;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useLocation, useNavigate, Link } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Users,
   CalendarCheck,
@@ -12,7 +12,6 @@ import {
   Building2,
   Landmark,
   Home as HomeIcon,
-  MessageCircle,
   History,
   Pencil,
   ArrowRight,
@@ -35,6 +34,16 @@ import { saveBookingDraft, loadBookingDraft, clearBookingDraft } from "../utils/
 import LoginPromptModal from "../components/LoginPromptModal";
 
 const DEFAULT_SERVICE_TYPE = "cook_for_me";
+
+const CITY_AREA_OPTIONS = ["Hadapsar", "Manjri", "Shewalwadi", "Loni"];
+
+// Service is limited to these areas — only auto-fill/apply a city we serve,
+// otherwise leave blank so the user picks from the dropdown.
+const normCity = (c) => (CITY_AREA_OPTIONS.includes(String(c || "").trim()) ? String(c).trim() : "");
+
+// A GPS fix older than this no longer counts as "detected" — the user gets
+// the manual address form (prefilled where possible) instead of a stale pin.
+const DETECTED_VENUE_FRESH_MS = 2 * 3600 * 1000;
 
 const DURATION_QUICK = [1, 2, 3, 4];
 
@@ -98,13 +107,6 @@ const pickRecommendedSlot = (options) => {
     if (d === 0 && toMinutes(o.startTime) < toMinutes(best.startTime)) return o;
     return best;
   });
-};
-
-const dateLabel = (dateStr) => {
-  if (!dateStr) return "Pick a date";
-  if (dateStr === localTodayStr()) return "Today";
-  if (dateStr === localTomorrowStr()) return "Tomorrow";
-  return dateStr;
 };
 
 const SecTitle = ({ icon, children }) => (
@@ -212,7 +214,7 @@ const CookBooking = () => {
       return {
         ...f,
         flatNo: exact || f.flatNo,
-        city: f.city.trim() ? f.city : siteLocation.city || "",
+        city: f.city.trim() ? f.city : normCity(siteLocation.city),
         society: f.society.trim() ? f.society : siteLocation.area || "",
         landmark: f.landmark.trim() ? f.landmark : siteLocation.street || siteLocation.area || "",
       };
@@ -270,12 +272,12 @@ const CookBooking = () => {
       flatNo: src.flatNo || "",
       society: src.society || "",
       landmark: src.landmark || "",
-      city: src.city || "",
+      city: normCity(src.city),
     }));
     setSavedIdx(String(idx));
     if (saved.location?.lat != null) {
       setCoords({ lat: saved.location.lat, lng: saved.location.lng });
-      setLocMsg("Previous location applied with its saved map pin");
+      setLocMsg("");
     } else {
       setCoords(null);
       setLocMsg("Previous location applied — verify the address below for precise navigation");
@@ -292,7 +294,7 @@ const CookBooking = () => {
           flatNo: src.flatNo || "",
           society: src.society || "",
           landmark: src.landmark || "",
-          city: src.city || "",
+          city: normCity(src.city),
         };
       });
     const profileAddr = String(user?.address || "").trim();
@@ -317,8 +319,6 @@ const CookBooking = () => {
       setCoords({ lat: savedLocations[0].location.lat, lng: savedLocations[0].location.lng });
     }
   }, [savedLocations, savedLoaded, user?.role, user?.address]);
-
-  const serviceLabel = "Home cooking session";
 
   const slab = slabPriceForDuration(Number(form.durationHours));
   const couponDiscount = slab != null && coupon ? Math.min(coupon.discount, slab) : 0;
@@ -417,11 +417,50 @@ const CookBooking = () => {
     return "";
   };
 
+  // Manual-venue override: the user can always type the address instead of
+  // using the detected GPS pin (e.g. pin looks wrong, booking for family).
+  const [manualVenue, setManualVenue] = useState(false);
+
+  // Precise GPS fix detected on entry (coords + reverse-geocoded address).
+  // Only a FRESH fix counts as a detected venue — a stale saved pin falls
+  // back to the manual address form so the user can type the real address.
+  // When a fresh fix is present, the booking is sent with this detected venue
+  // silently unless the user opts for manual entry.
+  const detectedVenue =
+    Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng)
+      ? siteLocation
+      : null;
+  const detectedAddressText = (
+    detectedVenue?.fullAddress ||
+    detectedVenue?.displayName ||
+    [
+      detectedVenue?.exactLine,
+      detectedVenue?.area,
+      detectedVenue?.city,
+      detectedVenue?.state,
+      detectedVenue?.postcode,
+    ]
+      .filter(Boolean)
+      .join(", ") ||
+    detectedVenue?.label ||
+    "Current location"
+  ).trim();
+  const detectedVenueAge = detectedVenue
+    ? Date.now() - Number(detectedVenue.savedAt || detectedVenue.timestamp || 0)
+    : null;
+  const hasFreshFix =
+    detectedVenue != null &&
+    Number.isFinite(detectedVenueAge) &&
+    detectedVenueAge < DETECTED_VENUE_FRESH_MS;
+  const useDetectedVenue = Boolean(hasFreshFix && !manualVenue);
+
   const validateVenue = () => {
     const errs = {};
-    if (!form.flatNo.trim()) errs.flatNo = "Please enter your flat / house number";
-    if (!form.society.trim()) errs.society = "Please enter your society / building / street";
-    if (!form.city.trim()) errs.city = "Please enter your city / area";
+    if (!useDetectedVenue) {
+      if (!form.flatNo.trim()) errs.flatNo = "Please enter your flat / house number";
+      if (!form.society.trim()) errs.society = "Please enter your society / building / street";
+      if (!CITY_AREA_OPTIONS.includes(form.city)) errs.city = "Please select your city / area";
+    }
     if (parseDishes().length === 0)
       errs.customDishes = "Please mention the dishes you need (comma separated)";
     return errs;
@@ -451,22 +490,6 @@ const CookBooking = () => {
     ]
       .filter(Boolean)
       .join(", ");
-  const hasVenue =
-    form.flatNo.trim() || form.society.trim() || form.city.trim();
-  const reviewDishes = parseDishes();
-  const scrollToVenue = () => {
-    setAddrEditing(true);
-    requestAnimationFrame(() =>
-      document
-        .querySelector(".od-venue-card")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" })
-    );
-  };
-  const focusDishes = () => {
-    scrollToVenue();
-    requestAnimationFrame(() => fieldRefs.current.customDishes?.focus());
-  };
-
   const buildSelectedItems = () => parseDishes();
 
   const aggregateSlots = (cooksWithSlots) => {
@@ -720,19 +743,6 @@ const CookBooking = () => {
     }
     return k;
   };
-  const cooksForSlot = selectedSlot
-    ? matches
-        .map((c) => ({
-          ...c,
-          slot: (c.slots || []).find(
-            (s) =>
-              s.startTime === selectedSlot.startTime &&
-              s.endTime === selectedSlot.endTime
-          ),
-        }))
-        .filter((c) => c.slot)
-    : [];
-
   const handleFindCook = async () => {
     if (findingCook) return;
     if (!user) {
@@ -771,20 +781,31 @@ const CookBooking = () => {
         date: form.date,
         startTime: selectedSlot.startTime,
         endTime: selectedSlot.endTime,
-        address: buildAddress(),
-        addressDetails: {
-          flatNo: form.flatNo.trim(),
-          society: form.society.trim(),
-          landmark: form.landmark.trim(),
-          city: form.city.trim(),
-        },
+        address: useDetectedVenue ? detectedAddressText : buildAddress(),
+        addressDetails: useDetectedVenue
+          ? {
+              flatNo: detectedVenue.exactLine || detectedVenue.street || "",
+              society: detectedVenue.area || detectedVenue.street || "",
+              landmark: "",
+              city: detectedVenue.city || "",
+            }
+          : {
+              flatNo: form.flatNo.trim(),
+              society: form.society.trim(),
+              landmark: form.landmark.trim(),
+              city: form.city.trim(),
+            },
         guests: Number(form.guests),
         durationHours: hours,
         notes: form.notes.trim(),
         selectedItems: buildSelectedItems(),
         couponCode: coupon?.code || "",
       };
-      if (coords) payload.location = coords;
+      if (useDetectedVenue) {
+        payload.location = { lat: detectedVenue.lat, lng: detectedVenue.lng };
+      } else if (coords) {
+        payload.location = coords;
+      }
       payload.clientKey = clientKeyFor(`${form.date}_${selectedSlot.startTime}_${selectedSlot.endTime}`);
       const res = await API.post("/bookings", payload);
       clearBookingDraft();
@@ -805,7 +826,7 @@ const CookBooking = () => {
   const steps = [
     { label: "Plan", desc: "Date & hours" },
     { label: "Time Slot", desc: "Pick when" },
-    { label: "Venue & Confirm", desc: "Address & find cook" },
+    { label: "Location", desc: "Address & find cook" },
   ];
 
   return (
@@ -869,11 +890,6 @@ const CookBooking = () => {
 
       {step === 1 && (
         <form onSubmit={handleSeeSlots} className="ondemand-form-card">
-          <h3>Plan your session</h3>
-          <p className="ondemand-form-sub">Same launch price for every cook — pick a date and duration.</p>
-
-          <SecTitle icon={<CalendarCheck size={15} />}>When and for how many?</SecTitle>
-
           <div className="form-row">
             <div className="form-group">
               <label>
@@ -947,9 +963,6 @@ const CookBooking = () => {
           <div className="form-row">
             <div className="form-group">
               <div className="bk-price-strip" aria-label="Launch pricing">
-                <span className="bk-price-badge">
-                  <BadgePercent size={13} /> Launch pricing · flat for every cook
-                </span>
                 <div className="bk-price-cells">
                   {DURATION_QUICK.map((h) => {
                     const active = Number(form.durationHours) === h;
@@ -976,12 +989,6 @@ const CookBooking = () => {
           {formError && <div className="error-message">{formError}</div>}
 
           <div className="od-stickybar">
-            <div className="od-summary" aria-live="polite">
-              <span>{serviceLabel}</span>
-              <span>{dateLabel(form.date)}</span>
-              <span>{form.durationHours || "–"} hr · {form.guests || "–"} guests</span>
-              <strong className="od-summary-price">{slab != null ? formatCurrency(slab) : "—"}</strong>
-            </div>
             <button type="submit" className="btn btn-primary btn-block btn-lg od-cta" disabled={searching}>
               {searching ? "Finding free cooks..." : (
                 <>
@@ -989,7 +996,6 @@ const CookBooking = () => {
                 </>
               )}
             </button>
-            <p className="od-sticky-note">Free to check · no address needed yet · no payment now</p>
           </div>
         </form>
       )}
@@ -1104,10 +1110,41 @@ const CookBooking = () => {
 
       {step === 3 && selectedSlot && (
         <div>
-          <h3>Venue &amp; Confirm</h3>
           <div className="ondemand-form-card od-venue-card">
+            {useDetectedVenue ? (
+              <>
+                <SecTitle icon={<MapPin size={15} />}>Where should the cook come?</SecTitle>
+                <div className="bk-profile-addr">
+                  <MapPin size={16} />
+                  <div className="bk-profile-addr-text">
+                    <strong>Using your current location</strong>
+                    <span>{detectedAddressText}</span>
+                  </div>
+                </div>
+                <p className="ondemand-form-sub">No typing needed — we&apos;ll share this location with the cook.</p>
+                <button
+                  type="button"
+                  className="bk-recap-edit"
+                  onClick={() => setManualVenue(true)}
+                  aria-label="Enter the location address manually instead"
+                >
+                  <Pencil size={12} /> Enter address manually instead
+                </button>
+              </>
+            ) : (
+            <>
             <SecTitle icon={<MapPin size={15} />}>Where should the cook come?</SecTitle>
+            {(hasFreshFix || savedLocations.length > 0 || locMsg) && (
             <div className="ondemand-locate-box">
+              {hasFreshFix && (
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm loc-gps-btn"
+                  onClick={() => { setManualVenue(false); setLocMsg(""); }}
+                >
+                  <MapPin size={15} /> Use my detected location
+                </button>
+              )}
               {savedLocations.length > 0 && (
                 <div className="form-group od-saved-group">
                   <label htmlFor="od-saved-select">
@@ -1141,7 +1178,8 @@ const CookBooking = () => {
                   {locMsg}
                 </p>
               )}
-            </div>
+              </div>
+            )}
             {profileAddress && !addrEditing ? (
               <div className="bk-profile-addr">
                 <MapPin size={16} />
@@ -1214,39 +1252,46 @@ const CookBooking = () => {
                 <label>
                   <MapPin size={15} /> City / Area *
                 </label>
-                <input
-                  type="text"
+                <select
                   name="city"
                   className="form-control"
-                  value={form.city}
+                  value={CITY_AREA_OPTIONS.includes(form.city) ? form.city : ""}
                   onChange={handleChange}
-                  placeholder="e.g. Pune"
                   required
                   ref={(el) => { fieldRefs.current.city = el; }}
                   aria-invalid={Boolean(fieldErrors.city)}
-                />
+                >
+                  <option value="">Select city / area…</option>
+                  {CITY_AREA_OPTIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
                 {fieldErrors.city && <p className="field-error" role="alert">{fieldErrors.city}</p>}
               </div>
             </div>
             </>
             )}
+            </>
+            )}
 
             <SecTitle icon={<UtensilsCrossed size={15} />}>What dishes do you need? *</SecTitle>
             <div className="form-group">
-              <label>Dishes <small>(comma separated)</small></label>
-                <input
-                  type="text"
-                  name="customDishes"
-                  className="form-control"
-                  value={form.customDishes}
-                  onChange={handleChange}
-                  placeholder="e.g. Puran Poli, Shankarpali, Modak"
-                  required
-                  ref={(el) => { fieldRefs.current.customDishes = el; }}
-                  aria-invalid={Boolean(fieldErrors.customDishes)}
-                />
-                {fieldErrors.customDishes && <p className="field-error" role="alert">{fieldErrors.customDishes}</p>}
-              </div>
+              <input
+                type="text"
+                name="customDishes"
+                className="form-control"
+                value={form.customDishes}
+                onChange={handleChange}
+                placeholder="e.g. Puran Poli, Shankarpali, Modak"
+                required
+                aria-label="Dishes, comma separated"
+                ref={(el) => { fieldRefs.current.customDishes = el; }}
+                aria-invalid={Boolean(fieldErrors.customDishes)}
+              />
+              {fieldErrors.customDishes && <p className="field-error" role="alert">{fieldErrors.customDishes}</p>}
+            </div>
 
             <div className="form-group">
               <label>
@@ -1264,10 +1309,12 @@ const CookBooking = () => {
 
             <SecTitle icon={<BadgePercent size={15} />}>Price &amp; coupon</SecTitle>
             <div className="price-rows">
-              <div className="price-row">
-                <span>Service Price · {form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
-                <span>{slab != null ? formatCurrency(slab) : "—"}</span>
-              </div>
+              {coupon && (
+                <div className="price-row">
+                  <span>Service Price · {form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
+                  <span>{slab != null ? formatCurrency(slab) : "—"}</span>
+                </div>
+              )}
               {coupon && (
                 <div className="price-row discount">
                   <span>Coupon {coupon.code}</span>
@@ -1288,124 +1335,26 @@ const CookBooking = () => {
               />
             )}
 
-            {user?.phone && (
-              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem", color: "var(--slate-600)", background: "var(--slate-50)", borderRadius: "var(--radius-md)", padding: "0.6rem 0.9rem" }}>
-                <MessageCircle size={15} style={{ color: "var(--accent-emerald)", flexShrink: 0 }} />
-                <span>Booking on mobile <strong>+91 {user.phone}</strong> — shared with the cook for coordination.</span>
-              </div>
-            )}
-
             {formError && <div ref={venueErrorRef} className="error-message">{formError}</div>}
           </div>
-          <div className="ondemand-form-card od-summary-card">
-            <SecTitle icon={<CalendarCheck size={15} />}>Review your booking</SecTitle>
-            <p className="od-review-sub">Check the details — one tap finds your cook. No payment now.</p>
-            <dl className="od-review-list">
-              <div className="od-review-row">
-                <dt>
-                  <span className="od-review-ic" aria-hidden="true"><CalendarCheck size={14} /></span>
-                  Schedule
-                </dt>
-                <dd>
-                  <strong>{dateLabel(form.date)}{form.date ? ` · ${form.date}` : ""}</strong>
-                  <span>{fmtTime(selectedSlot.startTime)} – {fmtTime(selectedSlot.endTime)} · {form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"} · {form.guests || "–"} guest{Number(form.guests) === 1 ? "" : "s"}</span>
-                  <span className="od-review-meta">{serviceLabel}</span>
-                </dd>
-                <dd className="od-review-edit">
-                  <button type="button" className="bk-recap-edit" onClick={() => setStep(1)} aria-label="Edit date, duration or guests">
-                    <Pencil size={12} /> Edit
-                  </button>
-                </dd>
-              </div>
-              <div className="od-review-row">
-                <dt>
-                  <span className="od-review-ic" aria-hidden="true"><MapPin size={14} /></span>
-                  Venue
-                </dt>
-                <dd>
-                  {hasVenue ? (
-                    <strong className="od-review-addr">{buildAddress() || "—"}</strong>
-                  ) : (
-                    <strong className="od-review-missing">Add your address above</strong>
-                  )}
-                </dd>
-                <dd className="od-review-edit">
-                  <button type="button" className="bk-recap-edit" onClick={scrollToVenue} aria-label="Edit venue address">
-                    <Pencil size={12} /> Edit
-                  </button>
-                </dd>
-              </div>
-              <div className="od-review-row">
-                <dt>
-                  <span className="od-review-ic" aria-hidden="true"><UtensilsCrossed size={14} /></span>
-                  Dishes
-                </dt>
-                <dd>
-                  {reviewDishes.length > 0 ? (
-                    <span className="od-dish-chips">
-                      {reviewDishes.map((d) => (
-                        <span key={d} className="od-dish-chip">{d}</span>
-                      ))}
-                    </span>
-                  ) : (
-                    <strong className="od-review-missing">Add dishes above</strong>
-                  )}
-                  {form.notes.trim() && (
-                    <span className="od-review-note">
-                      <StickyNote size={12} /> {form.notes.trim()}
-                    </span>
-                  )}
-                </dd>
-                <dd className="od-review-edit">
-                  <button type="button" className="bk-recap-edit" onClick={focusDishes} aria-label="Edit dishes">
-                    <Pencil size={12} /> Edit
-                  </button>
-                </dd>
-              </div>
-            </dl>
-            <div className="od-review-total" aria-live="polite">
-              <div className="od-review-total-row">
-                <span>To pay after cook accepts</span>
-                <strong>{slab != null ? formatCurrency(finalPayable) : "—"}</strong>
-              </div>
-              <div className="od-review-total-sub">
-                <span>{slab != null ? formatCurrency(slab) : "—"} · {form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
-                {coupon && <span className="od-review-coupon">Coupon {coupon.code} −{formatCurrency(couponDiscount)}</span>}
-              </div>
-            </div>
-            <p className="od-review-notice">
-              <ShieldCheck size={13} /> {cooksForSlot.length > 0
-                ? `${cooksForSlot.length} verified cook${cooksForSlot.length > 1 ? "s" : ""} free at this time — the first to accept gets your booking.`
-                : "We'll contact verified cooks free at this time — the first to accept gets your booking."}
+          {!user && (
+            <p className="od-review-notice od-review-notice-login">
+              <LogIn size={13} /> Login as a customer to find a cook for this slot
             </p>
-            <p className="od-review-notice">
-              Free cancellation while waiting for a cook. Paid bookings follow our{" "}
-              <Link to="/customer-cancellation-refund-policy">Cancellation & Refund Policy</Link>.
-            </p>
-            {!user && (
-              <p className="od-review-notice od-review-notice-login">
-                <LogIn size={13} /> Login as a customer to find a cook for this slot
-              </p>
-            )}
-            <div className="od-stickybar">
-              <div className="od-summary" aria-live="polite">
-                <span>{fmtTime(selectedSlot.startTime)} – {fmtTime(selectedSlot.endTime)}</span>
-                <strong className="od-summary-price">{slab != null ? formatCurrency(finalPayable) : "—"}</strong>
-              </div>
-              <button
-                type="button"
-                className="btn btn-primary btn-block btn-lg od-cta"
-                disabled={findingCook}
-                onClick={handleFindCook}
-              >
-                {findingCook ? (
-                  <span className="bk-submit-loading">Finding a cook…</span>
-                ) : (
-                  <>Find Cook <ArrowRight size={17} /></>
-                )}
-              </button>
-              <p className="od-sticky-note">One tap · no payment now · free to cancel while waiting</p>
-            </div>
+          )}
+          <div className="od-stickybar">
+            <button
+              type="button"
+              className="btn btn-primary btn-block btn-lg od-cta"
+              disabled={findingCook}
+              onClick={handleFindCook}
+            >
+              {findingCook ? (
+                <span className="bk-submit-loading">Finding a cook…</span>
+              ) : (
+                <>Find Cook <ArrowRight size={17} /></>
+              )}
+            </button>
           </div>
         </div>
       )}

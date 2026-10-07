@@ -89,7 +89,16 @@ const CookProfileForm = ({
   }, [dispatch]);
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    let { name, value } = e.target;
+    if (name === "mobileNumber") {
+      // Keep mobile input numeric-friendly (+91 / spaces allowed); validated on submit.
+      value = String(value || "")
+        .replace(/[^\d+ ]/g, "")
+        .replace(/(?!^)\+/g, "")
+        .slice(0, 14);
+      if (error) setError("");
+    }
+    setFormData({ ...formData, [name]: value });
   };
 
   const handleSubmit = async (e) => {
@@ -142,8 +151,9 @@ const CookProfileForm = ({
 
     try {
       // Keep the account mobile in sync (used for bookings + WhatsApp).
-      // The cook endpoints also persist mobileNumber, so the number is saved
-      // even if one of the two calls fails.
+      // The cook endpoints also persist the mobile to the User account, so the
+      // number is saved even if this account-sync call fails (best-effort).
+      let accountSynced = false;
       try {
         const meRes = await API.put("/auth/me", {
           phone: normalizedMobile,
@@ -152,19 +162,22 @@ const CookProfileForm = ({
         dispatch(
           updateUser({ phone: meRes.data?.phone, mobile: meRes.data?.mobile })
         );
+        accountSynced = true;
       } catch (mobileErr) {
-        const msg =
-          mobileErr.response?.data?.message || "Failed to update mobile number";
-        setError(msg);
-        showToast(msg, "error");
-        setSaving(false);
-        return;
+        // Non-fatal — fall through to the cook profile save below, which
+        // syncs User.phone/mobile itself. Surface only if that fails too.
+        void mobileErr;
       }
       const isUpdate = Boolean(existing);
       const res = isUpdate
         ? await API.put(`/cooks/${existing._id}`, payload)
         : await API.post("/cooks", payload);
       setExisting(res.data);
+      if (!accountSynced) {
+        dispatch(
+          updateUser({ phone: normalizedMobile, mobile: normalizedMobile })
+        );
+      }
       showToast(
         isUpdate ? "Chef profile updated successfully!" : "Profile submitted for admin approval!",
         "success"
@@ -233,7 +246,7 @@ const CookProfileForm = ({
               onChange={handleChange}
               placeholder="10-digit mobile number"
               inputMode="numeric"
-              maxLength={13}
+              maxLength={14}
               required
             />
           </div>

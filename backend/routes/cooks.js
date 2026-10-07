@@ -25,6 +25,28 @@ const uploadErrorMessage = (err) => {
   return err?.message || "File upload failed";
 };
 
+// Mobile number accepted through the cook profile form (create + edit).
+// Normalized to a 10-digit Indian mobile (allows +91 / leading 0 input).
+const mobileNumberRule = (field) =>
+  body(field)
+    .optional()
+    .trim()
+    .custom((v) => {
+      if (v === "" || v == null) return true; // absent/empty = no change (controller ignores)
+      let digits = String(v).replace(/\D/g, "");
+      if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+      else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+      if (digits.length !== 10) throw new Error("Mobile number must be exactly 10 digits");
+      if (!/^[6-9]\d{9}$/.test(digits))
+        throw new Error("Enter a valid 10-digit mobile number");
+      return true;
+    });
+const cookMobileRules = [
+  mobileNumberRule("mobileNumber"),
+  mobileNumberRule("mobile"),
+  mobileNumberRule("phone"),
+];
+
 router.get("/", optionalAuth, getCooks);
 router.get("/me", auth, authorize("cook"), getMyProfile);
 router.post(
@@ -79,12 +101,13 @@ router.post(
     body("serviceTypes")
       .isArray({ min: 1 })
       .withMessage("At least one service type is required"),
+    ...cookMobileRules,
   ],
   validate,
   createCookProfile
 );
 
-router.put("/:id", auth, authorize("cook"), updateCookProfile);
+router.put("/:id", auth, authorize("cook"), [...cookMobileRules], validate, updateCookProfile);
 router.patch(
   "/:id/approval",
   auth,

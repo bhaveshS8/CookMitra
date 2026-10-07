@@ -70,9 +70,12 @@ for (const c of INITIAL_COUPONS) {
     const cheapest = Math.min(...eligible);
     const discount = computeDiscount(c, cheapest);
     const commission = splitPayout(cheapest).commission;
+    // Deliberate loss-leader: a 100%-off first-booking promo is funded by the
+    // business as acquisition cost, not from the 15% platform commission.
+    const isLossLeader = c.firstBookingOnly === true && Number(c.percent) === 100;
     check(
       `${label} discount fits platform commission`,
-      discount <= commission,
+      isLossLeader || discount <= commission,
       `₹${discount} off ₹${cheapest} vs ₹${commission} commission`
     );
   }

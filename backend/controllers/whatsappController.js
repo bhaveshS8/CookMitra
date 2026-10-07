@@ -28,7 +28,10 @@ const {
   intervalsOverlap,
 } = require("../utils/slots");
 
-const VERIFY_TOKEN = () => String(process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || "").trim();
+const VERIFY_TOKEN = () =>
+  String(
+    process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN || process.env.WHATSAPP_VERIFY_TOKEN || ""
+  ).trim();
 const APP_SECRET = () => String(process.env.WHATSAPP_APP_SECRET || "").trim();
 
 exports.verifyWebhook = (req, res) => {

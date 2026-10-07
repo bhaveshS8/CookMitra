@@ -1,6 +1,17 @@
 
 const INITIAL_COUPONS = [
   {
+    code: "FIRSTFREE",
+    description: "100% off your first booking — your first cook session is on us.",
+    discountType: "percent",
+    percent: 100,
+    maxDiscount: 649, // top launch slab: 100% stays effective on every slab
+    minOrder: 0,
+    perUserLimit: 1,
+    firstBookingOnly: true,
+    active: true,
+  },
+  {
     code: "WELCOME50",
     description: "₹50 off your first booking (min order ₹349).",
     discountType: "flat",

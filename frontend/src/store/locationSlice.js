@@ -10,6 +10,35 @@ import {
 
 const STORAGE_KEY = "cm-user-location-v1";
 const AUTO_ASK_KEY = "cm-loc-auto-asked";
+// A saved precise GPS fix younger than this is reused as-is on entry.
+const FRESH_GPS_MS = 2 * 3600 * 1000;
+
+const isFreshGps = (stored) =>
+  stored?.source === "gps" &&
+  Number.isFinite(stored?.lat) &&
+  Number.isFinite(stored?.lng) &&
+  Date.now() - Number(stored?.savedAt || 0) < FRESH_GPS_MS;
+
+const queryGeoPermission = async () => {
+  try {
+    if (typeof navigator !== "undefined" && navigator.permissions?.query) {
+      const p = await navigator.permissions.query({ name: "geolocation" });
+      return p?.state || "";
+    }
+  } catch {
+  }
+  return "";
+};
+
+const loadStoredPin = () => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const prev = raw ? JSON.parse(raw) : null;
+    if (prev && Number.isFinite(prev.lat) && Number.isFinite(prev.lng)) return prev;
+  } catch {
+  }
+  return null;
+};
 
 const loadStored = () => {
   try {
@@ -36,14 +65,29 @@ export const initLocation = createAsyncThunk(
     const stored = loadStored();
     if (stored) {
       dispatch(locationSlice.actions.locationRestored(stored));
-      return stored;
     }
+    // Never auto-overwrite a location the user chose manually.
+    if (stored?.source === "manual") return stored;
+    // A fresh precise GPS fix needs no re-capture on entry.
+    if (isFreshGps(stored)) return stored;
+
+    // Capture a fresh precise fix on entry. When permission is already
+    // granted this is silent (no prompt); otherwise only auto-ask when
+    // there is no usable saved location to fall back to.
+    const permission = await queryGeoPermission();
+    let autoAsked = true;
     try {
-      if (sessionStorage.getItem(AUTO_ASK_KEY)) return null;
+      autoAsked = Boolean(sessionStorage.getItem(AUTO_ASK_KEY));
+    } catch {
+      autoAsked = true;
+    }
+    const shouldDetect = permission === "granted" || (!stored && !autoAsked);
+    if (!shouldDetect) return stored;
+    try {
       sessionStorage.setItem(AUTO_ASK_KEY, "1");
     } catch {
     }
-    return dispatch(requestPreciseLocation()).unwrap().catch(() => null);
+    return dispatch(requestPreciseLocation()).unwrap().catch(() => stored);
   }
 );
 
@@ -61,8 +105,14 @@ export const requestPreciseLocation = createAsyncThunk(
       const exactOk = grade !== "poor";
       const label =
         formatLocationLabel({ area, city: geo.city, state: geo.state }) || "Current location";
+      // Full detected address in text form (exact street address when GPS is good).
+      const fullAddress = (
+        geo.displayName ||
+        [houseLine, area, geo.city, geo.state, geo.postcode].filter(Boolean).join(", ")
+      ).trim();
       const next = {
         label,
+        fullAddress,
         city: geo.city || "",
         area,
         state: geo.state || "",
@@ -74,9 +124,7 @@ export const requestPreciseLocation = createAsyncThunk(
         accuracyNote:
           grade === "poor"
             ? `GPS accuracy is ${formatAccuracy(c.accuracy)} — the pin is approximate. Step outdoors with a clear sky view and re-detect for an exact address.`
-            : grade === "fair"
-              ? `GPS accuracy is ${formatAccuracy(c.accuracy)} — close, but re-detect outdoors if the house number looks off.`
-              : "",
+            : "",
         lat: c.lat,
         lng: c.lng,
         accuracy: c.accuracy ?? null,
@@ -84,16 +132,12 @@ export const requestPreciseLocation = createAsyncThunk(
         source: "gps",
       };
       if (grade === "poor" && !forceRefine) {
-        try {
-          const raw = localStorage.getItem(STORAGE_KEY);
-          const prev = raw ? JSON.parse(raw) : null;
-          if (prev && Number.isFinite(prev.lat) && Number.isFinite(prev.lng)) {
-            return {
-              location: { ...prev, source: prev.source || "stored" },
-              error: `GPS is approximate right now (${formatAccuracy(next.accuracy)}) — kept your saved pin. Step outdoors and tap Re-detect for an exact fix.`,
-            };
-          }
-        } catch {
+        const prev = loadStoredPin();
+        if (prev) {
+          return {
+            location: { ...prev, source: prev.source || "stored" },
+            error: `GPS is approximate right now (${formatAccuracy(next.accuracy)}) — kept your saved pin. Step outdoors and tap Re-detect for an exact fix.`,
+          };
         }
       }
       persist(next);
@@ -101,6 +145,16 @@ export const requestPreciseLocation = createAsyncThunk(
     } catch (err) {
       const msg = err?.message || "Could not detect your location";
       const denied = /permission|blocked|denied|secure page/i.test(msg);
+      // Never replace a saved precise pin with a coarse IP guess.
+      const prev = loadStoredPin();
+      if (prev) {
+        return {
+          location: { ...prev, source: prev.source || "stored" },
+          error: denied
+            ? "Precise location is off — kept your saved pin. Enable GPS to refresh it."
+            : "GPS unavailable — kept your saved pin. Tap Re-detect for a fresh fix.",
+        };
+      }
       try {
         const ip = await fetchIpLocation();
         if (ip?.label) {

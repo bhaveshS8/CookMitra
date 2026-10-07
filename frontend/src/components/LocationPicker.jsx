@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { MapPin, LocateFixed, X, AlertCircle, Navigation } from "lucide-react";
+import { MapPin, LocateFixed, X, AlertCircle } from "lucide-react";
 import { useDispatch } from "react-redux";
 import { useSiteLocation } from "../store/hooks";
 import { requestPreciseLocation, clearLocation } from "../store/locationSlice";
@@ -31,7 +31,10 @@ const LocationPicker = () => {
 
   const pillText = isLocating
     ? "Detecting…"
-    : location?.label || "Set location";
+    : location?.exactLine || location?.label || "Set location";
+
+  const addressText = location?.fullAddress || location?.exactLine || "";
+  const pillFullText = addressText || location?.label || "";
 
   const sourceNote =
     location?.source === "gps"
@@ -47,13 +50,14 @@ const LocationPicker = () => {
   const gpsGrade = location?.source === "gps" || Number.isFinite(location?.accuracy)
     ? accuracyGrade(location?.accuracy)
     : null;
-  const accuracyHint = error
-    ? ""
-    : location?.accuracyNote ||
-      (gpsGrade === "poor"
-        ? "Approximate pin — step outdoors with a clear sky view, then tap Re-detect for your exact house address."
-        : gpsGrade === "fair"
-          ? "Close pin — re-detect outdoors if the house number looks off."
+  // "Fair" fixes no longer surface a hint — only poor ones do (a cached
+  // fair note from an older session is suppressed too).
+  const accuracyHint =
+    error || gpsGrade === "fair"
+      ? ""
+      : location?.accuracyNote ||
+        (gpsGrade === "poor"
+          ? "Approximate pin — step outdoors with a clear sky view, then tap Re-detect for your exact house address."
           : "");
 
   return (
@@ -64,8 +68,8 @@ const LocationPicker = () => {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={location ? `Your location: ${location.label}. Change location` : "Set your location"}
-        title={location ? location.label : "Detect or set your location"}
+        aria-label={location ? `Your location: ${pillFullText}. Change location` : "Set your location"}
+        title={location ? pillFullText || "Detect or set your location" : "Detect or set your location"}
       >
         {isLocating ? (
           <span className="loc-spinner" aria-hidden="true" />
@@ -92,6 +96,9 @@ const LocationPicker = () => {
               <MapPin size={14} aria-hidden="true" />
               <div>
                 <div className="loc-current-label">{location.label}</div>
+                {addressText ? (
+                  <div className="loc-address">{addressText}</div>
+                ) : null}
                 {sourceNote && <div className="loc-source">{sourceNote}</div>}
               </div>
             </div>
@@ -107,11 +114,6 @@ const LocationPicker = () => {
             {isLocating ? "Detecting…" : location ? "Re-detect my location" : "Use my current location"}
           </button>
 
-          {location?.exactLine ? (
-            <div className="loc-current-sub">
-              <Navigation size={12} aria-hidden="true" /> {location.exactLine}
-            </div>
-          ) : null}
           {accuracyHint ? (
             <p className="loc-error" role="note" style={{ borderColor: "var(--amber-300, #fcd34d)" }}>
               <AlertCircle size={14} aria-hidden="true" /> {accuracyHint}

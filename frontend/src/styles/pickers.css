@@ -406,6 +406,17 @@
 .ccal-quick { display: inline-flex; gap: 0.35rem; }
 .ccal-picked { font-size: 0.76rem; font-weight: 700; color: var(--slate-500); margin-left: auto; }
 
+@media (max-width: 640px) {
+  /* Date chip: Today/Tomorrow tag sits next to the date text (not stacked). */
+  .ccal-field-text { flex-direction: row; align-items: center; gap: 0.45rem; }
+  .ccal-field-text em {
+    background: var(--primary-light);
+    border-radius: 99px;
+    padding: 0.1rem 0.5rem;
+    white-space: nowrap;
+  }
+}
+
 @media (max-width: 400px) {
   .ccal-pop { width: 280px; padding: 0.75rem 0.7rem 0.7rem; }
   .ccal-day, .ccal-blank { min-height: 33px; }

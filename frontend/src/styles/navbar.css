@@ -328,6 +328,7 @@
   color: var(--slate-800);
 }
 .loc-current-label { font-weight: 700; font-size: 0.86rem; }
+.loc-address { font-size: 0.78rem; color: var(--slate-600); margin-top: 0.15rem; line-height: 1.35; }
 .loc-source { font-size: 0.74rem; color: var(--slate-500); }
 .loc-gps-btn { width: 100%; justify-content: center; }
 .loc-error {
