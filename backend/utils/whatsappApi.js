@@ -60,8 +60,26 @@ const postToMessages = async (payload) => {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      console.warn("WhatsApp send failed:", res.status, JSON.stringify(data).slice(0, 500));
-      return { ok: false, error: data?.error?.message || `http-${res.status}` };
+      const fbCode = data?.error?.code;
+      const fbSubcode = data?.error?.error_subcode;
+      const fbMessage = data?.error?.message || `http-${res.status}`;
+      // 401 / code 190 = Meta rejected WHATSAPP_TOKEN (expired temporary
+      // token, revoked system-user token, or token from a different app than
+      // WHATSAPP_PHONE_NUMBER_ID). Surface an actionable hint so server logs
+      // point straight at the fix instead of just "Authentication Error".
+      const isAuthError = res.status === 401 || res.status === 403 || fbCode === 190;
+      const hint = isAuthError
+        ? " — WHATSAPP_TOKEN invalid/expired (code 190): regenerate the token in Meta (WhatsApp > API Setup for testing, or a permanent system-user token for production), put it on ONE line in backend/.env as WHATSAPP_TOKEN=<token>, and restart the backend. See docs/WHATSAPP_SETUP.md."
+        : "";
+      console.warn(
+        `WhatsApp send failed: ${res.status} code=${fbCode ?? "?"} subcode=${fbSubcode ?? "?"} ${JSON.stringify(data).slice(0, 500)}${hint}`
+      );
+      return {
+        ok: false,
+        error: `${fbMessage}${hint}`,
+        code: fbCode ?? null,
+        status: res.status,
+      };
     }
     return { ok: true, id: data?.messages?.[0]?.id || null };
   } catch (err) {
@@ -88,6 +106,64 @@ const sendWhatsAppText = async (toPhone, body) => {
 const acceptPayload = (bookingId) => `accept:${bookingId}`;
 const rejectPayload = (bookingId) => `reject:${bookingId}`;
 
+// Approved-template sender (Meta requires templates for
+// business-initiated messages outside the 24-hour customer-service
+// window). `bodyParams` fills the template's {{1}}..{{n}} variables.
+const sendTemplateMessage = async (toPhone, templateName, lang, bodyParams = []) => {
+  const to = toE164(toPhone);
+  if (!isWhatsAppEnabled()) return { ok: false, skipped: true, reason: "whatsapp-disabled" };
+  if (!to) return { ok: false, skipped: true, reason: "invalid-recipient" };
+  const name = String(templateName || "").trim();
+  if (!name) return { ok: false, skipped: true, reason: "no-template" };
+  const code = String(lang || "").trim() || "en";
+  const parameters = (Array.isArray(bodyParams) ? bodyParams : [])
+    .map((t) => String(t ?? "").slice(0, 100))
+    .filter((t) => t.length > 0)
+    .map((text) => ({ type: "text", text }));
+  const payload = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type: "template",
+    template: { name, language: { code } },
+  };
+  if (parameters.length) {
+    payload.template.components = [{ type: "body", parameters }];
+  }
+  return postToMessages(payload);
+};
+
+// Generic interactive button sender. `buttons` is an array of
+// { id, title } reply buttons. Payload ids stay booking-specific
+// (`accept:<id>` / `reject:<id>`); authorization always comes from the
+// verified sender phone number, never from these ids.
+const sendInteractiveButtons = async (toPhone, bodyText, buttons) => {
+  const to = toE164(toPhone);
+  if (!isWhatsAppEnabled()) return { ok: false, skipped: true, reason: "whatsapp-disabled" };
+  if (!to) return { ok: false, skipped: true, reason: "invalid-recipient" };
+  const text = String(bodyText || "").trim();
+  if (!text) return { ok: false, skipped: true, reason: "empty-body" };
+  const safeButtons = (Array.isArray(buttons) ? buttons : [])
+    .filter((b) => b && b.id && b.title)
+    .slice(0, 3)
+    .map((b) => ({
+      type: "reply",
+      reply: { id: String(b.id).slice(0, 256), title: String(b.title).slice(0, 20) },
+    }));
+  if (!safeButtons.length) return { ok: false, skipped: true, reason: "no-buttons" };
+  return postToMessages({
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type: "interactive",
+    interactive: {
+      type: "button",
+      body: { text: text.slice(0, 1024) },
+      action: { buttons: safeButtons },
+    },
+  });
+};
+
 const sendCookRequestInteractive = async (cookPhone, { customerName, booking }) => {
   const to = toE164(cookPhone);
   if (!isWhatsAppEnabled()) return { ok: false, skipped: true, reason: "whatsapp-disabled" };
@@ -111,9 +187,19 @@ const sendCookRequestInteractive = async (cookPhone, { customerName, booking }) 
       },
     },
   };
-  const templateName = String(process.env.WHATSAPP_REQUEST_TEMPLATE || "").trim();
+  const templateName = String(
+    process.env.WHATSAPP_REQUEST_TEMPLATE ||
+      // Legacy alias kept for existing .env files (see docs/WHATSAPP_SETUP.md).
+      process.env.WHATSAPP_REQUEST_TEMPLATE_FOR_COOK ||
+      ""
+  ).trim();
   if (templateName) {
-    const lang = String(process.env.WHATSAPP_REQUEST_TEMPLATE_LANG || "en").trim() || "en";
+    const lang =
+      String(
+        process.env.WHATSAPP_REQUEST_TEMPLATE_LANG ||
+          process.env.WHATSAPP_TEMPLATE_LANG_COOK_REQUEST ||
+          "en"
+      ).trim() || "en";
     const dateStr = booking?.date ? new Date(booking.date).toLocaleDateString("en-IN") : "";
     const tpl = await postToMessages({
       messaging_product: "whatsapp",
@@ -305,6 +391,8 @@ module.exports = {
   isWhatsAppEnabled,
   status: status,
   sendWhatsAppText,
+  sendTemplateMessage,
+  sendInteractiveButtons,
   sendCookRequestInteractive,
   acceptPayload,
   rejectPayload,

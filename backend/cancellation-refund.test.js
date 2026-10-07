@@ -312,6 +312,32 @@ const runCancel = async (user, body) => {
     check("OTHER with description accepted", r.statusCode === 200 && r.body.cancellationInfo.cancellationReasonNote === "Family emergency");
   }
 
+  // "Finding a cook" page: customer withdraws a still-unassigned
+  // (`requested`) booking — one tap, no reason, no cutoff.
+  storeDoc = mkDoc({ cook: null, status: "requested", payment: { status: "pending", paidAmount: 0, refundStatus: "none" } });
+  {
+    const r = await runCancel(CUSTOMER, {});
+    check("requested withdrawal needs no reason", r.statusCode === 200 && r.body.status === "cancelled", `s=${r.statusCode}`);
+  }
+  storeDoc = mkDoc({ cook: null, status: "requested", payment: { status: "pending", paidAmount: 0, refundStatus: "none" } });
+  {
+    // Service starts in ~15 min (inside the 30-min cutoff) — withdrawal still allowed.
+    const istWall = new Date(Date.now() + (5.5 * 60 + 15) * 60 * 1000);
+    const p = (n) => String(n).padStart(2, "0");
+    storeDoc.date = new Date();
+    storeDoc.startTime = `${p(istWall.getUTCHours())}:${p(istWall.getUTCMinutes())}`;
+    const { isWithin30MinCutoff } = require("./utils/cancellationPolicy");
+    const insideCutoff = isWithin30MinCutoff(storeDoc, Date.now());
+    const r = await runCancel(CUSTOMER, {});
+    check("requested withdrawal ignores 30-min cutoff", insideCutoff && r.statusCode === 200 && r.body.status === "cancelled", `cutoff=${insideCutoff} s=${r.statusCode}`);
+  }
+  storeDoc = mkDoc({ cook: "cook1", status: "confirmed" });
+  {
+    // Guard: the exemption is requested-only — confirmed bookings still need a reason.
+    const r = await runCancel(CUSTOMER, { reason: "OTHER" });
+    check("confirmed OTHER without description still refused", r.statusCode === 400);
+  }
+
   storeDoc = mkDoc({ payment: { status: "pending", paidAmount: 0, refundStatus: "none" } });
   {
     const r = await runCancel(CUSTOMER, { reason: "CHANGE_OF_PLANS" });

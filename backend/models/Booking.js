@@ -230,6 +230,29 @@ const bookingSchema = new mongoose.Schema(
     },
     requestExpiresAt: { type: Date },
     paymentExpiresAt: { type: Date },
+    // Per-booking/per-cook WhatsApp delivery state (spec section 10).
+    // A message is only marked `sent` after Meta accepts it; `failed`
+    // entries stay retryable. A `sent` entry also acts as the
+    // idempotency key so retries never double-send.
+    whatsappDispatch: {
+      type: [
+        {
+          cook: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+          kind: { type: String, default: "request", trim: true },
+          status: {
+            type: String,
+            enum: ["pending", "sending", "sent", "failed"],
+            default: "pending",
+          },
+          messageId: { type: String, default: "", trim: true },
+          attempts: { type: Number, default: 0, min: 0 },
+          sentAt: { type: Date },
+          lastAttemptAt: { type: Date },
+          error: { type: String, default: "", trim: true, maxlength: 500 },
+        },
+      ],
+      default: [],
+    },
     status: {
       type: String,
       enum: [

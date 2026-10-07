@@ -124,6 +124,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [clashBookingId, setClashBookingId] = useState(null);
   const [slotBusyError, setSlotBusyError] = useState("");
   const [checkingSlot, setCheckingSlot] = useState(false);
   const [coords, setCoords] = useState(null);
@@ -452,7 +453,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       fail("Guests must be between 1 and 500"); return;
     }
 
-    setSubmitting(true); setError("");
+    setSubmitting(true); setError(""); setClashBookingId(null);
     try {
       const selectedItems = formData.notes.split(/[,;]+/).map((d) => d.trim()).filter(Boolean);
       const payload = {
@@ -487,7 +488,16 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       onSubmit?.(res.data);
       navigate(`/bookings/${res.data._id}/wait`);
     } catch (err) {
-      const msg = err.response?.data?.message || err.message || "Booking failed.";
+      const data = err.response?.data || {};
+      const msg = data?.message || err.message || "Booking failed.";
+      if (err.response?.status === 409 && data?.bookingId) {
+        // Self-overlap: the customer already owns a live booking for this
+        // slot — notify and take them straight to it instead of a dead end.
+        setClashBookingId(data.bookingId);
+        showToast("You already have a booking for that time — taking you to it.", "info", 6000);
+        navigate(`/bookings/${data.bookingId}/wait`);
+        return;
+      }
       fail(msg); showToast(msg, "error");
     } finally {
       setSubmitting(false);
@@ -576,6 +586,19 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       <div ref={errorRef} className="bk-error" role="alert">
         <span className="bk-error-icon"><AlertCircle size={15} /></span>
         <span>{error}</span>
+      </div>
+    )}
+    {clashBookingId && (
+      <div ref={errorRef} className="bk-error" role="alert">
+        <span className="bk-error-icon"><AlertCircle size={15} /></span>
+        <span>You already have a booking for that time. </span>
+        <button
+          type="button"
+          className="bk-link-btn"
+          onClick={() => navigate(`/bookings/${clashBookingId}/wait`)}
+        >
+          View your booking
+        </button>
       </div>
     )}
 

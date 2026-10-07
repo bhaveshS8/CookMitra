@@ -28,6 +28,7 @@ const {
   markCookArrived,
   getCancellationPreview,
   markNoShow,
+  retryCookWhatsApp,
 } = require("../controllers/bookingController");
 const {
   getRefundEligibility,
@@ -113,6 +114,7 @@ router.patch(
   startService
 );
 router.patch("/:id/cancel", auth, cancelBooking);
+router.post("/:id/notify-cooks", auth, authorize("admin"), retryCookWhatsApp);
 router.get("/:id/cancellation-preview", auth, getCancellationPreview);
 router.post(
   "/:id/no-show",

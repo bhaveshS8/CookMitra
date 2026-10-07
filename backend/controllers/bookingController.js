@@ -95,33 +95,19 @@ const normalizeRescheduleReason = (raw) => {
 };
 
 
-const queueRefundForApproval = (booking, reason, amountOverride) => {
-  const pay = booking.payment || {};
-  if (pay.status !== "paid" || pay.testMode) return 0;
-  if (pay.refundStatus && pay.refundStatus !== "none") return 0;
-  let amount;
-  if (amountOverride != null) {
-    amount = Math.round(Number(amountOverride) * 100) / 100;
-  } else {
-    amount = Math.round(Number(pay.paidAmount || booking.amount || 0));
-  }
-  if (!(amount > 0)) return 0;
-  booking.payment.refundStatus = "pending";
-  booking.payment.refundAmount = amount;
-  booking.statusHistory.push({
-    status: booking.status,
-    note: `Refund of ₹${amount} queued for admin approval (${reason})`,
-  });
-  return amount;
-};
-
-const dbReady = () => {
-  try {
-    return mongoose.connection && mongoose.connection.readyState === 1;
-  } catch {
-    return false;
-  }
-};
+const {
+  queueRefundForApproval,
+  releaseCouponUsage,
+  expireBookingIfNeeded,
+  dbReady,
+  REQUEST_WINDOW_MS,
+  PAYMENT_WINDOW_MS,
+} = require("../services/bookingTransitions");
+const { notifyWhatsAppEvent, fanOutBookingRequest } = require("../services/whatsappDispatch");
+const {
+  acceptBookingForCook,
+  rejectBookingForCook,
+} = require("../services/bookingAcceptService");
 
 const OTP_FIELDS = ["serviceOtp", "serviceOtpGeneratedAt", "serviceOtpAttempts", "serviceOtpLockedUntil"];
 const stripServiceOtp = (payload) => {
@@ -639,6 +625,57 @@ exports.getEligibleCooksForBooking = async (req, res, next) => {
   }
 };
 
+// Admin recovery: re-send the WhatsApp booking request to every currently
+// eligible cook (e.g. the first fan-out failed while Meta was down).
+// Per-cook `sent` entries make this idempotent — cooks already notified
+// are skipped, `failed` ones are retried.
+exports.retryCookWhatsApp = async (req, res, next) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+    if (booking.status !== "requested") {
+      return res.status(409).json({
+        message: `Only pending requests can be re-notified (current status: ${booking.status}).`,
+      });
+    }
+    if (booking.requestExpiresAt && booking.requestExpiresAt <= new Date()) {
+      return res.status(410).json({ message: "This cook request has expired." });
+    }
+    const eligible = await findEligibleCooks({
+      date: booking.date,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      serviceType: booking.serviceType,
+      excludeCookIds: booking.ignoredBy || [],
+    });
+    const targets = booking.cook
+      ? [{ userId: String(booking.cook) }]
+      : eligible;
+    let customerName = "";
+    try {
+      const customer = await User.findById(booking.customer).select("name").lean();
+      if (customer?.name) customerName = customer.name;
+    } catch {
+    }
+    const result = await fanOutBookingRequest(booking, targets, { customerName });
+    const fresh = (await Booking.findById(req.params.id)) || booking;
+    const dispatch = Array.isArray(fresh.whatsappDispatch)
+      ? fresh.whatsappDispatch.map((e) => ({
+          cook: String(e.cook),
+          kind: e.kind,
+          status: e.status,
+          attempts: e.attempts,
+          error: e.error || undefined,
+        }))
+      : [];
+    return res.json({ success: true, ok: result?.ok === true, results: result?.results || [], dispatch });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.createBooking = async (req, res, next) => {
   try {
     const { date, startTime, endTime } = req.body;
@@ -707,7 +744,7 @@ exports.createBooking = async (req, res, next) => {
         }).select("startTime endTime status");
         const mine = timeToMinutes(startTime);
         const mineEnd = timeToMinutes(endTime);
-        const selfClash = (ownLive || []).some((r) => {
+        const selfClash = (ownLive || []).find((r) => {
           const rs = timeToMinutes(r.startTime);
           const re = timeToMinutes(r.endTime);
           return rs != null && re != null && intervalsOverlap(mine, mineEnd, rs, re);
@@ -723,7 +760,12 @@ exports.createBooking = async (req, res, next) => {
             } catch {
             }
           }
-          return res.status(409).json({ message: "You already have a booking for that time." });
+          return res.status(409).json({
+            message: "You already have a booking for that time.",
+            code: "BOOKING_SELF_CLASH",
+            bookingId: String(selfClash._id),
+            bookingStatus: selfClash.status,
+          });
         }
       }
     } catch {
@@ -1016,6 +1058,10 @@ exports.createBooking = async (req, res, next) => {
     }
 
 
+    // Eligible cooks for the WhatsApp request fan-out. Assigned outside
+    // the notification try-block so delivery bookkeeping never affects
+    // the booking response.
+    let whatsappCandidates = [];
     try {
       let notifyCooks = eligibleCooks;
       try {
@@ -1026,6 +1072,10 @@ exports.createBooking = async (req, res, next) => {
           serviceType: req.body.serviceType,
         });
         if (fresh.length) notifyCooks = fresh;
+      } catch {
+      }
+      try {
+        whatsappCandidates = notifyCooks || [];
       } catch {
       }
       const notifDocs = (notifyCooks || []).map((c) => ({
@@ -1065,6 +1115,16 @@ exports.createBooking = async (req, res, next) => {
     }
 
     notifyWhatsApp("request", booking, { customerName: req.user.name });
+    // WhatsApp is an additional channel: same eligible cooks, Marathi
+    // interactive request, per-cook delivery state. Fire-and-forget —
+    // a Meta failure never fails the booking itself.
+    try {
+      notifyWhatsAppEvent("booking.requested", booking, {
+        eligibleCooks: whatsappCandidates,
+        customerName: req.user.name,
+      });
+    } catch {
+    }
 
     const bookingObj = booking.toObject ? booking.toObject() : booking;
     res.status(201).json({ ...bookingObj, whatsappUrl: null, customerWhatsappUrl: null, cookPhone: null });
@@ -1073,234 +1133,6 @@ exports.createBooking = async (req, res, next) => {
   }
 };
 
-const REQUEST_WINDOW_MS = 5 * 60 * 1000;
-const PAYMENT_WINDOW_MS = 5 * 60 * 1000;
-
-const releaseCouponUsage = async (booking) => {
-  try {
-    if (!booking?.couponCode || !booking?.customer) return;
-    if (booking.couponReleased === true) return;
-    if (booking._id && dbReady()) {
-      try {
-        const claimed = await Booking.updateOne(
-          { _id: booking._id, couponReleased: { $ne: true } },
-          { $set: { couponReleased: true } }
-        );
-        if ((claimed.modifiedCount ?? claimed.nModified ?? 0) !== 1) return;
-      } catch {
-      }
-    }
-    const Coupon = require("../models/Coupon");
-    await Coupon.updateOne(
-      { code: String(booking.couponCode).toUpperCase() },
-      { $inc: { usedCount: -1 }, $pull: { usedBy: booking.customer } }
-    );
-    await Coupon.updateOne(
-      { code: String(booking.couponCode).toUpperCase(), usedCount: { $lt: 0 } },
-      { $set: { usedCount: 0 } }
-    );
-    if (booking && typeof booking.save === "function" && booking.couponReleased !== undefined) {
-      try {
-        booking.couponReleased = true;
-      } catch {
-      }
-    }
-    try {
-      if (booking?._id) {
-        await Booking.updateOne({ _id: booking._id }, { $set: { couponReleased: true } });
-      }
-    } catch {
-    }
-  } catch {
-  }
-};
-
-const expireBookingIfNeeded = async (booking) => {
-  try {
-    const now = new Date();
-    if (
-      booking.status === "requested" &&
-      booking.requestExpiresAt &&
-      booking.requestExpiresAt < now
-    ) {
-      if (dbReady() && booking._id) {
-        let expiredClaimed = false;
-        try {
-          const claim = await Booking.updateOne(
-            { _id: booking._id, status: "requested", requestExpiresAt: { $lt: now } },
-            {
-              $set: { status: "expired" },
-              $push: { statusHistory: { status: "expired", note: "Cook did not respond within 5 minutes" } },
-            }
-          );
-          expiredClaimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
-        } catch {
-          expiredClaimed = false;
-        }
-        if (!expiredClaimed) {
-          try {
-            const latest = await Booking.findById(booking._id);
-            if (latest && latest.status !== "requested") {
-              booking.status = latest.status;
-              return booking;
-            }
-          } catch {
-          }
-          return null;
-        }
-        booking.status = "expired";
-        booking.statusHistory.push({
-          status: "expired",
-          note: "Cook did not respond within 5 minutes",
-        });
-      } else {
-        booking.status = "expired";
-        booking.statusHistory.push({
-          status: "expired",
-          note: "Cook did not respond within 5 minutes",
-        });
-        await booking.save();
-      }
-      await releaseCouponUsage(booking);
-      let expiredRefundNote = "";
-      try {
-        const queued = queueRefundForApproval(booking, "request_expired");
-        if (queued > 0) {
-          if (dbReady() && booking._id) {
-            try {
-              await Booking.updateOne(
-                { _id: booking._id, "payment.refundStatus": "none" },
-                {
-                  $set: { "payment.refundStatus": "pending", "payment.refundAmount": queued },
-                  $push: {
-                    statusHistory: {
-                      status: booking.status,
-                      note: `Refund of ₹${queued} queued for admin approval (request_expired)`,
-                    },
-                  },
-                }
-              );
-            } catch {
-            }
-          } else {
-            await booking.save();
-          }
-          expiredRefundNote = ` A refund of ₹${queued} has been requested — our team will review it shortly.`;
-        } else if (booking.payment?.testMode && booking.payment?.status === "paid") {
-          expiredRefundNote = " (Test payment — no real money moved.)";
-        }
-      } catch {
-      }
-      try {
-        await Notification.create({
-          user: booking.customer,
-          type: "booking_expired",
-          booking: booking._id,
-          message: `Your booking request expired — the cook didn't respond within 5 minutes. Please find another cook.${expiredRefundNote}`,
-        });
-      } catch {
-      }
-      try {
-        await Notification.create({
-          user: booking.cook,
-          type: "booking_expired",
-          booking: booking._id,
-          message: "A booking request expired without a response — the slot is open again.",
-        });
-      } catch {
-      }
-      notifyWhatsApp("expired", booking);
-      try {
-        realtime.emit("booking_expired", {
-          bookingId: String(booking._id),
-          customerId: String(booking.customer),
-        });
-      } catch {
-      }
-      return booking;
-    }
-    if (
-      booking.status === "accepted" &&
-      booking.payment?.status !== "paid" &&
-      booking.paymentExpiresAt &&
-      booking.paymentExpiresAt < now
-    ) {
-      if (dbReady() && booking._id) {
-        let releasedClaimed = false;
-        try {
-          const claim = await Booking.updateOne(
-            {
-              _id: booking._id,
-              status: "accepted",
-              "payment.status": { $ne: "paid" },
-              paymentExpiresAt: { $lt: now },
-            },
-            {
-              $set: { status: "cancelled" },
-              $push: {
-                statusHistory: {
-                  status: "cancelled",
-                  note: "Payment not completed within 5 minutes — slot released",
-                },
-              },
-            }
-          );
-          releasedClaimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
-        } catch {
-          releasedClaimed = false;
-        }
-        if (!releasedClaimed) {
-          try {
-            const latest = await Booking.findById(booking._id);
-            if (latest && (latest.status !== "accepted" || latest.payment?.status === "paid")) {
-              booking.status = latest.status;
-              return booking;
-            }
-          } catch {
-          }
-          return null;
-        }
-        booking.status = "cancelled";
-        booking.statusHistory.push({
-          status: "cancelled",
-          note: "Payment not completed within 5 minutes — slot released",
-        });
-      } else {
-        booking.status = "cancelled";
-        booking.statusHistory.push({
-          status: "cancelled",
-          note: "Payment not completed within 5 minutes — slot released",
-        });
-        await booking.save();
-      }
-      await releaseCouponUsage(booking);
-      try {
-        await Notification.create({
-          user: booking.customer,
-          type: "booking_cancelled",
-          booking: booking._id,
-          message: "Payment was not completed within 5 minutes — the slot was released. Please book again.",
-        });
-      } catch {
-      }
-      try {
-        await Notification.create({
-          user: booking.cook,
-          type: "booking_cancelled",
-          booking: booking._id,
-          message: "A held slot was released (the customer didn't pay in time) — it is bookable again.",
-        });
-      } catch {
-      }
-      notifyWhatsApp("cancelled", booking, {
-        refundNote: "The slot was released because payment was not completed in time. Please book again.",
-      });
-      return booking;
-    }
-  } catch {
-  }
-  return null;
-};
 exports.expireBookingIfNeeded = expireBookingIfNeeded;
 exports.queueRefundForApproval = queueRefundForApproval;
 exports.releaseCouponUsage = releaseCouponUsage;
@@ -1626,6 +1458,45 @@ exports.getCookSchedule = async (req, res, next) => {
 exports.acceptBooking = async (req, res, next) => {
   try {
     const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
+    if (!isAdmin) {
+      // Website cooks share one acceptance service with the WhatsApp
+      // channel — same validations, same atomic claim, same side effects.
+      try {
+        const { booking, alreadyAccepted } = await acceptBookingForCook({
+          bookingId: req.params.id,
+          cookId: req.user.id,
+          source: "website",
+        });
+        let customerWhatsappUrl = null;
+        let cookPhoneForCustomer = null;
+        try {
+          const cookUser = await User.findById(req.user.id).select("name phone");
+          const customer = await User.findById(booking.customer).select("phone");
+          cookPhoneForCustomer = cookUser?.phone || null;
+          customerWhatsappUrl = buildCustomerWhatsAppUrl({
+            customerPhone: customer?.phone,
+            cookName: cookUser?.name,
+            cookPhone: cookUser?.phone,
+            booking,
+          });
+        } catch {
+          customerWhatsappUrl = null;
+        }
+        const obj = stripServiceOtp(booking);
+        if (alreadyAccepted) {
+          return res.json({ success: true, ...obj, alreadyAccepted: true });
+        }
+        return res.json({ success: true, ...obj, customerWhatsappUrl, cookPhone: cookPhoneForCustomer });
+      } catch (err) {
+        if (err && err.statusCode) {
+          if (err.code) {
+            return res.status(err.statusCode).json({ success: false, code: err.code, message: err.message });
+          }
+          return res.status(err.statusCode).json({ message: err.message });
+        }
+        throw err;
+      }
+    }
     let booking = await Booking.findOne({ _id: req.params.id });
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
@@ -2106,6 +1977,38 @@ exports.acceptBooking = async (req, res, next) => {
 exports.rejectBooking = async (req, res, next) => {
   try {
     const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
+    if (!isAdmin) {
+      // Website cooks share one rejection service with the WhatsApp
+      // channel — broadcast ignores keep status=requested, direct
+      // declines reject the request.
+      try {
+        const { booking, ignored } = await rejectBookingForCook({
+          bookingId: req.params.id,
+          cookId: req.user.id,
+          source: "website",
+        });
+        if (ignored) {
+          const out = stripServiceOtp(booking.toObject ? booking.toObject() : booking);
+          return res.json({
+            success: true,
+            ...out,
+            status: "requested",
+            ignored: true,
+            code: "BOOKING_STILL_REQUESTED",
+            message: "Request ignored — the customer is still waiting for another cook.",
+          });
+        }
+        return res.json(stripServiceOtp(booking));
+      } catch (err) {
+        if (err && err.statusCode) {
+          if (err.code) {
+            return res.status(err.statusCode).json({ success: false, code: err.code, message: err.message });
+          }
+          return res.status(err.statusCode).json({ message: err.message });
+        }
+        throw err;
+      }
+    }
     let booking = await Booking.findOne({ _id: req.params.id });
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
@@ -2453,10 +2356,19 @@ exports.cancelBooking = async (req, res, next) => {
     }
 
     const cancelledByValue = isAdmin ? "admin" : isCook ? "cook" : "customer";
+    // "Finding a cook" page: a customer withdrawing a still-unassigned
+    // (`requested`) booking cancels in one tap — no reason prompt, no
+    // 30-minute cutoff. Nothing is paid and no cook is engaged yet, so
+    // there is nothing to refund or penalize. evaluateCancellation() below
+    // still runs as a safety net (BEFORE_ASSIGNMENT, allowed).
+    const isRequestWithdrawal = booking.status === "requested" && cancelledByValue === "customer";
     const { CUSTOMER_CANCELLATION_REASONS } = require("../utils/cancellationPolicy");
     let cancelReason = "";
     let cancelReasonNote = "";
-    if (!isAdmin) {
+    if (isRequestWithdrawal) {
+      cancelReason = "OTHER";
+      cancelReasonNote = "";
+    } else if (!isAdmin) {
       cancelReason = String(req.body?.reason || "").trim().toUpperCase().slice(0, 60);
       if (cancelledByValue === "customer") {
         if (cancelReason && !CUSTOMER_CANCELLATION_REASONS.includes(cancelReason)) {
@@ -2485,7 +2397,7 @@ exports.cancelBooking = async (req, res, next) => {
     if (!isAdmin && booking.status === "in_progress") {
       return res.status(400).json({ message: "Service is already in progress — this booking can no longer be cancelled online. Please contact support." });
     }
-    if (!isAdmin && cancelLocked(booking)) {
+    if (!isAdmin && !isRequestWithdrawal && cancelLocked(booking)) {
       return res.status(400).json({ message: "Bookings can only be cancelled until 30 minutes before the service start time. Please contact support for help." });
     }
 
@@ -4126,6 +4038,17 @@ exports.payBooking = async (req, res, next) => {
       customerName: customer?.name,
       customerPhone: customer?.phone,
     });
+    // Marathi customer confirmation (accepted -> confirmed, payment
+    // verified). Never carries the service OTP. Fire-and-forget.
+    try {
+      notifyWhatsAppEvent("booking.confirmed", booking, {
+        cookName: cookUser?.name,
+        customerName: customer?.name,
+        customerPhone: customer?.phone,
+        paidAmount: booking?.payment?.paidAmount ?? booking?.amount,
+      });
+    } catch {
+    }
 
     const obj = booking.toObject ? booking.toObject() : booking;
     res.json({ ...obj, cookWhatsappUrl, customerWhatsappUrl });

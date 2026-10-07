@@ -527,7 +527,12 @@ exports.logout = async (req, res) => {
 exports.updateProfile = async (req, res, next) => {
   try {
     const { name, phone, mobile, address } = req.body;
-    const phoneVal = phone || mobile;
+    const phoneRaw = phone || mobile;
+    let phoneVal;
+    if (phoneRaw !== undefined) {
+      const core = normalizeMobileCore(phoneRaw);
+      phoneVal = /^[6-9]\d{9}$/.test(core) ? core : String(phoneRaw).trim();
+    }
     const user = await User.findByIdAndUpdate(
       req.user.id,
       {

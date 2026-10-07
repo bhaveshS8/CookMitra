@@ -13,6 +13,11 @@ const {
 } = require("./bookingController");
 const { normalizeIndianMobile } = require("../utils/whatsapp");
 const {
+  acceptBookingForCook,
+  rejectBookingForCook,
+} = require("../services/bookingAcceptService");
+const marathi = require("../utils/whatsappMessages");
+const {
   isWhatsAppEnabled,
   sendWhatsAppText,
   notifyWhatsApp,
@@ -65,22 +70,60 @@ const verifySignature = (raw, header) => {
   return signaturesEqual(expected, sig);
 };
 
+const LOOKUP_TIMEOUT_MS = 1500;
+const timedLookup = async (promise) => {
+  try {
+    const winner = await Promise.race([
+      Promise.resolve(promise),
+      new Promise((resolve) => setTimeout(() => resolve({ __timeout: true }), LOOKUP_TIMEOUT_MS)),
+    ]);
+    return winner && winner.__timeout ? null : winner;
+  } catch {
+    return null;
+  }
+};
+
 const findCookByWaId = async (waId) => {
   const digits = String(waId || "").replace(/\D/g, "");
   const core = normalizeIndianMobile(digits);
   if (!core) return null;
   const variants = [core, `91${core}`, `0${core}`, `+91${core}`];
-  try {
-    const user = await User.findOne({
-      $or: [{ phone: { $in: variants } }, { mobile: { $in: variants } }],
-    }).select("_id name phone mobile role status");
-    if (!user) return null;
-    if (String(user.role).toUpperCase() !== "COOK") return null;
-    if (user.status && user.status !== "active") return null;
-    return user;
-  } catch {
-    return null;
+  const isCookAccount = (user) => {
+    if (!user) return false;
+    if (String(user.role).toUpperCase() !== "COOK") return false;
+    if (user.status && user.status !== "active") return false;
+    return true;
+  };
+  const exact = await timedLookup(
+    (async () => {
+      try {
+        const user = await User.findOne({
+          $or: [{ phone: { $in: variants } }, { mobile: { $in: variants } }],
+        }).select("_id name phone mobile role status");
+        return user || null;
+      } catch {
+        return null;
+      }
+    })()
+  );
+  if (exact && isCookAccount(exact)) return exact;
+  // Fallback: stored numbers may carry formatting (spaces, dashes) that
+  // defeats exact matching. Compare digit-normalized values instead so a
+  // legitimate cook is never silently dropped at identification time.
+  const cooks = await timedLookup(
+    (async () => {
+      try {
+        return await User.find({ role: "COOK" }).select("_id name phone mobile role status").lean();
+      } catch {
+        return null;
+      }
+    })()
+  );
+  for (const c of cooks || []) {
+    const stored = normalizeIndianMobile(String(c?.phone || "")) || normalizeIndianMobile(String(c?.mobile || ""));
+    if (stored && stored === core && isCookAccount(c)) return c;
   }
+  return null;
 };
 
 const bookingLine = (booking) => {
@@ -159,196 +202,165 @@ const loadPendingForCook = async (cookId) => {
   }
 };
 
+const resolveNamesForReply = async (booking, cook) => {
+  let cookName = cook?.name || "";
+  let customerName = "";
+  try {
+    if (booking?.customer) {
+      const customer = await User.findById(booking.customer).select("name").lean();
+      if (customer?.name) customerName = customer.name;
+    }
+  } catch {
+  }
+  return { cookName, customerName };
+};
+
 const acceptViaWhatsApp = async (cook, booking, senderE164) => {
-  const isBroadcast = !booking.cook;
-  if (!isBroadcast && String(booking.cook) !== String(cook._id)) {
-    await reply(senderE164, "This booking isn't assigned to you — please check your Cook Dashboard.");
-    return { ok: false, reason: "not-owner" };
-  }
-  if (isBroadcast && Array.isArray(booking.ignoredBy) && booking.ignoredBy.map(String).includes(String(cook._id))) {
-    await reply(senderE164, "You already ignored this request — please check your Cook Dashboard for live ones.");
-    return { ok: false, reason: "ignored" };
-  }
-  await expireBookingIfNeeded(booking);
-  if (booking.status !== "requested") {
-    await reply(senderE164, `This request is already ${booking.status} — no action needed. Please check your Cook Dashboard.`);
-    return { ok: false, reason: `already-${booking.status}` };
-  }
-  if (booking.requestExpiresAt && booking.requestExpiresAt < new Date()) {
-    await expireBookingIfNeeded(booking);
-    await releaseCouponUsage(booking);
-    try {
-      await Notification.create({
-        user: booking.customer,
-        type: "booking_expired",
-        booking: booking._id,
-        message: "Your booking request expired — the cook didn't respond within 5 minutes. Please find another cook.",
-      });
-    } catch {
-    }
-    await reply(senderE164, "This request already expired (5-minute window). The slot is open again.");
-    return { ok: false, reason: "expired" };
-  }
+  // The verified sender phone number determines the cook. The button
+  // payload only identifies the booking — never the authorization.
+  const senderTail = String(senderE164 || "").replace(/\D/g, "").slice(-4) || "????";
+  const prevStatus = booking?.status || "unknown";
+  console.log(
+    `[whatsapp:accept] booking=${booking?._id} sender=...${senderTail} cook=${cook?._id} prev=${prevStatus} source=whatsapp`
+  );
+  let result = null;
   try {
-    const { start: dayStart, end: dayEnd } = dayBounds(booking.date);
-    const rivals = await Booking.find({
-      cook: isBroadcast ? cook._id : booking.cook,
-      _id: { $ne: booking._id },
-      date: { $gte: dayStart, $lte: dayEnd },
-      status: { $in: ["accepted", "confirmed", "in_progress"] },
-    }).select("startTime endTime status");
-    const s = timeToMinutes(booking.startTime);
-    const e = timeToMinutes(booking.endTime);
-    const clash = (rivals || []).some((r) => {
-      const rs = timeToMinutes(r.startTime);
-      const re = timeToMinutes(r.endTime);
-      return rs != null && re != null && intervalsOverlap(s, e, rs, re);
+    result = await acceptBookingForCook({
+      bookingId: booking._id,
+      cookId: cook._id,
+      source: "whatsapp",
     });
-    if (clash) {
-      await reply(senderE164, "This slot was just booked by another request — please decline this one in your Cook Dashboard.");
-      return { ok: false, reason: "slot-clash" };
-    }
-  } catch {
-    await reply(senderE164, "Could not verify slot availability right now — please try again or use your Cook Dashboard.");
-    return { ok: false, reason: "verify-unavailable" };
-  }
-  let claimed = false;
-  try {
-    const claimFilter = { _id: booking._id, status: "requested", requestExpiresAt: { $gt: new Date() } };
-    const claimUpdate = {
-      $set: { status: "accepted", paymentExpiresAt: new Date(Date.now() + PAYMENT_WINDOW_MS) },
-      $push: { statusHistory: { status: "accepted", note: "Accepted by cook via WhatsApp" } },
-    };
-    if (isBroadcast) {
-      claimFilter.cook = null;
-      claimUpdate.$set.cook = cook._id;
-    } else {
-      claimFilter.cook = cook._id;
-    }
-    const claim = await Booking.updateOne(claimFilter, claimUpdate);
-    claimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
-  } catch {
-    claimed = false;
-  }
-  if (!claimed) {
+  } catch (err) {
     let latest = null;
     try {
       latest = await Booking.findById(booking._id);
     } catch {
       latest = null;
     }
+    const current = latest || booking;
+    console.log(
+      `[whatsapp:accept] booking=${booking?._id} cook=${cook?._id} refused reason=${err?.code || err?.statusCode || "error"} status=${current?.status} source=whatsapp`
+    );
+    if (err?.statusCode === 404) {
+      await reply(senderE164, "This booking isn't assigned to you — please check your Cook Dashboard.");
+      return { ok: false, reason: "not-owner" };
+    }
+    if (err?.code === "BOOKING_IGNORED_BY_YOU") {
+      await reply(
+        senderE164,
+        ["You already ignored this request — please check your Cook Dashboard for live ones.", "", marathi.buildBookingRejectedMessage({ booking: current })].join("\n")
+      );
+      return { ok: false, reason: "ignored" };
+    }
+    if (String(current?.status || "") === "cancelled") {
+      await reply(senderE164, marathi.buildBookingCancelledMessage({}));
+      return { ok: false, reason: "cancelled" };
+    }
+    if (
+      String(current?.status || "") === "expired" ||
+      (current?.requestExpiresAt && current.requestExpiresAt < new Date())
+    ) {
+      await reply(senderE164, marathi.buildBookingExpiredMessage({ booking: current }));
+      return { ok: false, reason: "expired" };
+    }
+    if (String(current?.status || "") === "accepted") {
+      await reply(
+        senderE164,
+        ["This request is already accepted — no action needed.", "", marathi.buildBookingAlreadyAcceptedMessage({ booking: current })].join("\n")
+      );
+      return { ok: false, reason: "race-lost" };
+    }
+    if (err?.code === "SLOT_UNAVAILABLE" || err?.code === "COOK_NOT_ELIGIBLE") {
+      await reply(senderE164, err?.message || "This request can no longer be accepted.");
+      return { ok: false, reason: String(err?.code || "ineligible").toLowerCase().replace(/_/g, "-") };
+    }
     await reply(
       senderE164,
-      latest && latest.status !== "requested"
-        ? `This request is already ${latest.status} — no action needed.`
-        : "Another accept is being processed — please check your Cook Dashboard."
+      `This request is already ${current?.status || "handled"} — no action needed. Please check your Cook Dashboard.`
     );
-    return { ok: false, reason: "race-lost" };
+    return { ok: false, reason: `already-${current?.status || "handled"}` };
   }
+  let fresh = result?.booking || booking;
   try {
-    const fresh = await Booking.findById(booking._id);
-    if (fresh) booking = fresh;
+    const latest = await Booking.findById(booking._id);
+    if (latest) fresh = latest;
   } catch {
   }
-  try {
-    await Notification.create({
-      user: booking.customer,
-      type: "booking_accepted",
-      booking: booking._id,
-      message: "Your booking request has been accepted! Complete payment within 5 minutes to confirm your slot.",
-    });
-  } catch {
+  if (result?.alreadyAccepted) {
+    // Idempotent redelivery: state already reflects this cook — no
+    // duplicate assignment, payment window, or notifications.
+    await reply(
+      senderE164,
+      [`This request is already accepted — no action needed. ✅ Accepted! ${bookingLine(fresh)}`, "", marathi.buildBookingAlreadyAcceptedMessage({ booking: fresh })].join("\n")
+    );
+    return { ok: true, alreadyAccepted: true };
   }
-  notifyWhatsApp("accepted", booking);
-  await reply(
-    senderE164,
-    `✅ Accepted! ${bookingLine(booking)}\nThe customer has 5 minutes to pay. We'll notify you here the moment payment lands.`
+  const { customerName } = await resolveNamesForReply(fresh, cook);
+  console.log(
+    `[whatsapp:accept] booking=${booking?._id} cook=${cook?._id} prev=${prevStatus} new=${fresh?.status} assigned=${fresh?.cook} already=${result?.alreadyAccepted === true} source=whatsapp`
   );
+  // Success reply (§11): live booking data, accepted only — never claimed
+  // as payment-confirmed. English lead line kept for dashboard parity.
+  const confirmLines = [
+    `✅ Accepted! ${bookingLine(fresh)}`,
+    "",
+    "✅ बुकिंग स्वीकारली!",
+    "",
+    "ही बुकिंग तुमच्या नावावर निश्चित करण्यात आली आहे.",
+    "",
+    `ग्राहक: ${customerName || "ग्राहक"}`,
+    `तारीख: ${marathi.formatMarathiDate(fresh?.date)}`,
+    `वेळ: ${fresh?.startTime || ""} ते ${fresh?.endTime || ""}`,
+    "",
+    "कृपया Cook Mitra वेबसाइट/अॅपवर बुकिंगचे पुढील तपशील पहा.",
+  ];
+  await reply(senderE164, confirmLines.join("\n"));
   return { ok: true };
 };
 
 const rejectViaWhatsApp = async (cook, booking, senderE164) => {
-  const isBroadcast = !booking.cook;
-  if (!isBroadcast && String(booking.cook) !== String(cook._id)) {
-    await reply(senderE164, "This booking isn't assigned to you — please check your Cook Dashboard.");
-    return { ok: false, reason: "not-owner" };
-  }
-  await expireBookingIfNeeded(booking);
-  if (booking.status !== "requested") {
-    await reply(senderE164, `This request is already ${booking.status} — no action needed.`);
-    return { ok: false, reason: `already-${booking.status}` };
-  }
-  if (isBroadcast) {
+  // Broadcast declines are ignores (status stays requested so other
+  // cooks can accept). Direct-assigned declines reject the request.
+  // Both go through the shared rejection service.
+  let result = null;
+  try {
+    result = await rejectBookingForCook({
+      bookingId: booking._id,
+      cookId: cook._id,
+      source: "whatsapp",
+    });
+  } catch (err) {
+    let latest = null;
     try {
-      await Booking.updateOne(
-        { _id: booking._id, status: "requested" },
-        { $addToSet: { ignoredBy: cook._id } }
-      );
+      latest = await Booking.findById(booking._id);
     } catch {
+      latest = null;
     }
-    await reply(senderE164, `Ignored. ${bookingLine(booking)}\nOther cooks can still accept it.`);
+    const current = latest || booking;
+    if (err?.statusCode === 404) {
+      await reply(senderE164, "This booking isn't assigned to you — please check your Cook Dashboard.");
+      return { ok: false, reason: "not-owner" };
+    }
+    await reply(senderE164, `This request is already ${current?.status || "handled"} — no action needed.`);
+    return { ok: false, reason: `already-${current?.status || "handled"}` };
+  }
+  let fresh = result?.booking || booking;
+  try {
+    const latest = await Booking.findById(booking._id);
+    if (latest) fresh = latest;
+  } catch {
+  }
+  if (result?.ignored) {
+    await reply(
+      senderE164,
+      [`Ignored. ${bookingLine(fresh)}\nOther cooks can still accept it.`, "", marathi.buildBookingRejectedMessage({ booking: fresh })].join("\n")
+    );
     return { ok: true, ignored: true };
   }
-  let claimed = false;
-  try {
-    const claim = await Booking.updateOne(
-      { _id: booking._id, status: "requested" },
-      {
-        $set: { status: "rejected" },
-        $push: { statusHistory: { status: "rejected", note: "Declined by cook via WhatsApp" } },
-      }
-    );
-    claimed = (claim.modifiedCount ?? claim.nModified ?? 0) === 1;
-  } catch {
-    claimed = false;
-  }
-  if (!claimed) {
-    await reply(senderE164, "This request was just handled — please check your Cook Dashboard.");
-    return { ok: false, reason: "race-lost" };
-  }
-  try {
-    const fresh = await Booking.findById(booking._id);
-    if (fresh) booking = fresh;
-  } catch {
-  }
-  let refundNote = "";
-  try {
-    const queued = queueRefundForApproval(booking, "booking_rejected");
-    if (queued > 0) {
-      try {
-        await Booking.updateOne(
-          { _id: booking._id, "payment.refundStatus": "none" },
-          {
-            $set: { "payment.refundStatus": "pending", "payment.refundAmount": queued },
-            $push: {
-              statusHistory: {
-                status: booking.status,
-                note: `Refund of ₹${queued} queued for admin approval (booking_rejected)`,
-              },
-            },
-          }
-        );
-      } catch {
-      }
-      refundNote = ` A refund of ₹${queued} has been requested — our team will review it shortly.`;
-    }
-  } catch {
-  }
-  try {
-    await releaseCouponUsage(booking);
-  } catch {
-  }
-  try {
-    await Notification.create({
-      user: booking.customer,
-      type: "booking_rejected",
-      booking: booking._id,
-      message: `Your booking request has been rejected.${refundNote}`,
-    });
-  } catch {
-  }
-  notifyWhatsApp("rejected", booking, { refundNote: refundNote || undefined });
-  await reply(senderE164, `Declined. ${bookingLine(booking)}\nYour slot stays open.`);
+  await reply(
+    senderE164,
+    [`Declined. ${bookingLine(fresh)}\nYour slot stays open.`, "", marathi.buildBookingRejectedMessage({ booking: fresh })].join("\n")
+  );
   return { ok: true };
 };
 
@@ -449,7 +461,11 @@ exports.handleInbound = async (req, res) => {
       // eslint-disable-next-line no-await-in-loop
       results.push(await handleOneMessage(msg));
     }
-    return res.status(200).json({ received: true, handled: results.filter((r) => r.ok).length });
+    const handled = results.filter((r) => r.ok).length;
+    console.log(
+      `[whatsapp:webhook] messages=${messages.length} handled=${handled} reasons=${results.map((r) => r.reason || "ok").join(",")}`
+    );
+    return res.status(200).json({ received: true, handled });
   } catch (err) {
     console.warn("WhatsApp webhook error:", err?.message || err);
     return res.status(200).json({ received: true, handled: 0 });

@@ -463,6 +463,19 @@
   animation: bkShake 0.35s ease;
 }
 .bk-error-icon { flex-shrink: 0; margin-top: 1px; }
+.bk-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 0.25rem;
+  color: var(--primary-700, #1d4ed8);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bk-link-btn:hover { color: var(--primary-800, #1e40af); }
 
 .bk-foot {
   display: flex;

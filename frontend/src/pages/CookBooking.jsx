@@ -149,7 +149,6 @@ const CookBooking = () => {
   const [findingCook, setFindingCook] = useState(false);
   const [locMsg, setLocMsg] = useState("");
   const [coords, setCoords] = useState(null);
-  const [copied, setCopied] = useState(false);
   const [savedLocations, setSavedLocations] = useState([]);
   const [savedLoaded, setSavedLoaded] = useState(false);
   const [savedIdx, setSavedIdx] = useState("");
@@ -319,10 +318,6 @@ const CookBooking = () => {
     }
   }, [savedLocations, savedLoaded, user?.role, user?.address]);
 
-  const mapsLink = coords
-    ? `https://www.google.com/maps?q=${coords.lat},${coords.lng}`
-    : "";
-
   const serviceLabel = "Home cooking session";
 
   const slab = slabPriceForDuration(Number(form.durationHours));
@@ -381,21 +376,6 @@ const CookBooking = () => {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
-
-  const handleCopyLink = async () => {
-    if (!mapsLink) return;
-    try {
-      await navigator.clipboard.writeText(mapsLink);
-    } catch {
-      const input = document.getElementById("maps-link-input");
-      if (input) {
-        input.select();
-        document.execCommand("copy");
-      }
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -1161,36 +1141,6 @@ const CookBooking = () => {
                   {locMsg}
                 </p>
               )}
-              {coords && (
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="maps-link-input">
-                    <MapPin size={15} /> Google Maps link of your location
-                  </label>
-                  <div className="maps-link-group">
-                    <input
-                      id="maps-link-input"
-                      type="text"
-                      className="form-control"
-                      value={mapsLink}
-                      readOnly
-                      onFocus={(e) => e.target.select()}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-outline btn-sm"
-                      onClick={handleCopyLink}
-                    >
-                      {copied ? (
-                        <>
-                          <Check size={15} /> Copied
-                        </>
-                      ) : (
-                        "Copy"
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
             {profileAddress && !addrEditing ? (
               <div className="bk-profile-addr">
@@ -1377,11 +1327,6 @@ const CookBooking = () => {
                     <strong className="od-review-addr">{buildAddress() || "—"}</strong>
                   ) : (
                     <strong className="od-review-missing">Add your address above</strong>
-                  )}
-                  {coords && (
-                    <a className="od-review-link" href={mapsLink} target="_blank" rel="noreferrer">
-                      <MapPin size={12} /> Open map pin
-                    </a>
                   )}
                 </dd>
                 <dd className="od-review-edit">

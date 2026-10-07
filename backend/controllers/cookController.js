@@ -31,6 +31,13 @@ const COOK_EDITABLE_FIELDS = [
   "payoutDetails",
 ];
 
+const normalizeMobileCore = (v) => {
+  let digits = String(v || "").replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+  else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  return digits;
+};
+
 const pickCookEditable = (obj) => {
   const out = {};
   for (const key of COOK_EDITABLE_FIELDS) {
@@ -341,6 +348,20 @@ exports.createCookProfile = async (req, res, next) => {
       return res.status(400).json({ message: "Cook profile already exists" });
     }
 
+    // Allow mobile number update through the profile form (create flow)
+    const mobileRaw = req.body?.mobileNumber ?? req.body?.mobile ?? req.body?.phone;
+    if (mobileRaw !== undefined && mobileRaw !== null && String(mobileRaw).trim() !== "") {
+      const core = normalizeMobileCore(mobileRaw);
+      if (!/^[6-9]\d{9}$/.test(core)) {
+        return res.status(400).json({ message: "Enter a valid 10-digit mobile number" });
+      }
+      await User.findByIdAndUpdate(
+        req.user.id,
+        { phone: core, mobile: core },
+        { runValidators: true }
+      );
+    }
+
     const body = pickCookEditable(req.body);
     const docErr = assertDocUrlsOwned(body, req.user.id);
     if (docErr) {
@@ -386,7 +407,7 @@ exports.getMyProfile = async (req, res, next) => {
   try {
     const profile = await CookProfile.findOne({ user: req.user.id }).populate(
       "user",
-      "name email phone"
+      "name email phone mobile"
     );
     if (!profile) {
       return res.status(404).json({ message: "Cook profile not found" });
@@ -399,6 +420,20 @@ exports.getMyProfile = async (req, res, next) => {
 
 exports.updateCookProfile = async (req, res, next) => {
   try {
+    // Allow mobile number update through the profile form.
+    // Keeps User.phone/mobile in sync so bookings/WhatsApp use the fresh number.
+    const mobileRaw = req.body?.mobileNumber ?? req.body?.mobile ?? req.body?.phone;
+    if (mobileRaw !== undefined && mobileRaw !== null && String(mobileRaw).trim() !== "") {
+      const core = normalizeMobileCore(mobileRaw);
+      if (!/^[6-9]\d{9}$/.test(core)) {
+        return res.status(400).json({ message: "Enter a valid 10-digit mobile number" });
+      }
+      await User.findByIdAndUpdate(
+        req.user.id,
+        { phone: core, mobile: core },
+        { runValidators: true }
+      );
+    }
     const body = pickCookEditable(req.body);
     const docErr = assertDocUrlsOwned(body, req.user.id);
     if (docErr) {

@@ -83,6 +83,26 @@ WHATSAPP_ENABLED=true
 WHATSAPP_TOKEN=<permanent system-user token>
 WHATSAPP_PHONE_NUMBER_ID=<live phone number ID>
 # optional: WHATSAPP_API_VERSION=v22.0
+# Cook request template (optional cold-start path — Meta only delivers
+# approved templates outside the 24h window). Canonical names read by
+# backend/utils/whatsappApi.js sendCookRequestInteractive(); the _FOR_COOK
+# aliases are still honored for existing .env files.
+# WHATSAPP_REQUEST_TEMPLATE=cook_booking_request
+# WHATSAPP_REQUEST_TEMPLATE_LANG=en
+# (legacy aliases: WHATSAPP_REQUEST_TEMPLATE_FOR_COOK,
+#  WHATSAPP_TEMPLATE_LANG_COOK_REQUEST)
+# NOTE: broadcast fan-out (backend/services/whatsappDispatch.js) intentionally
+# sends ONLY the Marathi interactive message and ignores all template vars
+# (the approved template's {{n}} bindings render shifted values) — see T16
+# in backend/whatsapp-channel.test.js. The template path above applies only
+# to the direct-cook helper in utils/whatsappApi.js.
+#
+# Troubleshooting 401 code 190 "Authentication Error": Meta rejected
+# WHATSAPP_TOKEN (expired temporary token, revoked system-user token, or token
+# from a different app than WHATSAPP_PHONE_NUMBER_ID). Regenerate the token
+# (WhatsApp > API Setup for testing, permanent system-user token for prod),
+# keep it on ONE line in backend/.env, and restart. The server log now prints
+# this hint inline with the failure.
 ```
 
 Backend logs a `CONFIG NOTICE` at boot when these are missing — that just
@@ -99,6 +119,18 @@ means auto-push is off (safe).
   `notifyWhatsApp(event, booking, …)` after every state change — always
   fire-and-forget, always after the DB write + in-app `Notification.create`,
   so a WhatsApp outage can never fail or double-run a booking.
+- Broadcast fan-out: `POST /api/bookings` emits
+  `notifyWhatsAppEvent("booking.requested", …)` from
+  `backend/services/whatsappDispatch.js`, which sends the Marathi request
+  to every cook returned by the same eligibility rules as
+  `GET /bookings/cook/requests`, tracking per-cook delivery in
+  `Booking.whatsappDispatch` (`sent` only after Meta accepts; `failed`
+  stays retryable).
+- Shared rules: website and WhatsApp accepts/rejects both execute
+  `acceptBookingForCook` / `rejectBookingForCook` in
+  `backend/services/bookingAcceptService.js` (same validations, same atomic
+  `updateOne({_id, status: "requested", …})` claim, same side effects).
+  Marathi copy lives in `backend/utils/whatsappMessages.js`.
 - Regression test: `backend/whatsapp-api.test.js`
   (`node backend/whatsapp-api.test.js`).
 
@@ -112,10 +144,11 @@ numbers are free.
 
 Yes — the cook can decide **without opening the dashboard**:
 
-1. The booking request arrives as an **interactive message** with
-   **Accept ✅** / **Decline ❌** buttons (payloads `accept:<bookingId>` /
-   `reject:<bookingId>`). Plain-text replies (`ACCEPT`, `DECLINE`, …)
-   work too.
+1. The booking request arrives as a **Marathi interactive message** with
+   **✅ बुकिंग स्वीकारा** / **❌ नकार द्या** buttons (payloads
+   `accept:<bookingId>` / `reject:<bookingId>` — the payload only names
+   the booking; the verified sender number decides the cook). Plain-text
+   replies (`ACCEPT`, `DECLINE`, …) work too.
 2. The tap hits `POST /api/whatsapp/webhook`, which:
    - verifies `X-Hub-Signature-256` over the raw body (fail-closed),
    - matches the sender's number to the assigned cook (no enumeration —
@@ -128,6 +161,12 @@ Yes — the cook can decide **without opening the dashboard**:
    - notifies the customer in-app + on WhatsApp, and confirms to the cook.
 3. Text without a booking id uses the cook's single pending request, or
    lists the pendings when several exist.
+4. If a cook reports not receiving the request: check the server logs for
+   `[whatsapp:request]` lines (template/button errors from Meta are logged
+   with booking + cook ids), inspect `Booking.whatsappDispatch` for the
+   per-cook `sent`/`failed` state, and re-send with
+   `POST /api/bookings/:id/notify-cooks` (admin — idempotent: already-`sent`
+   cooks are skipped, `failed` ones retried).
 
 ### Webhook setup (one time)
 
@@ -143,5 +182,8 @@ Yes — the cook can decide **without opening the dashboard**:
 4. Cold starts (cook never messaged the business number): Meta only
    delivers **approved templates** outside the 24h window. Create a
    `cook_booking_request` Utility template with the same wording plus
-   Accept/Decline quick replies, set `WHATSAPP_REQUEST_TEMPLATE` (+`_LANG`);
-   the sender tries the template first and falls back to interactive.
+   Accept/Decline quick replies, set `WHATSAPP_REQUEST_TEMPLATE` (+
+   `WHATSAPP_REQUEST_TEMPLATE_LANG`, or the legacy aliases
+   `WHATSAPP_REQUEST_TEMPLATE_FOR_COOK` / `WHATSAPP_TEMPLATE_LANG_COOK_REQUEST`);
+   the direct-cook sender tries the template first and falls back to interactive.
+   (Broadcast fan-out stays interactive-only by design — see section 4 note.)

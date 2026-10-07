@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from "react";
 import API from "../api/axios";
+import { useDispatch } from "react-redux";
+import { updateUser } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
+import { getPhoneCore, validatePhone } from "../utils/authValidation";
 import CookDocUploads from "./CookDocUploads";
-import { ChefHat, AlertCircle } from "lucide-react";
+import { ChefHat, AlertCircle, Phone } from "lucide-react";
 
 const DEFAULT_SERVICE_TYPES = ["cook_for_me"];
 
@@ -13,7 +16,9 @@ const CookProfileForm = ({
   onSaved,
 }) => {
   const showToast = useShowToast();
+  const dispatch = useDispatch();
   const [formData, setFormData] = useState({
+    mobileNumber: "",
     skills: "",
     experienceYears: 0,
     specialties: "",
@@ -35,7 +40,21 @@ const CookProfileForm = ({
       try {
         const res = await API.get("/cooks/me");
         setExisting(res.data);
+        const profileMobile =
+          res.data?.user?.mobile || res.data?.user?.phone || res.data?.mobileNumber || "";
+        let accountMobile = profileMobile;
+        try {
+          const me = await API.get("/auth/me");
+          accountMobile =
+            me.data?.mobile || me.data?.phone || profileMobile || "";
+          if (accountMobile) {
+            dispatch(updateUser({ phone: me.data?.phone, mobile: me.data?.mobile }));
+          }
+        } catch {
+          // /cooks/me already gave us the number — non-fatal if /auth/me fails
+        }
         setFormData({
+          mobileNumber: accountMobile || "",
           skills: res.data.skills || res.data.bio || "",
           experienceYears: res.data.experienceYears ?? 0,
           specialties: (res.data.specialties || []).join(", "),
@@ -49,13 +68,25 @@ const CookProfileForm = ({
       } catch (err) {
         if (err.response?.status !== 404) {
           setError(err.response?.data?.message || "Failed to load profile");
+        } else {
+          // No cook profile yet — still prefill mobile from account
+          try {
+            const me = await API.get("/auth/me");
+            const accountMobile = me.data?.mobile || me.data?.phone || "";
+            if (accountMobile) {
+              setFormData((prev) => ({ ...prev, mobileNumber: accountMobile }));
+              dispatch(updateUser({ phone: me.data?.phone, mobile: me.data?.mobile }));
+            }
+          } catch {
+            // prefill is best-effort
+          }
         }
       } finally {
         setLoading(false);
       }
     };
     fetchProfile();
-  }, []);
+  }, [dispatch]);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -63,6 +94,12 @@ const CookProfileForm = ({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const mobileErr = validatePhone(formData.mobileNumber);
+    if (mobileErr) {
+      setError(mobileErr);
+      showToast(mobileErr, "error");
+      return;
+    }
     if (!formData.aadharCardUrl) {
       const msg = "Please upload your Aadhaar card";
       setError(msg);
@@ -78,7 +115,11 @@ const CookProfileForm = ({
     setSaving(true);
     setError("");
 
+    const normalizedMobile = getPhoneCore(formData.mobileNumber);
     const payload = {
+      mobileNumber: normalizedMobile,
+      mobile: normalizedMobile,
+      phone: normalizedMobile,
       skills: formData.skills,
       bio: formData.skills,
       experienceYears: Number.isFinite(Number(formData.experienceYears))
@@ -100,6 +141,25 @@ const CookProfileForm = ({
     };
 
     try {
+      // Keep the account mobile in sync (used for bookings + WhatsApp).
+      // The cook endpoints also persist mobileNumber, so the number is saved
+      // even if one of the two calls fails.
+      try {
+        const meRes = await API.put("/auth/me", {
+          phone: normalizedMobile,
+          mobile: normalizedMobile,
+        });
+        dispatch(
+          updateUser({ phone: meRes.data?.phone, mobile: meRes.data?.mobile })
+        );
+      } catch (mobileErr) {
+        const msg =
+          mobileErr.response?.data?.message || "Failed to update mobile number";
+        setError(msg);
+        showToast(msg, "error");
+        setSaving(false);
+        return;
+      }
       const isUpdate = Boolean(existing);
       const res = isUpdate
         ? await API.put(`/cooks/${existing._id}`, payload)
@@ -162,6 +222,26 @@ const CookProfileForm = ({
       )}
 
       <form onSubmit={handleSubmit}>
+        <div className="cook-field">
+          <label>Mobile Number</label>
+          <div className="input-with-icon">
+            <Phone size={16} className="input-icon-prefix" />
+            <input
+              name="mobileNumber"
+              className="form-control"
+              value={formData.mobileNumber}
+              onChange={handleChange}
+              placeholder="10-digit mobile number"
+              inputMode="numeric"
+              maxLength={13}
+              required
+            />
+          </div>
+          <span className="field-hint">
+            Used for booking coordination and WhatsApp updates.
+          </span>
+        </div>
+
         <div className="cook-field">
           <label>Skills</label>
           <textarea
