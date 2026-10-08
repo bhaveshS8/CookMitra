@@ -755,7 +755,9 @@ exports.adminDeleteUser = async (req, res, next) => {
     if (!target) {
       return res.status(404).json({ message: "User not found" });
     }
-    if (!assertManageableAccount(req, res, target)) return;
+    if (String(target.role).toUpperCase() === "ADMIN") {
+      return res.status(403).json({ message: "Admin accounts cannot be deleted" });
+    }
 
     const CookProfile = require("../models/CookProfile");
     const Availability = require("../models/Availability");
@@ -763,41 +765,11 @@ exports.adminDeleteUser = async (req, res, next) => {
     const Review = require("../models/Review");
     const Notification = require("../models/Notification");
 
-    const bookingCount = await Booking.countDocuments({
-      $or: [{ customer: target._id }, { cook: target._id }],
-    });
-
-    if (bookingCount > 0 && req.body?.anonymize !== true) {
-      return res.status(400).json({
-        message:
-          "This account has booking history (payments, refunds, payouts) and cannot be permanently deleted — suspend it instead, or re-send with { anonymize: true } to suspend and scrub personal data while keeping auditable records.",
-        code: "ACCOUNT_HAS_FINANCIAL_HISTORY",
-        bookings: bookingCount,
-      });
-    }
-
-    if (bookingCount > 0) {
-      const tag = String(target._id).slice(-6);
-      target.status = "suspended";
-      target.name = "Deleted User";
-      target.email = `deleted_${tag}@deleted.local`;
-      target.phone = "";
-      target.mobile = "";
-      target.address = "";
-      target.tokenVersion = Number(target.tokenVersion || 0) + 1;
-      await target.save();
-      await Availability.deleteMany({ cook: target._id });
-      return res.json({
-        message: `Account anonymized and suspended — ${bookingCount} booking record(s) preserved for audit`,
-        id: target._id,
-        anonymized: true,
-      });
-    }
-
     await CookProfile.deleteMany({ user: target._id });
     await Availability.deleteMany({ cook: target._id });
     await Notification.deleteMany({ user: target._id });
     await Review.deleteMany({ $or: [{ customer: target._id }, { cook: target._id }] });
+    await Booking.deleteMany({ $or: [{ customer: target._id }, { cook: target._id }] });
 
     await target.deleteOne();
 

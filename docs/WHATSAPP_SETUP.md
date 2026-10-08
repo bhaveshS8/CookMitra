@@ -187,3 +187,75 @@ Yes — the cook can decide **without opening the dashboard**:
    `WHATSAPP_REQUEST_TEMPLATE_FOR_COOK` / `WHATSAPP_TEMPLATE_LANG_COOK_REQUEST`);
    the direct-cook sender tries the template first and falls back to interactive.
    (Broadcast fan-out stays interactive-only by design — see section 4 note.)
+
+## 8. Dispatch reliability (durable outbox)
+
+Booking-request fan-out no longer depends on an unawaited background task.
+`createBooking` persists a `DispatchJob` (`backend/models/DispatchJob.js`,
+unique per booking) **before** returning 201, and an in-process worker
+(`backend/services/bookingDispatchJobs.js`) claims due jobs atomically, so
+restarts, deploys, and multi-instance/cluster setups cannot silently lose
+or double-process dispatch work.
+
+- **Every exit is recorded**: each job ends `completed`, `skipped`, or
+  `failed` with a machine-readable `reason` (`dispatched`,
+  `partially_dispatched`, `whatsapp_disabled`, `no_eligible_cooks`,
+  `booking_not_requested`, `booking_expired`, `cook_already_assigned`,
+  `no_valid_recipients`, `meta_api_error`, `network_timeout`,
+  `database_error`, `unexpected_error`, `booking_missing`,
+  `dispatch_inflight`) plus a one-line `[whatsapp:dispatch]
+  booking=<id> job=<id> stage=<stage> reason=<reason>` server log (no phone
+  numbers or message bodies are ever logged).
+- **Full recipient set, no caps**: the fan-out iterates the complete
+  eligible-cook list — no query limit, slicing, or first-N cutoff anywhere
+  in the pipeline. Before sending, a `pending` dispatch record is created
+  for every intended recipient, and the job stores a counts-only
+  `diagnostics` summary (`examined`, per-reason exclusions, `attempted`,
+  `skipped`, `noPhone`) plus a `summary` server log line, so "why did only
+  N qualify?" is answerable from the admin endpoint alone.
+- **Retries**: transient Meta/network failures retry with bounded
+  exponential backoff (+jitter, honoring Meta's `Retry-After` on 429)
+  while the 5-minute request window is open; permanent errors
+  (bad token/code 190, invalid numbers) terminate visibly instead of
+  looping. No-eligible-cook outcomes re-evaluate a few times inside the
+  window, then stop.
+- **No duplicates**: per-recipient `sent` entries in
+  `Booking.whatsappDispatch` (with Meta message ids) are skipped by every
+  retry path, including the manual admin re-notify
+  (`POST /api/bookings/:id/notify-cooks`, unchanged behavior).
+  Semantics are at-least-once: a crash between Meta accepting a message
+  and MongoDB persisting the id can produce one duplicate on recovery.
+- **Monitoring**: as admin, `GET /api/bookings/dispatch-jobs?status=failed`
+  (also `pending`/`retrying`/`skipped`/`completed`, `bookingId`, `limit`,
+  `skip`) lists sanitized jobs with attempts and timestamps.
+- **Config** (`backend/.env`): `WHATSAPP_DISPATCH_POLL_MS` (default
+  10000), `WHATSAPP_DISPATCH_MAX_ATTEMPTS` (default 5),
+  `WHATSAPP_DISPATCH_LEASE_MS` (default 60000),
+  `WHATSAPP_DISPATCH_WORKER=false` disables the in-process worker on
+  API-only instances (jobs are still persisted).
+- **Safe deploy**: no separate worker process is required; each instance
+  runs the loop and atomic claims prevent overlap. Deploy any time —
+  pending jobs (including ones orphaned mid-send) are recovered on boot
+  via lease expiry plus a backfill sweep for `requested` bookings that
+  somehow have no job.
+- **Verify**: create a test booking, then check the job
+  (`GET /api/bookings/dispatch-jobs?bookingId=<id>`) — expect `completed`
+  / `dispatched` with `sentCount` matching the eligible cooks, and matching
+  `wamid.*` entries in `Booking.whatsappDispatch`.
+- **Delivery truth (Meta accepted ≠ received)**: a `sent` entry only means
+  Meta accepted the message. The webhook also processes Meta `statuses`
+  callbacks and advances each entry's `deliveryStatus`
+  (`sent → delivered → read`, or `failed` with the upstream code, e.g.
+  `131026` recipient-not-on-WhatsApp) monotonically — duplicates and
+  out-of-order receipts can never regress it. Unknown message ids are
+  ignored. When a cook reports non-receipt, inspect the entry: no
+  `deliveryStatus` means Meta never confirmed handset delivery (check spam,
+  blocked list, phone offline); `failed` names the upstream reason;
+  `delivered`/`read` means the phone got it and the cook didn't act in
+  time. `POST /api/bookings/:id/notify-cooks` (admin) now returns
+  `deliveryStatus` per recipient too.
+- **Tests**: `node backend/whatsapp-dispatch-jobs.test.js` (40 checks:
+  persistence, worker, recovery, retries, skips, dedup, concurrency,
+  backfill, admin listing, manual-retry record, 3/5/12-cook full-set
+  dispatch, exclusion diagnostics, single-failure continuation, uncapped
+  inbound pending list, and a static no-cap guard).

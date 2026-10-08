@@ -177,6 +177,26 @@ const isBroadcastEligibleForDispatch = async (booking, cookId) => {
   }
 };
 
+// Retryability of a Meta send outcome. 429 / 5xx / network-level failures
+// are transient (safe to retry with backoff); auth errors, invalid
+// recipients and validation skips are permanent. The durable dispatch
+// worker (services/bookingDispatchJobs.js) uses this to decide between
+// `retrying` and a terminal state.
+const isRetryableResult = (res) => {
+  if (!res || res.ok) return false;
+  if (typeof res.retryable === "boolean") return res.retryable;
+  if (res.skipped) return false;
+  const status = Number(res.status);
+  if (status === 429) return true;
+  if (status >= 500 && status <= 599) return true;
+  if (!Number.isFinite(status) || status === 0) {
+    return /timeout|timed out|econn|enet|eai_again|socket|fetch failed|network/i.test(
+      String(res.error || res.reason || "")
+    );
+  }
+  return false;
+};
+
 // Send one Marathi booking-request with interactive Accept/Decline buttons.
 // The message body is built ONLY by buildBookingRequestMessage() from named
 // live fields — no Meta template is sent for requests, because the approved
@@ -189,10 +209,16 @@ const sendRequestToCook = async (booking, cookId, cookName, cookPhone, customerN
     console.warn(`[whatsapp:request] booking=${bookingId} cook=${cookId} ${msg}`, extra || "");
   const bodyText = marathi.buildBookingRequestMessage({ booking, customerName });
   await markDispatch(bookingId, cookId, REQUEST_KIND, { status: "sending", attempts: 1 });
-  const res = await sendInteractiveButtons(cookPhone, bodyText, [
+  const raw = await sendInteractiveButtons(cookPhone, bodyText, [
     { id: acceptPayload(bookingId), title: marathi.ACCEPT_BUTTON_TITLE },
     { id: rejectPayload(bookingId), title: marathi.REJECT_BUTTON_TITLE },
   ]);
+  // Annotate retryability (and Meta's Retry-After) so callers — the
+  // durable worker in particular — can decide retry vs terminal state
+  // without re-parsing provider error text.
+  const res = raw && typeof raw === "object"
+    ? { ...raw, retryable: isRetryableResult(raw) }
+    : raw;
   if (res?.ok) {
     await markDispatch(bookingId, cookId, REQUEST_KIND, {
       status: "sent",
@@ -217,16 +243,38 @@ const sendRequestToCook = async (booking, cookId, cookName, cookPhone, customerN
   return res;
 };
 
+// One-line structured log per fan-out exit (booking id + reason only —
+// no phone numbers, message bodies, or customer data). The durable worker
+// persists the same reason codes on the DispatchJob, so incidents are
+// diagnosable from logs or the admin endpoint without reading MongoDB.
+const fanoutLog = (bookingId, stage, reason, extra) => {
+  try {
+    console.warn(
+      `[whatsapp:dispatch] booking=${bookingId || "?"} stage=${stage} reason=${reason}${extra ? ` ${extra}` : ""}`
+    );
+  } catch {
+  }
+};
+
 // Fan-out: send the Marathi booking request to every eligible cook.
 // `eligibleCooks` uses the same shape as findEligibleCooks():
 // [{ profile, userId }]. For direct-cook bookings only the assigned cook
 // is contacted. Never throws.
 const fanOutBookingRequest = async (booking, eligibleCooks, opts = {}) => {
   try {
-    if (!booking?._id) return { ok: false, reason: "no-booking" };
-    if (!isWhatsAppEnabled()) return { ok: false, skipped: true, reason: "whatsapp-disabled" };
+    if (!booking?._id) {
+      fanoutLog(null, "fanout", "no-booking");
+      return { ok: false, reason: "no-booking" };
+    }
+    if (!isWhatsAppEnabled()) {
+      fanoutLog(booking._id, "fanout", "whatsapp-disabled");
+      return { ok: false, skipped: true, reason: "whatsapp-disabled" };
+    }
     const fresh = (await loadFreshBooking(booking._id)) || booking;
-    if (!fresh || fresh.status !== "requested") return { ok: false, reason: "not-requested" };
+    if (!fresh || fresh.status !== "requested") {
+      fanoutLog(booking._id, "fanout", "not-requested", `status=${fresh?.status || "missing"}`);
+      return { ok: false, reason: "not-requested", status: fresh?.status || null };
+    }
     const ignored = ignoredIds(fresh);
     const assignedCook = fresh.cook ? String(fresh.cook) : null;
 
@@ -237,7 +285,10 @@ const fanOutBookingRequest = async (booking, eligibleCooks, opts = {}) => {
     } else {
       targets = targets.filter((c) => c?.userId && !ignored.has(String(c.userId)));
     }
-    if (!targets.length) return { ok: false, reason: "no-recipients" };
+    if (!targets.length) {
+      fanoutLog(booking._id, "fanout", "no-recipients", `eligible=${(eligibleCooks || []).length}`);
+      return { ok: false, reason: "no-recipients" };
+    }
 
     const phones = await resolveCookPhones(targets.map((c) => c.userId));
     const results = [];
@@ -287,8 +338,40 @@ const fanOutBookingRequest = async (booking, eligibleCooks, opts = {}) => {
         results.push({ cookId, ok: false, error: err?.message || "dispatch-error" });
       }
     }
-    return { ok: results.some((r) => r.ok), results };
+    const sent = results.filter((r) => r?.ok).length;
+    const retryAfterMs = results.reduce(
+      (m, r) => (Number.isFinite(r?.retryAfterMs) ? Math.max(m, r.retryAfterMs) : m),
+      0
+    );
+    // Per-booking dispatch summary: intended vs attempted vs outcomes.
+    // `eligible` is the FULL eligible set — never truncated.
+    const summary = {
+      eligible: targets.length,
+      attempted: results.length,
+      sent,
+      failed: results.filter((r) => !r?.ok && !r?.skipped).length,
+      skipped: results.filter((r) => r?.skipped).length,
+      noPhone: results.filter((r) =>
+        /no-whatsapp-number|invalid-recipient/i.test(String(r?.error || r?.reason || ""))
+      ).length,
+      ineligible: results.filter((r) =>
+        /cook-not-eligible/i.test(String(r?.error || r?.reason || ""))
+      ).length,
+    };
+    fanoutLog(
+      booking._id,
+      "fanout",
+      sent > 0 ? "completed" : "all-failed",
+      `eligible=${summary.eligible} attempted=${summary.attempted} sent=${sent} failed=${summary.failed} skipped=${summary.skipped}`
+    );
+    return {
+      ok: results.some((r) => r.ok),
+      results,
+      summary,
+      ...(retryAfterMs > 0 ? { retryAfterMs } : {}),
+    };
   } catch (err) {
+    fanoutLog(booking?._id, "fanout", "dispatch-error", String(err?.message || "").slice(0, 120));
     return { ok: false, error: err?.message || "dispatch-error" };
   }
 };
@@ -449,6 +532,7 @@ module.exports = {
   REQUEST_KIND,
   SCHEDULED_KIND,
   CONFIRMED_KIND,
+  isRetryableResult,
   fanOutBookingRequest,
   sendCookScheduledMessage,
   sendCustomerConfirmedMessage,

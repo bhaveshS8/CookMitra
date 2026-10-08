@@ -84,6 +84,7 @@ const normalizeVisitInput = (body = {}) => {
     sid,
     path: normalizePath(src.path),
     city: cleanPlace(src.city),
+    area: cleanPlace(src.area),
     state: cleanPlace(src.state),
     country: cleanPlace(src.country),
   };

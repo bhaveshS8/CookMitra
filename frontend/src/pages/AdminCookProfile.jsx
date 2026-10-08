@@ -2,7 +2,6 @@ import React from "react";
 import { Link, useParams } from "react-router-dom";
 import { useFetch } from "../hooks/useFetch";
 import AdminDocViewer from "../components/AdminDocViewer";
-import AdminDocUpload from "../components/AdminDocUpload";
 import { formatCurrency, formatDate, SERVICE_DETAILS, formatTimeRange12 } from "../utils/constants";
 import {
   ArrowLeft,
@@ -118,7 +117,7 @@ const BookingCard = ({ booking }) => (
 
 const AdminCookProfile = () => {
   const { id } = useParams();
-  const { data, loading, error, refetch } = useFetch(`/cooks/admin-overview/${id}`);
+  const { data, loading, error } = useFetch(`/cooks/admin-overview/${id}`);
 
   if (loading) {
     return (
@@ -301,20 +300,6 @@ const AdminCookProfile = () => {
               })),
             ]}
           />
-
-          <div
-            style={{
-              marginTop: "1rem",
-              borderTop: "1px dashed var(--slate-200)",
-              paddingTop: "1rem",
-            }}
-          >
-            <AdminDocUpload
-              cookId={profile._id}
-              current={profile}
-              onUploaded={refetch}
-            />
-          </div>
         </div>
       </div>
 

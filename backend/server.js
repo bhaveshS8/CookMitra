@@ -175,6 +175,18 @@ connectDB();
 const { ensurePayoutIndexes } = require("./utils/payoutIndexes");
 ensurePayoutIndexes({ connection: mongoose.connection });
 
+// Durable WhatsApp dispatch worker (in-process; atomic job claims make it
+// safe with any number of instances/cluster workers). Recovers pending jobs
+// left by previous processes. Disabled in tests and when
+// WHATSAPP_DISPATCH_WORKER=false (API-only instances still persist jobs).
+if (process.env.NODE_ENV !== "test" && String(process.env.WHATSAPP_DISPATCH_WORKER || "").toLowerCase() !== "false") {
+  try {
+    require("./services/bookingDispatchJobs").startWorker();
+  } catch (err) {
+    console.error("Dispatch worker failed to start (bookings unaffected):", err?.message || err);
+  }
+}
+
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled promise rejection (server kept alive):", reason);
 });
@@ -376,6 +388,10 @@ server.on("error", (err) => {
 
 const shutdown = (signal) => {
   console.log(`Received ${signal} — closing server gracefully...`);
+  try {
+    require("./services/bookingDispatchJobs").stopWorker();
+  } catch {
+  }
   server.close(() => {
     mongoose.connection.close(false).finally(() => process.exit(0));
   });

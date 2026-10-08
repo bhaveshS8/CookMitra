@@ -169,6 +169,11 @@ const parseInboundAction = (msg) => {
   };
 };
 
+// Full pending list for a cook replying by text (no booking id).
+// Deliberately uncapped: every live request must be visible/countable.
+// Callers truncate only the displayed lines (WhatsApp text limit), never
+// the underlying list.
+const PENDING_FETCH_BOUND = 200;
 const loadPendingForCook = async (cookId) => {
   try {
     const now = new Date();
@@ -180,7 +185,7 @@ const loadPendingForCook = async (cookId) => {
       })
         .select("_id serviceType date startTime endTime status")
         .sort({ requestExpiresAt: 1 })
-        .limit(5),
+        .limit(PENDING_FETCH_BOUND),
       Booking.find({
         cook: null,
         status: "requested",
@@ -189,7 +194,7 @@ const loadPendingForCook = async (cookId) => {
       })
         .select("_id serviceType date startTime endTime status")
         .sort({ requestExpiresAt: 1 })
-        .limit(5),
+        .limit(PENDING_FETCH_BOUND),
     ]);
     const seen = new Set();
     const merged = [];
@@ -199,7 +204,7 @@ const loadPendingForCook = async (cookId) => {
       seen.add(key);
       merged.push(b);
     }
-    return merged.slice(0, 5);
+    return merged;
   } catch {
     return [];
   }
@@ -367,6 +372,75 @@ const rejectViaWhatsApp = async (cook, booking, senderE164) => {
   return { ok: true };
 };
 
+// Delivery receipts (Meta `statuses` callbacks). Maps Meta's per-message
+// lifecycle onto the matching whatsappDispatch entry by Meta message id:
+// sent -> delivered -> read, or failed (terminal, with upstream code).
+// Advances monotonically so out-of-order/duplicate callbacks can never
+// regress or duplicate visible state. Unknown ids (customer messages,
+// confirmations, other templates) are ignored — only fan-out entries with
+// a persisted messageId are tracked. Never throws.
+const DELIVERY_RANK = { sent: 1, delivered: 2, read: 3, deleted: 3, failed: 4 };
+const KNOWN_DELIVERY = new Set(Object.keys(DELIVERY_RANK));
+
+const sanitizeUpstreamError = (status) => {
+  try {
+    const errs = Array.isArray(status?.errors) ? status.errors : [];
+    const first = errs[0] || {};
+    const code = first.code != null ? String(first.code) : "";
+    const title = String(first.title || first.message || "").slice(0, 120);
+    const detail = [code && `code=${code}`, title].filter(Boolean).join(" ");
+    return detail.slice(0, 200);
+  } catch {
+    return "";
+  }
+};
+
+const applyDeliveryStatus = async (st) => {
+  try {
+    const wamid = String(st?.id || "").trim();
+    const state = String(st?.status || "").trim().toLowerCase();
+    if (!wamid || !KNOWN_DELIVERY.has(state)) return { ok: false, reason: "unrecognized" };
+    let doc = null;
+    try {
+      doc = await Booking.findOne({ "whatsappDispatch.messageId": wamid }).select(
+        "_id whatsappDispatch"
+      );
+    } catch {
+      return { ok: false, reason: "database_error" };
+    }
+    if (!doc) return { ok: false, reason: "unknown-message" };
+    const entry = (doc.whatsappDispatch || []).find((e) => String(e?.messageId || "") === wamid);
+    if (!entry) return { ok: false, reason: "unknown-message" };
+    const prevRank = DELIVERY_RANK[String(entry.deliveryStatus || "").toLowerCase()] || 0;
+    const nextRank = DELIVERY_RANK[state];
+    const upstream = state === "failed" ? sanitizeUpstreamError(st) : "";
+    if (state !== "failed" && nextRank <= prevRank) {
+      return { ok: true, skipped: true, reason: "stale" };
+    }
+    try {
+      const set = {
+        "whatsappDispatch.$.deliveryStatus": state,
+        "whatsappDispatch.$.deliveryUpdatedAt": new Date(),
+      };
+      if (upstream) set["whatsappDispatch.$.error"] = upstream;
+      await Booking.updateOne(
+        { _id: doc._id, "whatsappDispatch.messageId": wamid },
+        { $set: set }
+      );
+    } catch {
+      return { ok: false, reason: "database_error" };
+    }
+    if (state === "failed") {
+      console.warn(
+        `[whatsapp:delivery] booking=${doc._id} state=failed upstream=${upstream || "unknown"}`
+      );
+    }
+    return { ok: true, state };
+  } catch {
+    return { ok: false, reason: "handler-error" };
+  }
+};
+
 const handleOneMessage = async (msg) => {
   try {
     const from = String(msg?.from || "");
@@ -404,12 +478,19 @@ const handleOneMessage = async (msg) => {
         return { ok: false, reason: "none-pending" };
       }
       if (pending.length > 1) {
-        const list = pending
+        // WhatsApp text messages cap at 4096 chars: show the first lines
+        // plus an exact remainder count — the total is never understated.
+        const SHOWN = 10;
+        const shown = pending.slice(0, SHOWN);
+        const list = shown
           .map((b) => `• ${bookingLine(b)}`)
           .join("\n");
+        const more = pending.length > shown.length
+          ? `\n…and ${pending.length - shown.length} more.`
+          : "";
         await reply(
           senderE164,
-          `You have ${pending.length} pending requests — please tap Accept/Decline on the exact request message:\n${list}`
+          `You have ${pending.length} pending requests — please tap Accept/Decline on the exact request message:\n${list}${more}`
         );
         return { ok: false, reason: "ambiguous" };
       }
@@ -447,11 +528,15 @@ exports.handleInbound = async (req, res) => {
       return res.status(200).json({ received: false, reason: "bad-json" });
     }
     const messages = [];
+    const statuses = [];
     for (const entry of event?.entry || []) {
       for (const change of entry?.changes || []) {
         const value = change?.value || {};
         for (const msg of value?.messages || []) {
           if (msg?.from) messages.push(msg);
+        }
+        for (const st of value?.statuses || []) {
+          if (st?.id) statuses.push(st);
         }
       }
     }
@@ -464,15 +549,23 @@ exports.handleInbound = async (req, res) => {
       // eslint-disable-next-line no-await-in-loop
       results.push(await handleOneMessage(msg));
     }
+    let statusUpdates = 0;
+    const statusReasons = [];
+    for (const st of statuses) {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await applyDeliveryStatus(st);
+      if (r.ok && !r.skipped) statusUpdates += 1;
+      statusReasons.push(r.state || r.reason || "ok");
+    }
     const handled = results.filter((r) => r.ok).length;
     console.log(
-      `[whatsapp:webhook] messages=${messages.length} handled=${handled} reasons=${results.map((r) => r.reason || "ok").join(",")}`
+      `[whatsapp:webhook] messages=${messages.length} handled=${handled} reasons=${results.map((r) => r.reason || "ok").join(",")} statuses=${statuses.length} updated=${statusUpdates} states=${statusReasons.join(",")}`
     );
-    return res.status(200).json({ received: true, handled });
+    return res.status(200).json({ received: true, handled, statusUpdates });
   } catch (err) {
     console.warn("WhatsApp webhook error:", err?.message || err);
     return res.status(200).json({ received: true, handled: 0 });
   }
 };
 
-exports.__test = { verifySignature, parseInboundAction, findCookByWaId, handleOneMessage };
+exports.__test = { verifySignature, parseInboundAction, findCookByWaId, handleOneMessage, applyDeliveryStatus };

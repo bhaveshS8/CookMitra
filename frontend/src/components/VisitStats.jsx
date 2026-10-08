@@ -24,7 +24,7 @@ const VisitStats = () => {
         <div>
           <h2 style={{ fontSize: "1.4rem", margin: 0 }}>Site Visits</h2>
           <p style={{ color: "var(--slate-500)", margin: "0.25rem 0 0", fontSize: "0.9rem" }}>
-            One count per browser-tab session · bots excluded · days in IST · cities are approximate (IP-based).
+            One count per browser-tab session · bots excluded · days in IST · locations / areas are approximate (IP-based).
           </p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
@@ -94,19 +94,26 @@ const VisitStats = () => {
       </div>
 
       <div style={{ background: "white", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-subtle)", padding: "1.25rem" }}>
-        <h3 style={{ fontSize: "1rem", margin: "0 0 0.75rem" }}>Top cities · last {range} days</h3>
+        <h3 style={{ fontSize: "1rem", margin: "0 0 0.75rem" }}>Top locations / areas · last {range} days</h3>
         {topCities.length === 0 ? (
-          <p style={{ color: "var(--slate-500)", margin: 0 }}>No city data yet.</p>
+          <p style={{ color: "var(--slate-500)", margin: 0 }}>No location data yet.</p>
         ) : (
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {topCities.map((c) => {
-              const label = [c.city, c.state].filter(Boolean).join(", ") || "Unknown";
+              const exact = [c.area, c.city, c.state, c.country].filter(Boolean).join(", ") || "Unknown";
               return (
                 <li
-                  key={`${c.city}|${c.state}`}
+                  key={`${c.area || ""}|${c.city || ""}|${c.state || ""}|${c.country || ""}`}
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", padding: "0.5rem 0", borderBottom: "1px solid var(--slate-100)", fontSize: "0.9rem" }}
                 >
-                  <span>{label}</span>
+                  <span>
+                    <span style={{ display: "block" }}>{exact}</span>
+                    {c.area && c.city ? (
+                      <span style={{ display: "block", color: "var(--slate-500)", fontSize: "0.8rem" }}>
+                        {c.area} · {c.city}
+                      </span>
+                    ) : null}
+                  </span>
                   <strong style={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
                     {Number(c.visits).toLocaleString("en-IN")} visits
                   </strong>

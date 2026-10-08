@@ -8,8 +8,6 @@ import { useShowToast } from "../store/hooks";
 import { formatCurrency, formatDate, formatTimeRange12, playAlarmSound } from "../utils/constants";
 import AddCookModal from "../components/AddCookModal";
 import BookingRequestModal from "../components/BookingRequestModal";
-import AdminDocViewer from "../components/AdminDocViewer";
-import AdminDocUpload from "../components/AdminDocUpload";
 import CouponManagement from "../components/CouponManagement";
 import VisitStats from "../components/VisitStats";
 import AnalyticsPanel from "../components/AnalyticsPanel";
@@ -52,7 +50,6 @@ import {
   Banknote,
   XCircle,
   BarChart3,
-  Upload,
 } from "lucide-react";
 import { resolveFileUrl } from "../components/CookDocUploads";
 
@@ -294,13 +291,6 @@ const CookManagement = () => {
                     <span className="acc-stat-value">{cook.experienceYears} yrs</span>
                   </span>
                 </div>
-                <div className="acc-stat acc-stat-rate">
-                  <span className="acc-stat-ico"><Wallet size={14} /></span>
-                  <span className="acc-stat-body">
-                    <span className="acc-stat-label">Rate</span>
-                    <span className="acc-stat-value">{formatCurrency(cook.rate)}/hr</span>
-                  </span>
-                </div>
                 {cook.serviceArea && (
                   <div className="acc-stat acc-stat-area">
                     <span className="acc-stat-ico"><MapPin size={14} /></span>
@@ -336,38 +326,6 @@ const CookManagement = () => {
                   <p className="acc-bio-text">{cook.skills || cook.bio}</p>
                 </div>
               )}
-
-              <div className="acc-section acc-docs-section">
-                <span className="acc-section-label">
-                  <ShieldCheck size={13} />
-                  Verification documents
-                </span>
-                <AdminDocViewer
-                  docs={[
-                    { label: "Aadhaar Card", url: cook.aadharCardUrl },
-                    { label: "PAN Card", url: cook.panCardUrl },
-                    { label: "Profile Photo", url: cook.photoUrl },
-                    ...(cook.documents || []).map((d) => ({
-                      label: d.label || "Document",
-                      url: d.url,
-                    })),
-                  ]}
-                />
-              </div>
-
-              <details className="acc-upload-zone">
-                <summary className="acc-upload-head">
-                  <Upload size={13} />
-                  <span>Attach additional document</span>
-                </summary>
-                <div className="acc-upload-body">
-                  <AdminDocUpload
-                    cookId={cook._id}
-                    current={cook}
-                    onUploaded={refetch}
-                  />
-                </div>
-              </details>
 
               <footer className="acc-actions">
                 <div className="acc-actions-main">

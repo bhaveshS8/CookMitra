@@ -249,6 +249,11 @@ const bookingSchema = new mongoose.Schema(
           sentAt: { type: Date },
           lastAttemptAt: { type: Date },
           error: { type: String, default: "", trim: true, maxlength: 500 },
+          // Downstream delivery truth from Meta `statuses` callbacks
+          // (sent -> delivered -> read, or failed). `sent` here means Meta
+          // accepted the message — NOT that the handset displayed it.
+          deliveryStatus: { type: String, default: "", trim: true, maxlength: 20 },
+          deliveryUpdatedAt: { type: Date },
         },
       ],
       default: [],

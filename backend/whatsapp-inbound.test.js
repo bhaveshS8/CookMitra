@@ -275,6 +275,90 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       check("lost race replies current truth", r.statusCode === 200 && /already accepted/.test(cookTexts), cookTexts.slice(0, 80));
     }
 
+    // ---- delivery receipts (Meta statuses callbacks) ----
+    const WAMID = "wamid.delivery1";
+    const mkDispatchDoc = (entry = {}) => mkBooking({
+      whatsappDispatch: [{
+        cook: COOK_ID, kind: "request", status: "sent", messageId: WAMID, attempts: 1, sentAt: new Date(), ...entry,
+      }],
+    });
+    const mockDispatchStore = (doc) => {
+      Booking.findOne = (filter) => {
+        const id = filter?.["whatsappDispatch.messageId"];
+        const hit = id && (doc.whatsappDispatch || []).some((e) => e.messageId === id);
+        return { select: async () => (hit ? doc : null) };
+      };
+      Booking.updateOne = async (filter, update) => {
+        const id = filter?.["whatsappDispatch.messageId"];
+        const e = (doc.whatsappDispatch || []).find((x) => x.messageId === id);
+        if (!e) return { modifiedCount: 0 };
+        for (const [k, v] of Object.entries(update?.$set || {})) {
+          const m = k.match(/^whatsappDispatch\.\$\.(.+)$/);
+          if (m) e[m[1]] = v;
+        }
+        return { modifiedCount: 1 };
+      };
+    };
+    const statusBody = (arr) =>
+      Buffer.from(JSON.stringify({ object: "whatsapp_business_account", entry: [{ changes: [{ value: { statuses: arr } }] }] }));
+    const st = (id, status, errors) => ({ id, status, timestamp: String(Date.now()), recipient_id: "919876543210", ...(errors ? { errors } : {}) });
+
+    {
+      const doc = mkDispatchDoc();
+      mockDispatchStore(doc);
+      const raw = statusBody([st(WAMID, "delivered")]);
+      const r2 = await postInbound(raw, sign(raw));
+      const e = doc.whatsappDispatch[0];
+      check("delivered advances sent entry", r2.statusCode === 200 && r2.body?.statusUpdates === 1 && e.deliveryStatus === "delivered" && e.deliveryUpdatedAt instanceof Date, `${r2.body?.statusUpdates}/${e.deliveryStatus}`);
+    }
+
+    {
+      const doc = mkDispatchDoc({ deliveryStatus: "delivered" });
+      mockDispatchStore(doc);
+      const raw = statusBody([st(WAMID, "read")]);
+      const r = await postInbound(raw, sign(raw));
+      check("read advances delivered entry", r.body?.statusUpdates === 1 && doc.whatsappDispatch[0].deliveryStatus === "read", doc.whatsappDispatch[0].deliveryStatus);
+    }
+
+    {
+      const doc = mkDispatchDoc({ deliveryStatus: "read" });
+      mockDispatchStore(doc);
+      let writes = 0;
+      const realUpdate = Booking.updateOne;
+      Booking.updateOne = async (...a) => { writes += 1; return realUpdate(...a); };
+      const raw = statusBody([st(WAMID, "delivered")]);
+      const r = await postInbound(raw, sign(raw));
+      Booking.updateOne = realUpdate;
+      check("stale delivered-after-read ignored", doc.whatsappDispatch[0].deliveryStatus === "read", `${doc.whatsappDispatch[0].deliveryStatus} writes=${writes}`);
+      void r;
+    }
+
+    {
+      const doc = mkDispatchDoc();
+      mockDispatchStore(doc);
+      const raw = statusBody([st(WAMID, "failed", [{ code: 131026, title: "Recipient not on WhatsApp" }])]);
+      const r = await postInbound(raw, sign(raw));
+      const e = doc.whatsappDispatch[0];
+      check("failed records upstream code", r.body?.statusUpdates === 1 && e.deliveryStatus === "failed" && /131026/.test(e.error || ""), `${e.deliveryStatus}/${e.error}`);
+    }
+
+    {
+      mockDispatchStore(mkDispatchDoc());
+      const raw = statusBody([st("wamid.unknown", "delivered")]);
+      const r = await postInbound(raw, sign(raw));
+      check("unknown wamid ignored, still 200", r.statusCode === 200 && r.body?.statusUpdates === 0, JSON.stringify(r.body));
+    }
+
+    {
+      const doc = mkDispatchDoc();
+      mockDispatchStore(doc);
+      let wrote = false;
+      Booking.updateOne = async () => { wrote = true; return { modifiedCount: 0 }; };
+      const raw = statusBody([st(WAMID, "delivered")]);
+      const r = await postInbound(raw, "sha256=deadbeef");
+      check("forged statuses -> 401, nothing written", r.statusCode === 401 && wrote === false && !doc.whatsappDispatch[0].deliveryStatus, `s=${r.statusCode} wrote=${wrote}`);
+    }
+
     console.log(`\n${passes} passed, ${failures} failed`);
     process.exit(failures === 0 ? 0 : 1);
   } catch (err) {

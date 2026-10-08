@@ -189,9 +189,10 @@ export const fetchIpLocation = async () => {
       const d = await r.json();
       if (d && d.success !== false) {
         const city = d.city || "";
+        const area = d.district || d.suburb || d.locality || "";
         const state = d.region || "";
         const country = d.country || "";
-        if (city || state) return { city, state, country, label: formatLocationLabel({ city, state }) };
+        if (city || state || area) return { city, area, state, country, label: formatLocationLabel({ area, city, state }) };
       }
     }
   } catch {
@@ -201,10 +202,11 @@ export const fetchIpLocation = async () => {
     if (!r2.ok) return null;
     const d2 = await r2.json();
     const city = d2.city || "";
+    const area = d2.district || d2.suburb || d2.locality || "";
     const state = d2.region || "";
     const country = d2.country || d2.country_name || "";
-    if (!city && !state) return null;
-    return { city, state, country, label: formatLocationLabel({ city, state }) };
+    if (!city && !state && !area) return null;
+    return { city, area, state, country, label: formatLocationLabel({ area, city, state }) };
   } catch {
     return null;
   }

@@ -4,8 +4,8 @@ import { useDispatch } from "react-redux";
 import { updateUser } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
 import { getPhoneCore, validatePhone } from "../utils/authValidation";
-import CookDocUploads from "./CookDocUploads";
-import { ChefHat, AlertCircle, Phone } from "lucide-react";
+import { resolveFileUrl } from "./CookDocUploads";
+import { ChefHat, AlertCircle, Phone, Camera, Upload, X } from "lucide-react";
 
 const DEFAULT_SERVICE_TYPES = ["cook_for_me"];
 
@@ -24,16 +24,41 @@ const CookProfileForm = ({
     specialties: "",
     serviceArea: "",
     address: "",
-    documents: [],
-    aadharCardUrl: "",
-    panCardUrl: "",
     photoUrl: "",
   });
   const [existing, setExisting] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [uploadingDocs, setUploadingDocs] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [error, setError] = useState("");
+
+  const handlePhotoUpload = async (file) => {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      const msg = "File too large — photo must be 2MB or less";
+      setError(msg);
+      showToast(msg, "error");
+      return;
+    }
+    setUploadingPhoto(true);
+    try {
+      const fd = new FormData();
+      fd.append("photo", file);
+      const res = await API.post("/cooks/upload-docs", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      const url = res.data?.photoUrl || "";
+      if (!url) throw new Error("Upload failed — no file URL returned");
+      setFormData((prev) => ({ ...prev, photoUrl: url }));
+      showToast("Photo uploaded successfully!", "success");
+    } catch (err) {
+      const msg = err.response?.data?.message || "Photo upload failed (JPG/PNG/WEBP, max 2MB)";
+      setError(msg);
+      showToast(msg, "error");
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -60,9 +85,6 @@ const CookProfileForm = ({
           specialties: (res.data.specialties || []).join(", "),
           serviceArea: res.data.serviceArea || "",
           address: res.data.address || "",
-          documents: res.data.documents || [],
-          aadharCardUrl: res.data.aadharCardUrl || "",
-          panCardUrl: res.data.panCardUrl || "",
           photoUrl: res.data.photoUrl || "",
         });
       } catch (err) {
@@ -109,18 +131,6 @@ const CookProfileForm = ({
       showToast(mobileErr, "error");
       return;
     }
-    if (!formData.aadharCardUrl) {
-      const msg = "Please upload your Aadhaar card";
-      setError(msg);
-      showToast(msg, "error");
-      return;
-    }
-    if (!formData.panCardUrl) {
-      const msg = "Please upload your PAN card";
-      setError(msg);
-      showToast(msg, "error");
-      return;
-    }
     setSaving(true);
     setError("");
 
@@ -141,12 +151,7 @@ const CookProfileForm = ({
       serviceTypes: DEFAULT_SERVICE_TYPES,
       serviceArea: formData.serviceArea,
       address: formData.address,
-      aadharCardUrl: formData.aadharCardUrl,
-      panCardUrl: formData.panCardUrl,
       photoUrl: formData.photoUrl || "",
-      documents: (formData.documents || [])
-        .map((d) => ({ label: (d.label || "").trim(), url: (d.url || "").trim() }))
-        .filter((d) => d.label || d.url),
     };
 
     try {
@@ -315,78 +320,59 @@ const CookProfileForm = ({
           />
         </div>
 
-        <CookDocUploads
-          aadharCardUrl={formData.aadharCardUrl}
-          panCardUrl={formData.panCardUrl}
-          photoUrl={formData.photoUrl}
-          onChange={(key, url) => setFormData((prev) => ({ ...prev, [key]: url }))}
-          onError={(msg) => setError(msg)}
-          onUploadingChange={setUploadingDocs}
-        />
-
         <div className="cook-field">
           <label>
-            Additional Documents (optional, visible to admin)
+            <Camera size={15} style={{ verticalAlign: "-2px" }} /> Profile Photo{" "}
+            <span className="cook-optional">(optional)</span>
           </label>
-          {(formData.documents || []).map((doc, i) => (
-            <div key={i} className="cook-doc-grid">
-              <input
-                className="form-control"
-                value={doc.label || ""}
-                onChange={(e) => {
-                  const docs = [...(formData.documents || [])];
-                  docs[i] = { ...docs[i], label: e.target.value };
-                  setFormData((prev) => ({ ...prev, documents: docs }));
-                }}
-                placeholder="e.g. Aadhaar Card"
-              />
-              <input
-                className="form-control"
-                value={doc.url || ""}
-                onChange={(e) => {
-                  const docs = [...(formData.documents || [])];
-                  docs[i] = { ...docs[i], url: e.target.value };
-                  setFormData((prev) => ({ ...prev, documents: docs }));
-                }}
-                placeholder="Document link (https://...)"
-              />
-              <button
-                type="button"
-                className="btn btn-danger-outline btn-sm"
-                onClick={() =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    documents: (prev.documents || []).filter((_, j) => j !== i),
-                  }))
-                }
-              >
-                Remove
-              </button>
+          <div className="cook-doc-card">
+            <div className="cook-doc-row">
+              {formData.photoUrl && (
+                <img
+                  src={resolveFileUrl(formData.photoUrl)}
+                  alt="Cook profile"
+                  className="cook-doc-photo"
+                />
+              )}
+              {formData.photoUrl ? (
+                <button
+                  type="button"
+                  className="btn btn-danger-outline btn-sm"
+                  onClick={() =>
+                    setFormData((prev) => ({ ...prev, photoUrl: "" }))
+                  }
+                >
+                  <X size={14} /> Remove
+                </button>
+              ) : (
+                <label className="btn btn-outline btn-sm cook-file-btn">
+                  <Upload size={15} />{" "}
+                  {uploadingPhoto ? "Uploading..." : "Upload Photo (JPG/PNG/WEBP, max 2MB)"}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    hidden
+                    disabled={uploadingPhoto}
+                    onChange={(e) => {
+                      handlePhotoUpload(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+              )}
             </div>
-          ))}
-        <button
-          type="button"
-          className="btn btn-outline btn-sm"
-          onClick={() =>
-            setFormData((prev) => ({
-              ...prev,
-              documents: [...(prev.documents || []), { label: "", url: "" }],
-            }))
-          }
-        >
-          + Add Document
-        </button>
+          </div>
         </div>
 
         <button
           type="submit"
           className="btn btn-primary btn-block btn-lg cook-form-submit"
-          disabled={saving || uploadingDocs}
+          disabled={saving || uploadingPhoto}
         >
           {saving
             ? "Saving Details..."
-            : uploadingDocs
-            ? "Uploading files..."
+            : uploadingPhoto
+            ? "Uploading photo..."
             : existing
             ? "Update Profile"
             : "Submit for Approval"}

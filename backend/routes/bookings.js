@@ -16,6 +16,7 @@ const {
   getAdminBookings,
   getBookingById,
   getEligibleCooksForBooking,
+  getDispatchJobs,
   acceptBooking,
   rejectBooking,
   completeBooking,
@@ -89,6 +90,8 @@ router.get("/cook", auth, authorize("cook"), getCookBookings);
 router.get("/cook/requests", auth, authorize("cook"), getCookRequests);
 router.get("/cook/schedule", auth, authorize("cook"), getCookSchedule);
 router.get("/:id/eligible-cooks", auth, authorize("admin", "cook"), getEligibleCooksForBooking);
+// Registered before "/:id" so the literal path is not captured as an id.
+router.get("/dispatch-jobs", auth, authorize("admin"), getDispatchJobs);
 router.get("/:id", auth, getBookingById);
 router.get("/", auth, authorize("admin"), getAdminBookings);
 router.patch("/:id/accept", auth, authorize("cook", "admin"), acceptBooking);

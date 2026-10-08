@@ -104,6 +104,7 @@ const {
   PAYMENT_WINDOW_MS,
 } = require("../services/bookingTransitions");
 const { notifyWhatsAppEvent, fanOutBookingRequest } = require("../services/whatsappDispatch");
+const dispatchJobs = require("../services/bookingDispatchJobs");
 const {
   acceptBookingForCook,
   rejectBookingForCook,
@@ -534,40 +535,84 @@ const pickBookingCustomerFields = (obj) => {
   return out;
 };
 
-const findEligibleCooks = async ({ date, startTime, endTime, serviceType, excludeCookIds = [] }) => {
+// When `diagnostics` is true, returns { eligible, examined, excluded }
+// where `excluded` counts cooks dropped at each filter stage (no personal
+// data — counts only). Default return is the plain eligible array, so all
+// existing callers are unaffected.
+const findEligibleCooks = async ({ date, startTime, endTime, serviceType, excludeCookIds = [], diagnostics = false }) => {
   const excluded = new Set((excludeCookIds || []).map((id) => String(id)));
+  const diag = {
+    examined: 0,
+    excludedByRequester: 0,
+    wrongService: 0,
+    missingAccount: 0,
+    suspended: 0,
+    unavailable: 0,
+    noWindow: 0,
+    overlap: 0,
+  };
+  const done = (eligible) =>
+    diagnostics
+      ? {
+          eligible,
+          examined: diag.examined,
+          excluded: {
+            excludedByRequester: diag.excludedByRequester,
+            wrongService: diag.wrongService,
+            missingAccount: diag.missingAccount,
+            suspended: diag.suspended,
+            unavailable: diag.unavailable,
+            noWindow: diag.noWindow,
+            overlap: diag.overlap,
+          },
+        }
+      : eligible;
   let profiles = [];
   try {
     profiles = await CookProfile.find({ approvalStatus: "approved" })
       .populate("user", "name status")
       .lean();
   } catch {
-    return [];
+    return done([]);
   }
+  diag.examined = (profiles || []).length;
   const live = [];
   for (const p of profiles || []) {
     const userId = p?.user?._id || p?.user;
-    if (!userId) continue;
-    if (excluded.has(String(userId))) continue;
+    if (!userId) {
+      diag.missingAccount += 1;
+      continue;
+    }
+    if (excluded.has(String(userId))) {
+      diag.excludedByRequester += 1;
+      continue;
+    }
     if (
       Array.isArray(p.serviceTypes) &&
       p.serviceTypes.length > 0 &&
       serviceType &&
       !p.serviceTypes.includes(serviceType)
     ) {
+      diag.wrongService += 1;
       continue;
     }
-    if (!p.user || p.user.status === "suspended") continue;
+    if (!p.user || p.user.status === "suspended") {
+      diag[!p.user ? "missingAccount" : "suspended"] += 1;
+      continue;
+    }
     let available = false;
     try {
       available = await resolveCookAvailability(p);
     } catch {
       available = false;
     }
-    if (!available) continue;
+    if (!available) {
+      diag.unavailable += 1;
+      continue;
+    }
     live.push({ profile: p, userId: String(userId) });
   }
-  if (!live.length) return [];
+  if (!live.length) return done([]);
   let byCook = new Map();
   try {
     const { start: dayStart, end: dayEnd } = dayBounds(date);
@@ -594,13 +639,36 @@ const findEligibleCooks = async ({ date, startTime, endTime, serviceType, exclud
     } catch {
       windows = [];
     }
-    if (!findContainingWindow(windows, startTime, endTime)) continue;
-    if (findOverlapBooking(byCook.get(userId) || [], startTime, endTime)) continue;
+    if (!findContainingWindow(windows, startTime, endTime)) {
+      diag.noWindow += 1;
+      continue;
+    }
+    if (findOverlapBooking(byCook.get(userId) || [], startTime, endTime)) {
+      diag.overlap += 1;
+      continue;
+    }
     eligible.push({ profile, userId });
   }
-  return eligible;
+  return done(eligible);
 };
 exports.findEligibleCooks = findEligibleCooks;
+
+// Admin diagnostics for the durable WhatsApp dispatch outbox.
+// GET /api/bookings/dispatch-jobs?status=failed&bookingId=<id>&limit=20&skip=0
+// Sanitized: job ids, booking ids, counters, timestamps, reason codes only.
+exports.getDispatchJobs = async (req, res, next) => {
+  try {
+    const { jobs, total } = await dispatchJobs.listJobs({
+      status: req.query.status,
+      bookingId: req.query.bookingId,
+      limit: req.query.limit,
+      skip: req.query.skip,
+    });
+    return res.json({ success: true, jobs, total });
+  } catch (error) {
+    next(error);
+  }
+};
 
 exports.getEligibleCooksForBooking = async (req, res, next) => {
   try {
@@ -660,6 +728,13 @@ exports.retryCookWhatsApp = async (req, res, next) => {
     } catch {
     }
     const result = await fanOutBookingRequest(booking, targets, { customerName });
+    // Keep the durable job record in sync with manual re-notifies so the
+    // admin dispatch-jobs view reflects the latest outcome. Best-effort:
+    // never changes the response contract below.
+    try {
+      await dispatchJobs.recordManualAttempt(booking._id, result);
+    } catch {
+    }
     const fresh = (await Booking.findById(req.params.id)) || booking;
     const dispatch = Array.isArray(fresh.whatsappDispatch)
       ? fresh.whatsappDispatch.map((e) => ({
@@ -668,6 +743,8 @@ exports.retryCookWhatsApp = async (req, res, next) => {
           status: e.status,
           attempts: e.attempts,
           error: e.error || undefined,
+          deliveryStatus: e.deliveryStatus || undefined,
+          deliveryUpdatedAt: e.deliveryUpdatedAt || undefined,
         }))
       : [];
     return res.json({ success: true, ok: result?.ok === true, results: result?.results || [], dispatch });
@@ -1115,14 +1192,13 @@ exports.createBooking = async (req, res, next) => {
     }
 
     notifyWhatsApp("request", booking, { customerName: req.user.name });
-    // WhatsApp is an additional channel: same eligible cooks, Marathi
-    // interactive request, per-cook delivery state. Fire-and-forget —
-    // a Meta failure never fails the booking itself.
+    // Durable cook fan-out: persist a dispatch job BEFORE responding so a
+    // restart can never silently lose the WhatsApp work (the old unawaited
+    // fan-out had no durable trace). The worker picks the job up within
+    // seconds; a Meta failure still never fails the booking itself.
     try {
-      notifyWhatsAppEvent("booking.requested", booking, {
-        eligibleCooks: whatsappCandidates,
-        customerName: req.user.name,
-      });
+      await dispatchJobs.enqueueBookingRequestJob(booking._id);
+      dispatchJobs.kickWorker();
     } catch {
     }
 

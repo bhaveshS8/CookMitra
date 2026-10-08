@@ -133,6 +133,7 @@ export const trackSiteVisit = (path = "/") => {
             sid,
             path,
             city: loc?.city || "",
+            area: loc?.area || "",
             state: loc?.state || "",
             country: loc?.country || "",
           })

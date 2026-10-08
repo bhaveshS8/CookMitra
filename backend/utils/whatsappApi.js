@@ -63,6 +63,20 @@ const postToMessages = async (payload) => {
       const fbCode = data?.error?.code;
       const fbSubcode = data?.error?.error_subcode;
       const fbMessage = data?.error?.message || `http-${res.status}`;
+      // Honor Meta 429 Retry-After so the dispatch worker backs off for
+      // as long as Meta asks instead of hammering the rate limit.
+      let retryAfterMs = null;
+      try {
+        const raw = res.headers && typeof res.headers.get === "function"
+          ? res.headers.get("retry-after")
+          : null;
+        const secs = Number(raw);
+        if (res.status === 429 && Number.isFinite(secs) && secs >= 0) {
+          retryAfterMs = Math.min(secs * 1000, 15 * 60 * 1000);
+        }
+      } catch {
+        retryAfterMs = null;
+      }
       // 401 / code 190 = Meta rejected WHATSAPP_TOKEN (expired temporary
       // token, revoked system-user token, or token from a different app than
       // WHATSAPP_PHONE_NUMBER_ID). Surface an actionable hint so server logs
@@ -79,6 +93,7 @@ const postToMessages = async (payload) => {
         error: `${fbMessage}${hint}`,
         code: fbCode ?? null,
         status: res.status,
+        ...(retryAfterMs != null ? { retryAfterMs } : {}),
       };
     }
     return { ok: true, id: data?.messages?.[0]?.id || null };
