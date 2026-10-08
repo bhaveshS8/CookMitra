@@ -17,6 +17,7 @@ const { normalizeIndianMobile } = require("../utils/whatsapp");
 const {
   isWhatsAppEnabled,
   sendInteractiveButtons,
+  sendTemplateMessage,
   sendWhatsAppText,
   acceptPayload,
   rejectPayload,
@@ -197,18 +198,123 @@ const isRetryableResult = (res) => {
   return false;
 };
 
-// Send one Marathi booking-request with interactive Accept/Decline buttons.
-// The message body is built ONLY by buildBookingRequestMessage() from named
-// live fields — no Meta template is sent for requests, because the approved
-// template's {{n}} bindings render shifted values (service in the date
-// line, booking ref in the weekday line, ...). Only a Meta-accepted button
-// message marks delivery `sent`; anything else stays retryable.
-const sendRequestToCook = async (booking, cookId, cookName, cookPhone, customerName) => {
+// Send one Marathi booking-request with Accept/Decline buttons.
+// Cold-start path first: when WHATSAPP_REQUEST_TEMPLATE(_FOR_COOK) is set,
+// the approved template (params built ONLY by templateParamsForBooking()
+// in example order [customer, date, weekday, time, duration, address]) is
+// tried first — templates are deliverable outside the 24h customer-service
+// window where interactive free-form fails async with 131047. On template
+// failure/misconfiguration it falls back to the interactive button message
+// built ONLY by buildBookingRequestMessage() from named live fields. Only
+// a Meta-accepted message marks delivery `sent`; anything else stays
+// retryable.
+const templateParamsForBooking = (booking, customerName) => {
+  // Param order matches the approved `new_booking_request` (mr) example:
+  // [customer, date dd/mm/yyyy, weekday, time-range, duration-hours, address].
+  // sendTemplateMessage truncates each to 100 chars.
+  try {
+    const d = booking?.date ? new Date(booking.date) : null;
+    let dateStr = "";
+    try {
+      if (d && !Number.isNaN(d.getTime())) {
+        const parts = new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Kolkata",
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        }).format(d);
+        dateStr = String(parts || "");
+      }
+    } catch {
+      dateStr = "";
+    }
+    const start = String(booking?.startTime || "").slice(0, 5);
+    const end = String(booking?.endTime || "").slice(0, 5);
+    const timeRange = start && end ? `${start} - ${end}` : start || end || "";
+    const duration = booking?.durationHours != null ? String(booking.durationHours) : "";
+    const address = String(booking?.address || "").trim();
+    let weekday = "";
+    try {
+      weekday = marathi.calculateMarathiWeekday(booking?.date) || "";
+    } catch {
+      weekday = "";
+    }
+    if (weekday === "माहिती उपलब्ध नाही") weekday = "";
+    return [
+      String(customerName || "ग्राहक"),
+      dateStr,
+      weekday,
+      timeRange,
+      duration,
+      address,
+    ];
+  } catch {
+    return [String(customerName || "ग्राहक")];
+  }
+};
+
+// A template failure with a client/config status (bad name, bad token)
+// will fail identically for every cook in the fan-out — retrying it per
+// cook wastes one Meta call each. Callers pass a shared `fanoutState`
+// ({ templateBroken: false }); once set, remaining cooks skip straight
+// to interactive. Transient failures (429/5xx/network) never set it.
+const isTemplateConfigFailure = (tpl) => {
+  if (!tpl || tpl.ok) return false;
+  const status = Number(tpl.status);
+  if (status === 401 || status === 403) return true;
+  if (status === 400) return true;
+  return /no-template|template/i.test(String(tpl.error || tpl.reason || ""));
+};
+
+const sendRequestToCook = async (booking, cookId, cookName, cookPhone, customerName, opts = {}) => {
   const bookingId = String(booking._id);
+  const fanoutState = opts.fanoutState || null;
   const log = (msg, extra) =>
     console.warn(`[whatsapp:request] booking=${bookingId} cook=${cookId} ${msg}`, extra || "");
   const bodyText = marathi.buildBookingRequestMessage({ booking, customerName });
   await markDispatch(bookingId, cookId, REQUEST_KIND, { status: "sending", attempts: 1 });
+  // Cold-start path: cooks outside the 24h customer-service window cannot
+  // receive interactive free-form messages (Meta fails async with 131047
+  // Re-engagement). Try the approved template first when configured —
+  // templates are deliverable outside the window and carry Accept/Decline
+  // quick replies. Fall back to interactive for warm cooks / misconfigured
+  // template names so current behavior is preserved.
+  const templateName = String(
+    process.env.WHATSAPP_REQUEST_TEMPLATE ||
+      process.env.WHATSAPP_REQUEST_TEMPLATE_FOR_COOK ||
+      ""
+  ).trim();
+  if (templateName && !(fanoutState && fanoutState.templateBroken)) {
+    const lang = String(
+      process.env.WHATSAPP_REQUEST_TEMPLATE_LANG ||
+        process.env.WHATSAPP_TEMPLATE_LANG_COOK_REQUEST ||
+        "mr"
+    ).trim() || "mr";
+    try {
+      const tpl = await sendTemplateMessage(
+        cookPhone,
+        templateName,
+        lang,
+        templateParamsForBooking(booking, customerName)
+      );
+      if (tpl?.ok) {
+        await markDispatch(bookingId, cookId, REQUEST_KIND, {
+          status: "sent",
+          messageId: tpl.id || "",
+          attempts: 1,
+        });
+        return { ...(tpl || {}), retryable: false };
+      }
+      if (fanoutState && isTemplateConfigFailure(tpl) && !tpl.retryAfterMs) {
+        fanoutState.templateBroken = true;
+        log("template misconfigured, skipping template for remaining cooks", tpl?.error || tpl?.reason || "");
+      } else {
+        log("template request failed, falling back to interactive", tpl?.error || tpl?.reason || "");
+      }
+    } catch (err) {
+      log("template request error, falling back to interactive", err?.message || err);
+    }
+  }
   const raw = await sendInteractiveButtons(cookPhone, bodyText, [
     { id: acceptPayload(bookingId), title: marathi.ACCEPT_BUTTON_TITLE },
     { id: rejectPayload(bookingId), title: marathi.REJECT_BUTTON_TITLE },
@@ -292,6 +398,9 @@ const fanOutBookingRequest = async (booking, eligibleCooks, opts = {}) => {
 
     const phones = await resolveCookPhones(targets.map((c) => c.userId));
     const results = [];
+    // Shared across this fan-out only: avoids one wasted template call per
+    // remaining cook when the template itself is misconfigured.
+    const fanoutState = { templateBroken: false };
     for (const target of targets) {
       const cookId = String(target.userId);
       try {
@@ -331,7 +440,8 @@ const fanOutBookingRequest = async (booking, eligibleCooks, opts = {}) => {
           cookId,
           target?.profile?.user?.name || contact.name || undefined,
           contact.phone,
-          opts.customerName
+          opts.customerName,
+          { fanoutState }
         );
         results.push({ cookId, ...r });
       } catch (err) {

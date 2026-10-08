@@ -103,7 +103,7 @@ const {
   REQUEST_WINDOW_MS,
   PAYMENT_WINDOW_MS,
 } = require("../services/bookingTransitions");
-const { notifyWhatsAppEvent, fanOutBookingRequest } = require("../services/whatsappDispatch");
+const { fanOutBookingRequest } = require("../services/whatsappDispatch");
 const dispatchJobs = require("../services/bookingDispatchJobs");
 const {
   acceptBookingForCook,
@@ -4108,23 +4108,16 @@ exports.payBooking = async (req, res, next) => {
     } catch {
     }
 
+    // Single confirmation fan-out: cook job sheet + customer confirmation
+    // with cook contact (2 Meta calls). Do NOT also emit
+    // notifyWhatsAppEvent("booking.confirmed") here — it sends the customer
+    // a second confirmation message for the same payment (was 3 calls).
     notifyWhatsApp("confirmed", booking, {
       cookName: cookUser?.name,
       cookPhone: cookUser?.phone,
       customerName: customer?.name,
       customerPhone: customer?.phone,
     });
-    // Marathi customer confirmation (accepted -> confirmed, payment
-    // verified). Never carries the service OTP. Fire-and-forget.
-    try {
-      notifyWhatsAppEvent("booking.confirmed", booking, {
-        cookName: cookUser?.name,
-        customerName: customer?.name,
-        customerPhone: customer?.phone,
-        paidAmount: booking?.payment?.paidAmount ?? booking?.amount,
-      });
-    } catch {
-    }
 
     const obj = booking.toObject ? booking.toObject() : booking;
     res.json({ ...obj, cookWhatsappUrl, customerWhatsappUrl });

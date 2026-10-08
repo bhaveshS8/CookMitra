@@ -10,6 +10,17 @@ const TABS = [
   { id: "payouts", label: "Weekly payouts" },
 ];
 
+// One badge style per status family — glanceable, no per-tab hardcoding.
+const statusBadge = (status) => {
+  const s = String(status || "").toLowerCase();
+  if (/reject|fail|invalid|duplicate/.test(s)) return "badge-rose";
+  if (/approv|verif|paid|process|complete|active/.test(s)) return "badge-emerald";
+  if (/hold|review|pending|new|scheduled/.test(s)) return "badge-amber";
+  return "badge-slate";
+};
+
+const prettyStatus = (status) => String(status || "—").replace(/_/g, " ");
+
 const AdminIncentivesPanel = () => {
   const showToast = useShowToast();
   const [tab, setTab] = useState("leads");
@@ -22,16 +33,23 @@ const AdminIncentivesPanel = () => {
   const base = (t) =>
     t === "leads" ? "/admin/cook-incentives/leads" : t === "incentives" ? "/admin/cook-incentives/incentives" : t === "referrals" ? "/admin/cook-incentives/referrals" : "/admin/cook-payouts/payouts";
 
+  // Sequence guard: fast tab switches must not let a stale response
+  // overwrite the current tab's rows.
+  const seqRef = React.useRef(0);
   const load = async (t = tab) => {
+    const seq = seqRef.current + 1;
+    seqRef.current = seq;
     setLoading(true);
     try {
       const res = await API.get(base(t));
+      if (seqRef.current !== seq) return;
       const d = res.data;
       setRows(Array.isArray(d) ? d : d?.items || d?.data || []);
     } catch (err) {
+      if (seqRef.current !== seq) return;
       showToast(err.response?.data?.message || "Could not load data", "error");
     } finally {
-      setLoading(false);
+      if (seqRef.current === seq) setLoading(false);
     }
   };
 
@@ -40,7 +58,13 @@ const AdminIncentivesPanel = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  const act = async (method, url, body) => {
+  // In-flight guard: double-clicking an action fires it only once.
+  const [actingId, setActingId] = useState(null);
+  const actingRef = React.useRef(false);
+  const act = async (method, url, body, rowId) => {
+    if (actingRef.current) return null;
+    actingRef.current = true;
+    if (rowId) setActingId(rowId);
     try {
       const fn = method === "post" ? API.post : API.patch;
       const res = await fn(url, body || {});
@@ -50,7 +74,19 @@ const AdminIncentivesPanel = () => {
     } catch (err) {
       showToast(err.response?.data?.message || "Action failed", "error");
       return null;
+    } finally {
+      actingRef.current = false;
+      if (rowId) setActingId(null);
     }
+  };
+
+  const markPaid = (row) => {
+    // Never auto-invent a reference: the payout trail needs the real id.
+    if (!payRef.trim()) {
+      showToast("Enter the UPI / bank transaction id first", "error");
+      return;
+    }
+    act("post", `/admin/cook-payouts/payouts/${row._id}/pay`, { reference: payRef.trim() }, row._id);
   };
 
   const buildCycle = async (e) => {
@@ -66,77 +102,121 @@ const AdminIncentivesPanel = () => {
     });
   };
 
+  const busy = actingId !== null;
+  const btn = (label, onClick, rowId, kind = "primary") => (
+    <button
+      key={label}
+      className={`btn btn-sm ${kind === "primary" ? "btn-primary" : kind === "danger" ? "btn-danger-outline" : "btn-outline"}`}
+      type="button"
+      disabled={busy}
+      onClick={onClick}
+    >
+      {actingId === rowId ? "Working…" : label}
+    </button>
+  );
+
+  const actionsFor = (r) => {
+    if (tab === "leads") return [
+      btn("Verify", () => act("post", `/admin/cook-incentives/leads/${r._id}/verify`, {}, r._id), r._id),
+      btn("Reject", () => act("post", `/admin/cook-incentives/leads/${r._id}/reject`, { reason: reason || "Invalid lead" }, r._id), r._id, "danger"),
+      btn("Duplicate", () => act("post", `/admin/cook-incentives/leads/${r._id}/duplicate`, { reason: reason || "Duplicate lead" }, r._id), r._id, "ghost"),
+    ];
+    if (tab === "incentives") return [
+      btn("Approve", () => act("post", `/admin/cook-incentives/incentives/${r._id}/approve`, {}, r._id), r._id),
+      btn("Reject", () => act("post", `/admin/cook-incentives/incentives/${r._id}/reject`, { reason: reason || "Not qualified" }, r._id), r._id, "danger"),
+      btn("Hold", () => act("post", `/admin/cook-incentives/incentives/${r._id}/hold`, { reason: reason || "Under review" }, r._id), r._id, "ghost"),
+    ];
+    if (tab === "referrals") return [
+      btn("Approve", () => act("post", `/admin/cook-incentives/referrals/${r._id}/approve`, {}, r._id), r._id),
+    ];
+    return [
+      btn("Approve", () => act("post", `/admin/cook-payouts/payouts/${r._id}/approve`, {}, r._id), r._id),
+      btn("Mark paid", () => markPaid(r), r._id),
+      btn("Hold", () => act("post", `/admin/cook-payouts/payouts/${r._id}/hold`, { reason: reason || "Under verification" }, r._id), r._id, "ghost"),
+    ];
+  };
+
+  const titleFor = (r) => {
+    if (tab === "leads") return r.customerName || "Lead";
+    if (tab === "incentives") return r.code || "Incentive";
+    if (tab === "referrals") return `${r.referrer?.name || "Referrer"} → ${r.referredCook?.name || "Cook"}`;
+    return r.payoutRef || "Payout";
+  };
+
+  const metaFor = (r) => {
+    if (tab === "leads") return `${r.location || "—"} · ${r.normalizedPhone || "—"} · Cook: ${r.cook?.name || r.cook || "—"}`;
+    if (tab === "incentives") return `Cook: ${r.cook?.name || r.cook || "—"} · Target: ${r.target ?? "—"} · Verified: ${r.verifiedLeadCount ?? r.liveVerifiedCount ?? 0} · Reward: ${formatCurrency(r.reward)}`;
+    if (tab === "referrals") return `Bookings: ${r.liveVerifiedBookings ?? r.verifiedBookings ?? 0}/${r.bookingTarget ?? "—"} · Reward: ${formatCurrency(r.reward)}`;
+    const week = r.weekStart ? formatDate(r.weekStart) : "";
+    const weekEnd = r.weekEnd ? ` → ${formatDate(r.weekEnd)}` : "";
+    return `${r.bookingCount ?? 0} bookings · Payable: ${formatCurrency(r.totalPayable)}${week ? ` · Week: ${week}${weekEnd}` : ""}`;
+  };
+
   return (
-    <div className="cook-card">
-      <h3 style={{ marginBottom: "0.5rem" }}>Cook Partner Incentives</h3>
-      <div className="tabs-navigation-bar" style={{ marginBottom: "0.75rem" }}>
+    <div className="inc-panel">
+      <div className="admin-section-head">
+        <h3>Cook Partner Incentives</h3>
+        <div className="admin-section-actions">
+          {!loading && rows.length > 0 && (
+            <span className="admin-filter-count">{rows.length}</span>
+          )}
+          <button type="button" className="btn btn-outline btn-sm" onClick={() => load()} disabled={loading}>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="tabs-navigation-bar inc-tabs" role="tablist" aria-label="Incentive queues">
         {TABS.map((t) => (
-          <button key={t.id} type="button" className={`tab-btn ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>{t.label}</button>
+          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={`tab-btn ${tab === t.id ? "active" : ""}`} onClick={() => setTab(t.id)}>{t.label}</button>
         ))}
       </div>
-      {loading ? <p className="cook-loading-text">Loading…</p> : (
-        <div style={{ display: "grid", gap: "0.6rem" }}>
-          {tab === "payouts" && (
-            <form onSubmit={buildCycle} style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "end" }}>
-              <label style={{ fontSize: "0.85rem" }}>Cook id<br /><input value={buildForm.cookId} onChange={(e) => setBuildForm({ ...buildForm, cookId: e.target.value })} placeholder="24-hex user id" style={{ minWidth: "220px" }} /></label>
-              <label style={{ fontSize: "0.85rem" }}>Week start<br /><input type="date" value={buildForm.weekStart} onChange={(e) => setBuildForm({ ...buildForm, weekStart: e.target.value })} /></label>
-              <label style={{ fontSize: "0.85rem" }}>Week end<br /><input type="date" value={buildForm.weekEnd} onChange={(e) => setBuildForm({ ...buildForm, weekEnd: e.target.value })} /></label>
-              <button className="btn btn-primary btn-sm" type="submit">Build weekly cycle</button>
-            </form>
-          )}
-          {tab !== "payouts" && (
-            <label style={{ fontSize: "0.85rem" }}>Reason (for reject / hold / duplicate)<br />
-              <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Required for rejections" style={{ minWidth: "min(320px, 100%)" }} />
-            </label>
-          )}
-          {tab === "payouts" && (
-            <label style={{ fontSize: "0.85rem" }}>Payment reference (for Mark paid)<br />
-              <input value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="UPI / bank transaction id" style={{ minWidth: "min(320px, 100%)" }} />
-            </label>
-          )}
-          {!rows.length && <p style={{ color: "var(--slate-500)" }}>Nothing here yet.</p>}
+
+      {tab === "payouts" && (
+        <form onSubmit={buildCycle} className="inc-inputs">
+          <div className="booking-form-group">
+            <label>Cook id</label>
+            <input className="form-control" value={buildForm.cookId} onChange={(e) => setBuildForm({ ...buildForm, cookId: e.target.value })} placeholder="24-hex user id" />
+          </div>
+          <div className="booking-form-group">
+            <label>Week start</label>
+            <input className="form-control" type="date" value={buildForm.weekStart} onChange={(e) => setBuildForm({ ...buildForm, weekStart: e.target.value })} />
+          </div>
+          <div className="booking-form-group">
+            <label>Week end</label>
+            <input className="form-control" type="date" value={buildForm.weekEnd} onChange={(e) => setBuildForm({ ...buildForm, weekEnd: e.target.value })} />
+          </div>
+          <button className="btn btn-primary btn-sm" type="submit">Build cycle</button>
+        </form>
+      )}
+
+      <div className="inc-inputs">
+        <div className="booking-form-group">
+          <label>Reason <span className="inc-hint">for reject / hold / duplicate</span></label>
+          <input className="form-control" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Required for rejections" />
+        </div>
+        {tab === "payouts" && (
+          <div className="booking-form-group">
+            <label>Payment reference <span className="inc-hint">for Mark paid</span></label>
+            <input className="form-control" value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="UPI / bank transaction id" />
+          </div>
+        )}
+      </div>
+
+      {loading ? (
+        <p className="cook-loading-text">Loading…</p>
+      ) : rows.length === 0 ? (
+        <p className="anx-empty">Nothing here yet.</p>
+      ) : (
+        <div className="inc-list">
           {rows.map((r) => (
-            <div key={r._id} className="booking-item-card cook-booking-card cb-card" style={{ padding: "0.75rem" }}>
-              {tab === "leads" && (
-                <>
-                  <strong>{r.customerName}</strong> <span className="badge badge-amber">{r.status}</span>
-                  <p style={{ fontSize: "0.85rem", margin: "0.25rem 0" }}>{r.location} · {r.normalizedPhone} · cook {r.cook?.name || r.cook} · verification {r.verificationStatus}</p>
-                  <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                    <button className="btn btn-primary btn-sm" type="button" onClick={() => act("post", `/admin/cook-incentives/leads/${r._id}/verify`)}>Verify</button>
-                    <button className="btn btn-danger-outline btn-sm" type="button" onClick={() => act("post", `/admin/cook-incentives/leads/${r._id}/reject`, { reason: reason || "Invalid lead" })}>Reject</button>
-                    <button className="btn btn-outline btn-sm" type="button" onClick={() => act("post", `/admin/cook-incentives/leads/${r._id}/duplicate`, { reason: reason || "Duplicate lead" })}>Duplicate</button>
-                  </div>
-                </>
-              )}
-              {tab === "incentives" && (
-                <>
-                  <strong>{r.code}</strong> <span className="badge badge-blue">{r.status}</span>
-                  <p style={{ fontSize: "0.85rem", margin: "0.25rem 0" }}>cook {r.cook?.name || r.cook} · target {r.target} · verified {r.verifiedLeadCount ?? r.liveVerifiedCount ?? 0} · reward {formatCurrency(r.reward)}</p>
-                  <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                    <button className="btn btn-primary btn-sm" type="button" onClick={() => act("post", `/admin/cook-incentives/incentives/${r._id}/approve`)}>Approve</button>
-                    <button className="btn btn-danger-outline btn-sm" type="button" onClick={() => act("post", `/admin/cook-incentives/incentives/${r._id}/reject`, { reason: reason || "Not qualified" })}>Reject</button>
-                    <button className="btn btn-outline btn-sm" type="button" onClick={() => act("post", `/admin/cook-incentives/incentives/${r._id}/hold`, { reason: reason || "Under review" })}>Hold</button>
-                  </div>
-                </>
-              )}
-              {tab === "referrals" && (
-                <>
-                  <strong>{r.referrer?.name || r.referrer} → {r.referredCook?.name || r.referredCook}</strong> <span className="badge badge-blue">{r.status}</span>
-                  <p style={{ fontSize: "0.85rem", margin: "0.25rem 0" }}>bookings {r.liveVerifiedBookings ?? r.verifiedBookings ?? 0}/{r.bookingTarget} · reward {formatCurrency(r.reward)}</p>
-                  <button className="btn btn-primary btn-sm" type="button" onClick={() => act("post", `/admin/cook-incentives/referrals/${r._id}/approve`)}>Approve</button>
-                </>
-              )}
-              {tab === "payouts" && (
-                <>
-                  <strong>{r.payoutRef}</strong> <span className="badge badge-blue">{r.status}</span>
-                  <p style={{ fontSize: "0.85rem", margin: "0.25rem 0" }}>{r.bookingCount} bookings · gross {formatCurrency(r.grossCustomerValue)} · payable {formatCurrency(r.totalPayable)} · week {r.weekStart ? formatDate(r.weekStart) : ""}</p>
-                  <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                    <button className="btn btn-primary btn-sm" type="button" onClick={() => act("post", `/admin/cook-payouts/payouts/${r._id}/approve`)}>Approve</button>
-                    <button className="btn btn-primary btn-sm" type="button" onClick={() => act("post", `/admin/cook-payouts/payouts/${r._id}/pay`, { reference: payRef || `MANUAL-${Date.now()}` })}>Mark paid</button>
-                    <button className="btn btn-outline btn-sm" type="button" onClick={() => act("post", `/admin/cook-payouts/payouts/${r._id}/hold`, { reason: reason || "Under verification" })}>Hold</button>
-                  </div>
-                </>
-              )}
+            <div key={r._id} className="inc-row">
+              <div className="inc-row-head">
+                <strong className="inc-row-title">{titleFor(r)}</strong>
+                <span className={`badge ${statusBadge(r.status)}`}>{prettyStatus(r.status)}</span>
+              </div>
+              <p className="inc-row-meta">{metaFor(r)}</p>
+              <div className="inc-row-actions">{actionsFor(r)}</div>
             </div>
           ))}
         </div>

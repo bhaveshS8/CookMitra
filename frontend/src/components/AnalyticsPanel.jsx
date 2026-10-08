@@ -1,4 +1,5 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import {
   BarChart3,
   CalendarDays,
@@ -132,6 +133,30 @@ const AnalyticsPanel = () => {
 
   const { data, loading, error, refetch } = useFetch(query);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Realtime data: poll while mounted (tab visible only) + refetch instantly
+  // on booking lifecycle events (same pattern as BookingManagement).
+  // Previously the panel fetched once on mount and went stale.
+  useAutoRefresh(refetch, { intervalMs: 30000 });
+  useEffect(() => {
+    const onBookingEvent = () => {
+      try {
+        refetch();
+      } catch {
+      }
+    };
+    window.addEventListener("realtime-booking-request", onBookingEvent);
+    window.addEventListener("realtime-booking-assigned", onBookingEvent);
+    window.addEventListener("realtime-booking-expired", onBookingEvent);
+    window.addEventListener("realtime-booking-ignored", onBookingEvent);
+    return () => {
+      window.removeEventListener("realtime-booking-request", onBookingEvent);
+      window.removeEventListener("realtime-booking-assigned", onBookingEvent);
+      window.removeEventListener("realtime-booking-expired", onBookingEvent);
+      window.removeEventListener("realtime-booking-ignored", onBookingEvent);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     if (refreshing) return;

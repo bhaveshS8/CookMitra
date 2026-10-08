@@ -669,8 +669,21 @@
   .cook-page-head-title h1 { font-size: 1.28rem; }
 }
 @media (max-width: 480px) {
-  .cook-hero-btn-row { flex-direction: column; align-items: stretch; }
-  .cook-hero-btn-row .cook-glass-btn { width: 100%; justify-content: center; }
+  /* Keep Profile/Reviews/Earnings in ONE compact row — stacking them
+     full-width made the "Hello, Cook" hero ~200px tall on phones. */
+  .cook-hero-btn-row { flex-direction: row; gap: 0.4rem; width: 100%; }
+  .cook-hero-btn-row .cook-glass-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 38px;
+    font-size: 0.78rem;
+    padding: 0.45rem 0.25rem;
+    gap: 0.3rem;
+    white-space: nowrap;
+    justify-content: center;
+  }
+  .cook-hero-btn-row .cook-glass-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+  .cook-modern-hero-copy { min-width: 0; }
 }
 @media (max-width: 320px) {
   .cook-stat-icon { width: 38px; height: 38px; }

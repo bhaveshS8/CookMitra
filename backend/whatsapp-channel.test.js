@@ -525,20 +525,36 @@ const errOf = async (fn) => {
       check("T15 shared service exported", typeof acceptBookingForCook === "function" && typeof rejectBookingForCook === "function", "exports");
     }
 
-    // ---- T16: request goes as the new interactive message only (no template) ----
+    // ---- T16: cold-start uses approved template first (deliverable outside 24h window) ----
     {
       reset();
-      process.env.WHATSAPP_REQUEST_TEMPLATE_FOR_COOK = "cook_booking_request";
+      process.env.WHATSAPP_REQUEST_TEMPLATE_FOR_COOK = "new_booking_request";
+      const b = mkBooking();
+      sentPayloads.length = 0;
+      const r = await dispatch.fanOutBookingRequest(b, [{ userId: COOK_A }], { customerName: "Aditi Rao" });
+      const types = sentPayloads.map((p) => p.type);
+      const tpl = sentPayloads.find((p) => p.type === "template");
+      const params = tpl?.template?.components?.[0]?.parameters || [];
+      check("T16 template sent (no interactive fallback needed)", types.includes("template") && !types.includes("interactive"), JSON.stringify(types));
+      check("T16 template name+lang", tpl?.template?.name === "new_booking_request" && tpl?.template?.language?.code === "mr", JSON.stringify(tpl?.template));
+      check("T16 template has 6 params", params.length === 6 && params.every((p) => p.type === "text"), `params=${params.length}`);
+      check("T16 delivery marked sent", r.ok === true, String(r.ok));
+      delete process.env.WHATSAPP_REQUEST_TEMPLATE_FOR_COOK;
+    }
+    // ---- T16a: no template configured -> interactive only (unchanged warm path) ----
+    {
+      reset();
+      delete process.env.WHATSAPP_REQUEST_TEMPLATE_FOR_COOK;
+      delete process.env.WHATSAPP_REQUEST_TEMPLATE;
       const b = mkBooking();
       sentPayloads.length = 0;
       const r = await dispatch.fanOutBookingRequest(b, [{ userId: COOK_A }], { customerName: "Aditi Rao" });
       const types = sentPayloads.map((p) => p.type);
       const inter = sentPayloads.find((p) => p.type === "interactive");
       const body = inter?.interactive?.body?.text || "";
-      check("T16 no template message sent", !types.includes("template") && types.includes("interactive"), JSON.stringify(types));
-      check("T16 new-format body only", body.startsWith("🍳 नवीन Cook Mitra बुकिंग विनंती") && body.includes("📆 वार:") && !body.includes("cook for me") && !body.includes("मानधन"), body.slice(0, 60));
-      check("T16 delivery marked sent", r.ok === true, String(r.ok));
-      delete process.env.WHATSAPP_REQUEST_TEMPLATE_FOR_COOK;
+      check("T16a interactive only without template", !types.includes("template") && types.includes("interactive"), JSON.stringify(types));
+      check("T16a new-format body only", body.startsWith("🍳 नवीन Cook Mitra बुकिंग विनंती") && body.includes("📆 वार:") && !body.includes("cook for me") && !body.includes("मानधन"), body.slice(0, 60));
+      check("T16a delivery marked sent", r.ok === true, String(r.ok));
     }
     {
       reset();

@@ -21,7 +21,10 @@ const {
 const ALLOWED_DATE_FIELDS = new Set(["service", "created"]);
 
 const buildScopeMatch = (filter) => {
-  if (!filter) return {};
+  // All-time scope (no from/to, only dateField) must match everything.
+  // Previously `{ date: { $gte: null, $lt: null } }` matched nothing, so
+  // the default "All Time" view (which always sends dateField) showed 0s.
+  if (!filter || filter.from == null || filter.toExclusive == null) return {};
   const field = filter.dateField === "created" ? "createdAt" : "date";
   return { [field]: { $gte: filter.from, $lt: filter.toExclusive } };
 };

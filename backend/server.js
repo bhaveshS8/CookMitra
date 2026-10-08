@@ -314,7 +314,6 @@ app.use("/api/coupons", require("./routes/coupons"));
 app.use("/api/analytics", require("./routes/analytics"));
 app.use("/api/payouts", strictLimiter, require("./routes/payouts"));
 app.use("/api/cook", require("./routes/cookEarnings"));
-app.use("/api/admin/cancellations", require("./routes/cancellations"));
 app.use("/api/admin/cook-incentives", require("./routes/adminCookEarnings"));
 app.use("/api/admin/cook-payouts", require("./routes/adminCookEarnings"));
 app.use("/api/stats/public/visit", visitLimiter);

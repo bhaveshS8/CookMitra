@@ -1,24 +1,16 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
 import { ChefHat, X, UserPlus, Loader2, AlertCircle, CheckCircle2, Copy, Check } from "lucide-react";
-
-const SERVICE_TYPES = [
-  { id: "cook_for_me", label: "Cook for Me" },
-  { id: "cook_with_me", label: "Cook With Me" },
-  { id: "teach_me", label: "Teach Me" },
-  { id: "preparation_help", label: "Preparation Help" },
-];
 
 const initialForm = {
   name: "",
   email: "",
   phone: "",
   password: "",
-  rate: "500",
   serviceArea: "",
   specialties: "",
-  serviceTypes: ["cook_with_me"],
 };
 
 const AddCookModal = ({ open, onClose, onCreated }) => {
@@ -78,16 +70,6 @@ const AddCookModal = ({ open, onClose, onCreated }) => {
     setForm((f) => ({ ...f, [name]: value }));
   };
 
-  const toggleServiceType = (id) => {
-    setForm((f) => {
-      const has = f.serviceTypes.includes(id);
-      const next = has
-        ? f.serviceTypes.filter((t) => t !== id)
-        : [...f.serviceTypes, id];
-      return { ...f, serviceTypes: next.length ? next : ["cook_with_me"] };
-    });
-  };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -98,13 +80,11 @@ const AddCookModal = ({ open, onClose, onCreated }) => {
         email: form.email.trim(),
         phone: form.phone.trim(),
         password: form.password,
-        rate: Number(form.rate),
         serviceArea: form.serviceArea.trim(),
         specialties: form.specialties
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean),
-        serviceTypes: form.serviceTypes,
       };
       const res = await API.post("/auth/cooks", payload);
       setCreated(res.data?.user || {});
@@ -128,7 +108,11 @@ const AddCookModal = ({ open, onClose, onCreated }) => {
     setError("");
   };
 
-  return (
+  // Portal to document.body so the fixed overlay always escapes any
+  // ancestor overflow/transform/stacking context on the admin page.
+  // Without this, `position: fixed` resolves against a transformed
+  // ancestor and the form can render off-screen / invisible on click.
+  const modal = (
     <div className="login-modal-overlay" onClick={() => !saving && onClose()}>
       <div
         className="add-cook-modal"
@@ -282,32 +266,16 @@ const AddCookModal = ({ open, onClose, onCreated }) => {
               />
             </div>
 
-            <div className="modal-form-grid-2">
-              <div className="booking-form-group">
-                <label>Hourly Rate (₹) *</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  pattern="[0-9]*[.]?[0-9]*"
-                  name="rate"
-                  className="form-control"
-                  value={form.rate}
-                  onChange={handleChange}
-                  min={1}
-                  required
-                />
-              </div>
-              <div className="booking-form-group">
-                <label>Service Area</label>
-                <input
-                  type="text"
-                  name="serviceArea"
-                  className="form-control"
-                  value={form.serviceArea}
-                  onChange={handleChange}
-                  placeholder="e.g. Pune"
-                />
-              </div>
+            <div className="booking-form-group">
+              <label>Service Area</label>
+              <input
+                type="text"
+                name="serviceArea"
+                className="form-control"
+                value={form.serviceArea}
+                onChange={handleChange}
+                placeholder="e.g. Pune"
+              />
             </div>
 
             <div className="booking-form-group">
@@ -320,31 +288,6 @@ const AddCookModal = ({ open, onClose, onCreated }) => {
                 onChange={handleChange}
                 placeholder="e.g. Puran Poli, Modak, Sheera"
               />
-            </div>
-
-            <div className="booking-form-group">
-              <label>Services Offered</label>
-              <div className="service-pick-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))" }}>
-                {SERVICE_TYPES.map((s) => {
-                  const selected = form.serviceTypes.includes(s.id);
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      className={`service-pick-card ${selected ? "selected" : ""}`}
-                      onClick={() => toggleServiceType(s.id)}
-                      style={{ padding: "0.7rem", fontSize: "0.85rem" }}
-                    >
-                      {selected ? (
-                        <span className="service-pick-check">
-                          <CheckCircle2 size={16} />
-                        </span>
-                      ) : null}
-                      <span>{s.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
             </div>
 
             <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={saving}>
@@ -372,6 +315,10 @@ const AddCookModal = ({ open, onClose, onCreated }) => {
       </div>
     </div>
   );
+  if (typeof document !== "undefined" && document.body) {
+    return createPortal(modal, document.body);
+  }
+  return modal;
 };
 
 export default AddCookModal;

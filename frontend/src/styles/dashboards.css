@@ -2024,6 +2024,55 @@
   background: var(--slate-50);
 }
 .anx-meta { margin: 0; font-size: 0.76rem; color: var(--slate-400); }
+.anx-build-form {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr auto;
+  gap: 0.6rem;
+  align-items: end;
+  background: var(--slate-50);
+  border: 1px solid var(--slate-100);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+}
+.anx-build-form .booking-form-group { margin: 0; }
+@media (max-width: 640px) {
+  .anx-build-form { grid-template-columns: 1fr; }
+  .anx-build-form .btn { width: 100%; }
+}
+
+/* Cook incentives tab — simple stacked rows, shared input card. */
+.inc-panel { display: grid; gap: 0.75rem; }
+.inc-panel .admin-section-head h3 { margin: 0; }
+.inc-tabs { margin: 0; }
+.inc-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.6rem;
+  align-items: end;
+  background: var(--slate-50);
+  border: 1px solid var(--slate-100);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+}
+.inc-inputs .booking-form-group { margin: 0; }
+.inc-hint { font-weight: 500; color: var(--slate-400); font-size: 0.78em; }
+.inc-list { display: grid; gap: 0.6rem; }
+.inc-row {
+  background: #fff;
+  border: 1px solid var(--slate-100);
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+  box-shadow: var(--shadow-sm);
+}
+.inc-row-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; }
+.inc-row-title { font-size: 0.95rem; }
+.inc-row-meta { margin: 0.3rem 0 0.6rem; font-size: 0.83rem; color: var(--slate-500); }
+.inc-row-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .inc-inputs { grid-template-columns: 1fr; }
+  .inc-inputs .btn { width: 100%; }
+  .inc-row-actions .btn { flex: 1 1 auto; }
+}
 
 @media (max-width: 900px) {
   .anx-cols { grid-template-columns: 1fr; }

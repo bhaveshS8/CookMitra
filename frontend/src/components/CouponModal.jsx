@@ -1,10 +1,26 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
 import { Tag, X, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 
-const toDateInputValue = (d) =>
-  d ? new Date(d).toISOString().slice(0, 10) : "";
+// Format in IST (Asia/Kolkata) — toISOString() is UTC and shifts the day
+// back for midnight-IST dates, showing the admin the wrong validity date.
+const toDateInputValue = (d) => {
+  if (!d) return "";
+  try {
+    const dt = d instanceof Date ? d : new Date(d);
+    if (Number.isNaN(dt.getTime())) return "";
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(dt);
+  } catch {
+    return "";
+  }
+};
 const numberOrNull = (v) => (v === "" || v == null ? null : Number(v));
 const numberOrZero = (v) => (v === "" || v == null ? 0 : Number(v));
 
@@ -93,12 +109,15 @@ const CouponModal = ({ open, onClose, onSaved, coupon }) => {
       setError("Percent discount must be between 1 and 100.");
       return;
     }
+    // Send only the active discount field and omit blank optionals.
+    // Backend validators use `.optional()` which skips `undefined` but NOT
+    // `null` — sending `flatAmount: null` / `percent: null` / blank dates
+    // used to 400 ("flatAmount must be at least ₹1", ...).
     const payload = {
       code: (form.code || "").trim().toUpperCase(),
       description: (form.description || "").trim(),
       discountType: isFlat ? "flat" : "percent",
-      percent: isFlat ? null : Number(form.percent),
-      flatAmount: isFlat ? Number(form.flatAmount) : null,
+      ...(isFlat ? { flatAmount: Number(form.flatAmount) } : { percent: Number(form.percent) }),
       maxDiscount: numberOrNull(form.maxDiscount),
       minOrder: numberOrZero(form.minOrder),
       usageLimit: numberOrNull(form.usageLimit),
@@ -112,6 +131,9 @@ const CouponModal = ({ open, onClose, onSaved, coupon }) => {
       validTo: form.validTo ? new Date(`${form.validTo}T00:00:00`) : null,
       active: form.active,
     };
+    for (const k of Object.keys(payload)) {
+      if (payload[k] === null) delete payload[k];
+    }
     try {
       if (editing) {
         await API.patch(`/coupons/${coupon._id}`, payload);
@@ -128,7 +150,10 @@ const CouponModal = ({ open, onClose, onSaved, coupon }) => {
     }
   };
 
-  return (
+  // Portal to document.body so the fixed overlay escapes any ancestor
+  // overflow/transform/stacking context on the admin page (same fix as
+  // AddCookModal — without this the edit form can render off-screen).
+  const modal = (
     <div className="login-modal-overlay" onClick={() => !saving && onClose()}>
       <div
         className="add-cook-modal"
@@ -174,8 +199,9 @@ const CouponModal = ({ open, onClose, onSaved, coupon }) => {
               maxLength={24}
               minLength={3}
               pattern="[A-Za-z0-9]+"
-              title="3–24 letters and numbers, no spaces"
+              title={editing ? "Code cannot be changed after creation" : "3–24 letters and numbers, no spaces"}
               required
+              disabled={editing}
               style={{ textTransform: "uppercase" }}
             />
           </div>
@@ -319,6 +345,10 @@ const CouponModal = ({ open, onClose, onSaved, coupon }) => {
       </div>
     </div>
   );
+  if (typeof document !== "undefined" && document.body) {
+    return createPortal(modal, document.body);
+  }
+  return modal;
 };
 
 export default CouponModal;

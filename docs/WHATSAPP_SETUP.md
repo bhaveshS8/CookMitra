@@ -91,11 +91,12 @@ WHATSAPP_PHONE_NUMBER_ID=<live phone number ID>
 # WHATSAPP_REQUEST_TEMPLATE_LANG=en
 # (legacy aliases: WHATSAPP_REQUEST_TEMPLATE_FOR_COOK,
 #  WHATSAPP_TEMPLATE_LANG_COOK_REQUEST)
-# NOTE: broadcast fan-out (backend/services/whatsappDispatch.js) intentionally
-# sends ONLY the Marathi interactive message and ignores all template vars
-# (the approved template's {{n}} bindings render shifted values) — see T16
-# in backend/whatsapp-channel.test.js. The template path above applies only
-# to the direct-cook helper in utils/whatsappApi.js.
+# NOTE: broadcast fan-out (backend/services/whatsappDispatch.js) tries the
+# approved template first (deliverable outside the 24h window, params in
+# example order [customer, date, weekday, time, duration, address]) and
+# falls back to the Marathi interactive message — see T16
+# in backend/whatsapp-channel.test.js. A misconfigured template fails once
+# per fan-out, then remaining cooks skip straight to interactive.
 #
 # Troubleshooting 401 code 190 "Authentication Error": Meta rejected
 # WHATSAPP_TOKEN (expired temporary token, revoked system-user token, or token
