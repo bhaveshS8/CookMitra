@@ -65,7 +65,13 @@ const generalLimiter = rateLimit({
   store: rateLimitStore("general"),
   windowMs: 60 * 1000,
   max: Number(process.env.RATE_LIMIT_GENERAL || 300),
-  skip: (req) => req.path === "/api/health" || req.path === "/api/ready",
+  skip: (req) => {
+    // Meta's webhook verification is a single GET that must return 200
+    // with the raw challenge — never rate-limit it (429 = "callback rejected").
+    const url = req.originalUrl || req.url || "";
+    if (req.method === "GET" && url.split("?")[0] === "/api/whatsapp/webhook") return true;
+    return req.path === "/api/health" || req.path === "/api/ready";
+  },
   message: { message: "Too many requests — please slow down and retry." },
 });
 const authLimiter = rateLimit({

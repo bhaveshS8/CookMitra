@@ -45,6 +45,24 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       # Frontend origin for CORS — empty when served same-origin by this app.
       CLIENT_URL: ${CLIENT_URL:-}
+      # WhatsApp Cloud API (Meta) — REQUIRED for webhook verification.
+      # Without these the container sees empty VERIFY_TOKEN and every
+      # Meta GET /api/whatsapp/webhook returns 403 ("callback not accepted").
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v22.0}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
+      WHATSAPP_WEBHOOK_VERIFY_TOKEN: ${WHATSAPP_WEBHOOK_VERIFY_TOKEN:-}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+      WHATSAPP_REQUEST_TEMPLATE: ${WHATSAPP_REQUEST_TEMPLATE:-}
+      WHATSAPP_REQUEST_TEMPLATE_LANG: ${WHATSAPP_REQUEST_TEMPLATE_LANG:-}
+      WHATSAPP_REQUEST_TEMPLATE_FOR_COOK: ${WHATSAPP_REQUEST_TEMPLATE_FOR_COOK:-}
+      WHATSAPP_TEMPLATE_LANG_COOK_REQUEST: ${WHATSAPP_TEMPLATE_LANG_COOK_REQUEST:-}
+      WHATSAPP_DISPATCH_POLL_MS: ${WHATSAPP_DISPATCH_POLL_MS:-}
+      WHATSAPP_DISPATCH_MAX_ATTEMPTS: ${WHATSAPP_DISPATCH_MAX_ATTEMPTS:-}
+      WHATSAPP_DISPATCH_LEASE_MS: ${WHATSAPP_DISPATCH_LEASE_MS:-}
+      WHATSAPP_DISPATCH_WORKER: ${WHATSAPP_DISPATCH_WORKER:-}
     # No depends_on: the backend retries the DB connection in the background,
     # so startup order doesn't matter (Atlas or local mongo alike).
     volumes:
