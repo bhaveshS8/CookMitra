@@ -81,7 +81,9 @@ const BookingWaiting = () => {
         setPhase("accepted");
         showToast(`${b.cook?.name || "Your cook"} accepted your request!`, "success");
         setTimeout(() => {
-          if (aliveRef.current) navigate(`/bookings/${bookingId}/pay`, { replace: true });
+          // 100% coupon (nothing payable): server auto-confirms — go to
+          // details, never the payment page.
+          if (aliveRef.current) navigate(Number(b.amount) <= 0 ? `/bookings/${bookingId}` : `/bookings/${bookingId}/pay`, { replace: true });
         }, 1800);
       } else if (["rejected", "cancelled", "expired"].includes(st)) {
         handledRef.current = true;

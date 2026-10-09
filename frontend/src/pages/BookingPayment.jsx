@@ -98,6 +98,7 @@ const BookingPayment = () => {
   const pollRef = useRef(null);
   const completedRef = useRef(false);
   const failedSilentDismissRef = useRef(false);
+  const couponToastRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -105,6 +106,10 @@ const BookingPayment = () => {
       if (!aliveRef.current || handledRef.current) return;
       const b = res.data;
       setBooking(b);
+      if (!couponToastRef.current && b.couponCode && Number(b.discount) > 0) {
+        couponToastRef.current = true;
+        showToast(`🎉 Coupon ${b.couponCode} applied — you saved ${formatCurrency(b.discount)}!`, "success");
+      }
       const st = b.status;
       const paid = b.payment?.status === "paid";
       if (["confirmed", "in_progress", "completed"].includes(st) || paid) {
@@ -129,7 +134,7 @@ const BookingPayment = () => {
         setPhase("error");
       }
     }
-  }, [bookingId, navigate]);
+  }, [bookingId, navigate, showToast]);
 
   useEffect(() => {
     aliveRef.current = true;

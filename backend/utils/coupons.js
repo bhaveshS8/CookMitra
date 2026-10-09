@@ -1,5 +1,9 @@
 
-const normalizeCode = (code) => String(code || "").trim().toUpperCase();
+const normalizeCode = (code) =>
+  String(code || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s\-_]+/g, "");
 
 const rejectionReason = (
   coupon,

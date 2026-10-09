@@ -415,18 +415,96 @@ const acceptBookingForCook = async ({ bookingId, cookId, source = "website" } = 
   }
 
   // Side effects — identical for website and WhatsApp accepts.
+  // Zero-payable fast path first: a 100% coupon (or otherwise free booking)
+  // is confirmed immediately, so the customer never sees a payment page.
+  // Claim failures here never fail the accept — the booking stays accepted
+  // and the customer can still confirm free via the payment page.
+  let autoConfirmed = false;
+  try {
+    const rawPayable = booking?.amount;
+    const payable = rawPayable === undefined || rawPayable === null ? NaN : Number(rawPayable);
+    const alreadyPaid = String(booking?.payment?.status || "").toLowerCase() === "paid";
+    if (!alreadyPaid && Number.isFinite(payable) && payable <= 0) {
+      const now = new Date();
+      const res = await timed(
+        Booking.updateOne(
+          { _id: booking._id, status: "accepted", "payment.status": { $ne: "paid" } },
+          {
+            $set: {
+              payment: {
+                status: "paid",
+                paidAmount: 0,
+                paidAt: now,
+                testMode: false,
+                razorpayOrderId: "",
+                razorpayPaymentId: `zero_free_${booking._id}`,
+                razorpaySignature: "no_charge",
+              },
+              status: "confirmed",
+              paymentExpiresAt: null,
+            },
+            $push: {
+              statusHistory: {
+                status: "confirmed",
+                note: "100% discount — auto-confirmed on accept, no payment required",
+              },
+            },
+          }
+        )
+      );
+      const n = res && !isTimeout(res) ? (res.modifiedCount ?? res.nModified ?? 0) : 0;
+      if (Number(n) === 1) {
+        try {
+          const fresh2 = await loadBooking(booking._id, source);
+          if (fresh2) booking = fresh2;
+        } catch {
+        }
+        autoConfirmed = true;
+        try {
+          await timed(
+            require("../utils/finance").recordLedger({
+              idempotencyKey: `pay:${booking._id}:no-gateway`,
+              booking: booking._id,
+              type: "payment.confirmed",
+              amount: 0,
+              prevState: "payment:pending",
+              newState: "payment:paid",
+              actor: `customer:${booking.customer}`,
+              source: "auto-confirm",
+              razorpayOrderId: "",
+              razorpayPaymentId: "",
+              reason: "100% discount — no charge",
+            })
+          );
+        } catch {
+        }
+      }
+    }
+  } catch {
+  }
   try {
     await Notification.create({
       user: booking.customer,
-      type: "booking_accepted",
+      type: autoConfirmed ? "booking_confirmed" : "booking_accepted",
       booking: booking._id,
-      message:
-        "Your booking request has been accepted! Complete payment within 5 minutes to confirm your slot.",
+      message: autoConfirmed
+        ? "Booking confirmed — your 100% coupon covered the full fee. No payment needed!"
+        : "Your booking request has been accepted! Complete payment within 5 minutes to confirm your slot.",
     });
   } catch {
   }
   try {
-    notifyWhatsApp("accepted", booking);
+    if (autoConfirmed) {
+      notifyWhatsApp("confirmed", booking);
+      // The cook needs the venue job sheet even for WhatsApp-source
+      // accepts (the website-only emit below is skipped there).
+      try {
+        require("./whatsappDispatch").notifyWhatsAppEvent("booking.accepted", booking);
+      } catch {
+      }
+    } else {
+      notifyWhatsApp("accepted", booking);
+    }
   } catch {
   }
   if (source === "website") {

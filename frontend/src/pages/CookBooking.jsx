@@ -350,6 +350,16 @@ const CookBooking = () => {
   const couponDiscount = slab != null && coupon ? Math.min(coupon.discount, slab) : 0;
   const finalPayable = slab != null ? Math.max(0, slab - couponDiscount) : 0;
 
+  const handleCouponApplied = (result, meta) => {
+    setCoupon(result);
+    if (meta?.auto) return;
+    if (result) {
+      showToast(`🎉 Coupon ${result.code} applied — you saved ${formatCurrency(result.discount)}!`, "success");
+    } else if (coupon) {
+      showToast("Coupon removed — showing full price.", "info");
+    }
+  };
+
   const resumedDraft = useRef(false);
   useEffect(() => {
     if (resumedDraft.current || !user) return;
@@ -873,7 +883,7 @@ const CookBooking = () => {
         {slab != null && (
           <div className="od-hero-price" aria-live="polite">
             <span>{form.durationHours || "–"} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
-            <strong>{formatCurrency(finalPayable)}</strong>
+            <strong key={finalPayable} className="price-flash">{formatCurrency(finalPayable)}</strong>
           </div>
         )}
       </div>
@@ -1349,14 +1359,14 @@ const CookBooking = () => {
               )}
               <div className="price-row total">
                 <span>Final Amount</span>
-                <strong>{slab != null ? formatCurrency(finalPayable) : "—"}</strong>
+                <strong key={finalPayable} className="price-flash">{slab != null ? formatCurrency(finalPayable) : "—"}</strong>
               </div>
             </div>
             {slab != null && (
               <CouponApply
                 amount={slab}
                 serviceType={DEFAULT_SERVICE_TYPE}
-                onApplied={setCoupon}
+                onApplied={handleCouponApplied}
                 initialCode={couponRestore}
               />
             )}

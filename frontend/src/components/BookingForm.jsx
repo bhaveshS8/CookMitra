@@ -187,6 +187,16 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
   const discount = slab != null && coupon ? Math.min(coupon.discount, slab) : 0;
   const finalAmount = slab != null ? Math.max(0, slab - discount) : 0;
 
+  const handleCouponApplied = (result, meta) => {
+    setCoupon(result);
+    if (meta?.auto) return;
+    if (result) {
+      showToast(`🎉 Coupon ${result.code} applied — you saved ${formatCurrency(result.discount)}!`, "success");
+    } else if (coupon) {
+      showToast("Coupon removed — showing full price.", "info");
+    }
+  };
+
   const derivedEndTime = (() => {
     if (!formData.startTime || !hoursValid) return "";
     const startMin = hmToMinutes(formData.startTime);
@@ -1001,7 +1011,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
                   )}
                   <div className="price-row total">
                     <span>To pay after acceptance</span>
-                    <strong>{formatCurrency(finalAmount)}</strong>
+                    <strong key={finalAmount} className="price-flash">{formatCurrency(finalAmount)}</strong>
                   </div>
                 </div>
               </div>
@@ -1010,7 +1020,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
               <CouponApply
                 amount={slab}
                 serviceType={DEFAULT_SERVICE_TYPE}
-                onApplied={setCoupon}
+                onApplied={handleCouponApplied}
               />
             )}
             <button type="submit" className="bk-submit bk-submit-inline" disabled={submitting}>
@@ -1034,7 +1044,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
           <span className="bk-sticky-text">
             {step === 0 ? (scheduleSummary || "Pick date, length & time") : `Pay ${slab != null ? formatCurrency(finalAmount) : "—"} after acceptance`}
           </span>
-          <strong className="bk-sticky-price">{slab != null && hoursValid ? formatCurrency(finalAmount) : slab != null ? formatCurrency(slab) : "₹—"}</strong>
+          <strong className="bk-sticky-price price-flash" key={finalAmount}>{slab != null && hoursValid ? formatCurrency(finalAmount) : slab != null ? formatCurrency(slab) : "₹—"}</strong>
         </div>
         <div className="bk-sticky-actions">
           {step > 0 && (

@@ -22,8 +22,8 @@ const codeRule = (field = "code", optional = false) => {
     .trim()
     .isLength({ min: 3, max: 24 })
     .withMessage("Coupon code must be 3–24 characters")
-    .matches(/^[A-Za-z0-9]+$/)
-    .withMessage("Coupon code may only contain letters and numbers");
+    .matches(/^[A-Za-z0-9\s\-_]+$/)
+    .withMessage("Coupon code may only contain letters, numbers, spaces and hyphens");
 };
 const couponBodyRules = () => {
   const O = (field) => body(field).optional();

@@ -63,6 +63,23 @@ const gatewayDeductionFor = (booking) => {
 const slabFor = (category) =>
   policyConfig.slabs[category] || { cancellationChargePercent: 0, refundPercent: 0 };
 
+// Fully-discounted bookings (100% coupon: discount covers the whole slab,
+// nothing payable) never carry a cancellation charge — there is no money
+// to charge from. Detected via discount-vs-slab, falling back to amount.
+const isFullyDiscounted = (booking) => {
+  try {
+    const slab = Number(booking?.slabPrice);
+    const disc = Number(booking?.discount);
+    if (Number.isFinite(slab) && slab > 0 && Number.isFinite(disc) && disc >= slab) return true;
+    if (booking?.amount !== undefined && booking?.amount !== null) {
+      return Number(booking.amount) <= 0 && !(Number(booking?.payment?.paidAmount) > 0);
+    }
+    return false;
+  } catch {
+    return false;
+  }
+};
+
 const deriveCategory = (booking, nowMs, opts = {}) => {
   const role = String(opts.actorRole || "customer").toLowerCase();
   if (opts.noShow) return "CUSTOMER_NO_SHOW";
@@ -109,14 +126,16 @@ const evaluateCancellation = ({ booking, currentTime, actorRole = "customer", no
   if (booking.cookArrived && role === "customer" && !noShow) {
     const slab = slabFor("COOK_ARRIVED");
     const base = refundBaseOf(booking);
-    return fail("COOK_ARRIVED", "The cook has already reached the venue — this booking can no longer be cancelled online. Please contact support.", {
+    const free = isFullyDiscounted(booking);
+    return fail("COOK_ARRIVED", free ? "The cook has already reached the venue — this booking can no longer be cancelled online. No cancellation charge applies (fully discounted booking)." : "The cook has already reached the venue — this booking can no longer be cancelled online. Please contact support.", {
       cancellationCategory: "COOK_ARRIVED",
-      cancellationChargePercent: slab.cancellationChargePercent,
+      cancellationChargePercent: free ? 0 : slab.cancellationChargePercent,
       refundPercent: slab.refundPercent,
       bookingAmount: base,
       grossRefund: 0,
       nonRefundableCharges: 0,
       finalRefund: 0,
+      fullyDiscounted: free,
     });
   }
 
@@ -127,18 +146,22 @@ const evaluateCancellation = ({ booking, currentTime, actorRole = "customer", no
   const grossRefund = paid ? computeRefund(base, slab.refundPercent) : 0;
   const fee = paid && grossRefund > 0 ? gatewayDeductionFor(booking) : 0;
   const finalRefund = paid ? Math.max(0, Math.round((grossRefund - fee) * 100) / 100) : 0;
+  const free = isFullyDiscounted(booking);
   return {
     allowed: true,
     cancellationCategory: category,
-    cancellationChargePercent: slab.cancellationChargePercent,
+    cancellationChargePercent: free ? 0 : slab.cancellationChargePercent,
     refundPercent: slab.refundPercent,
     bookingAmount: base,
     grossRefund,
     nonRefundableCharges: fee,
     finalRefund,
+    fullyDiscounted: free,
     policyVersion: policyConfig.version,
     withinCutoff30Min: isWithin30MinCutoff(booking, nowMs),
-    message: messageFor(category, slab),
+    message: free
+      ? "No cancellation charge — this booking was fully discounted (100% off coupon)."
+      : messageFor(category, slab),
   };
 };
 
@@ -178,6 +201,7 @@ module.exports = {
   CUSTOMER_COMPLAINT_REASONS,
   NOT_AUTO_REFUNDABLE,
   computeRefund,
+  isFullyDiscounted,
   toPaise,
   fromPaise,
   serviceStartInstant,

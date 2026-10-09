@@ -538,6 +538,36 @@ const errOf = async (fn) => {
       check("T15 shared service exported", typeof acceptBookingForCook === "function" && typeof rejectBookingForCook === "function", "exports");
     }
 
+    // ---- T15b: 100% coupon -> accept auto-confirms, no payment page ----
+    {
+      reset();
+      const b = mkBooking({
+        amount: 0,
+        slabPrice: 349,
+        discount: 349,
+        couponCode: "FREE100",
+        payment: { status: "pending", paidAmount: 0 },
+      });
+      const out = await acceptBookingForCook({ bookingId: b._id, cookId: COOK_A, source: "website" });
+      const d = store.bookings.get(b._id);
+      check(
+        "T15b free booking auto-confirmed on accept",
+        d.status === "confirmed" && d.payment?.status === "paid" && d.payment?.razorpaySignature === "no_charge",
+        `${d.status}/${d.payment?.status}`
+      );
+      check(
+        "T15b confirmed history recorded",
+        d.statusHistory.some((h) => h.status === "confirmed" && /no payment required/i.test(h.note || "")),
+        d.statusHistory.map((h) => h.status).join(",")
+      );
+      check(
+        "T15b customer told confirmed (not pay-in-5-min)",
+        notifs.some((n) => n.type === "booking_confirmed"),
+        notifs.map((n) => n.type).join(",")
+      );
+      void out;
+    }
+
     // ---- T16: cold-start uses approved template first (deliverable outside 24h window) ----
     {
       reset();

@@ -30,12 +30,12 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
     if (!c || applying || applied || initialTried.current === `${c}|${amount}|${serviceType}`) return;
     initialTried.current = `${c}|${amount}|${serviceType}`;
     setCode(c);
-    apply(c);
+    apply(c, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCode, amount, serviceType]);
 
-  const apply = async (override) => {
-    const c = String(override ?? code).trim().toUpperCase();
+  const apply = async (override, auto = false) => {
+    const c = String(override ?? code).trim().toUpperCase().replace(/[\s\-_]+/g, "");
     if (!c || applying) return;
     setApplying(true);
     setError("");
@@ -48,7 +48,7 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
         fullFee: res.data.fullFee,
       };
       setApplied(result);
-      onApplied?.(result);
+      onApplied?.(result, { auto });
       track(AnalyticsEvents.COUPON_APPLIED, {
         coupon_code: result.code,
         discount: Number(result.discount) || 0,
@@ -101,7 +101,7 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
           className="form-control coupon-input"
           value={code}
           onChange={(e) => {
-            setCode(e.target.value.toUpperCase());
+            setCode(e.target.value.toUpperCase().replace(/\s+/g, ""));
             setError("");
           }}
           onKeyDown={(e) => {

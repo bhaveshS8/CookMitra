@@ -94,6 +94,35 @@ const startOf = (b) => {
   check("cook arrived → customer blocked, 0%", !r.allowed && r.cancellationCategory === "COOK_ARRIVED" && r.finalRefund === 0, r.reasonCode);
 }
 {
+  const free = () =>
+    mkBooking({
+      amount: 0,
+      slabPrice: 349,
+      discount: 349,
+      couponCode: "FREE100",
+      payment: { status: "paid", paidAmount: 0, razorpayPaymentId: "zero_free_b1", refundStatus: "none", testMode: false },
+    });
+  const r = evaluateCancellation({ booking: free(), currentTime: startOf(free()) - 2 * H, actorRole: "customer" });
+  check(
+    "100% coupon → 0% cancellation charge",
+    r.allowed && r.cancellationChargePercent === 0 && r.finalRefund === 0 && r.fullyDiscounted === true,
+    JSON.stringify({ charge: r.cancellationChargePercent, refund: r.finalRefund })
+  );
+  const r2 = evaluateCancellation({ booking: free(), currentTime: startOf(free()) - 30 * H, actorRole: "customer" });
+  check(
+    "100% coupon (>24h) → still 0% charge",
+    r2.allowed && r2.cancellationChargePercent === 0 && r2.finalRefund === 0,
+    JSON.stringify({ charge: r2.cancellationChargePercent })
+  );
+  const paid = mkBooking();
+  const r3 = evaluateCancellation({ booking: paid, currentTime: startOf(paid) - 2 * H, actorRole: "customer" });
+  check(
+    "paid booking keeps slab charge (no regression)",
+    r3.cancellationChargePercent === 50 && r3.fullyDiscounted !== true,
+    JSON.stringify({ charge: r3.cancellationChargePercent })
+  );
+}
+{
   const b = mkBooking({ cookArrived: true });
   const r = evaluateCancellation({ booking: b, currentTime: startOf(b) - 30 * H, actorRole: "admin" });
   check("cook arrived → admin records 0%", r.allowed && r.cancellationCategory === "COOK_ARRIVED" && r.finalRefund === 0);

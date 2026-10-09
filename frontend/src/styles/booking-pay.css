@@ -74,7 +74,14 @@
   color: #fff;
 }
 .bf-amount-label { font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255, 255, 255, 0.72); }
-.bf-amount { font-size: 2rem; font-weight: 800; color: #ffd24d; letter-spacing: -0.02em; }
+.bf-amount { font-size: 2rem; font-weight: 800; color: #ffd24d; letter-spacing: -0.02em; animation: bf-amount-in 0.35s ease-out; }
+@keyframes bf-amount-in {
+  from { transform: translateY(4px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bf-amount { animation: none; }
+}
 .bf-amount-note { font-size: 0.76rem; color: rgba(255, 255, 255, 0.75); text-align: center; }
 .bf-pay-btn { width: 100%; padding: 0.9rem; font-size: 1rem; }
 .bf-consent {
