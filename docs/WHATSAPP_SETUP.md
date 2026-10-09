@@ -5,7 +5,7 @@ messages for every major booking event:
 
 | Event | Customer | Cook |
 |---|---|---|
-| New booking request | ✅ request sent | ✅ new request + venue |
+| New booking request | — (in-app only) | ✅ new request + venue |
 | Cook accepts | ✅ pay within 5 min | ✅ (only if admin accepted for them) |
 | Cook rejects | ✅ declined (+refund note) | — |
 | Payment confirmed | ✅ confirmation + cook contact | ✅ job sheet + venue pin |
@@ -14,7 +14,7 @@ messages for every major booking event:
 | Service completed | ✅ please rate cook | ✅ closed |
 | Cancelled | ✅ | ✅ |
 | Rescheduled | ✅ old → new slot | ✅ old → new slot |
-| Expired (no response / unpaid) | ✅ | ✅ |
+| Expired (no response / unpaid) | — (in-app only) | ✅ |
 
 In-app notifications are **always** created too — WhatsApp is an extra push.
 If WhatsApp is unconfigured or Meta is down, bookings keep working normally

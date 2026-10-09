@@ -18,6 +18,10 @@ const normalizeIndianMobile = (phone) => {
 
 const serviceLabel = (booking) => String(booking?.serviceType || "").replace(/_/g, " ");
 
+// All user-visible times render in 12-hour clock ("3:30 PM", never "15:30").
+const { slotRange, to12h } = require("./time");
+const slotLabel = (booking) => slotRange(booking?.startTime, booking?.endTime);
+
 const dateLabel = (booking) =>
   booking?.date ? new Date(booking.date).toLocaleDateString("en-IN") : "";
 
@@ -47,7 +51,7 @@ const buildBookingRequestMessage = ({ customerName, booking }) => {
     "*New Cook Mitra Booking Request*",
     `Customer: ${customerName || "Customer"}`,
     `Service: ${serviceLabel(booking)}`,
-    `Date: ${dateLabel(booking)} | Time: ${booking?.startTime || ""} - ${booking?.endTime || ""}`,
+    `Date: ${dateLabel(booking)} | Time: ${slotLabel(booking)}`,
     `Venue: ${booking?.address || ""}`,
   ];
   if (mapsLink) lines.push(`Venue pin: ${mapsLink}`);
@@ -78,7 +82,7 @@ const buildCustomerConfirmationMessage = ({ cookName, cookPhone, booking }) => {
     `Cook: ${cookName || "Assigned cook"}`,
     `Cook's number: ${cookPhone || "will be shared shortly"}`,
     `Date: ${dateLabel(booking)}`,
-    `Service hours: ${booking?.startTime || ""} - ${booking?.endTime || ""}${booking?.durationHours ? ` (${booking.durationHours} hrs)` : ""}`,
+    `Service hours: ${slotLabel(booking)}${booking?.durationHours ? ` (${booking.durationHours} hrs)` : ""}`,
     `Venue: ${booking?.address || ""}`,
   ];
   if (venueMapsLink) lines.push(`Your venue pin: ${venueMapsLink}`);
@@ -98,7 +102,7 @@ const buildCookJobSheetMessage = ({ customerName, customerPhone, booking }) => {
     `Customer: ${customerName || "Customer"}`,
     `Customer number: ${customerPhone || "not shared"}`,
     `Service: ${serviceLabel(booking)}`,
-    `Date: ${dateLabel(booking)} | Time: ${booking?.startTime || ""} - ${booking?.endTime || ""}`,
+    `Date: ${dateLabel(booking)} | Time: ${slotLabel(booking)}`,
     `Venue: ${fullVenue(booking)}`,
   ];
   if (mapsLink) lines.push(`Location pin: ${mapsLink}`);
@@ -112,7 +116,7 @@ const buildCookJobSheetMessage = ({ customerName, customerPhone, booking }) => {
 };
 
 const buildHoursCompleteMessage = ({ booking, cookName, cookPhone, customerName }) => {
-  const endStr = booking?.endTime || "";
+  const endStr = to12h(booking?.endTime);
   const completedAt = booking?.hoursCompletedAt
     ? new Date(booking.hoursCompletedAt).toLocaleString("en-IN")
     : "";
@@ -137,7 +141,7 @@ const buildReviewMessage = ({ cookName, booking, reviewUrl }) => {
     "*Cook Mitra: How was your meal? Please rate your cook* ⭐",
     `Cook: ${cookName || "Your cook"}`,
     `Service: ${serviceLabel(booking)}`,
-    `Date: ${dateLabel(booking)}${booking?.startTime ? ` | ${booking.startTime} - ${booking.endTime || ""}` : ""}`,
+    `Date: ${dateLabel(booking)}${booking?.startTime ? ` | ${slotRange(booking.startTime, booking.endTime)}` : ""}`,
   ];
   const bid = booking?._id;
   if (bid) lines.push(`Booking ID: ${bid}`);
@@ -152,7 +156,7 @@ const buildAcceptedMessage = ({ cookName, cookPhone, booking, forCook = false, c
       "*Cook Mitra: You accepted a booking* ✅",
       `Customer: ${customerName || "Customer"}`,
       `Service: ${serviceLabel(booking)}`,
-      `Date: ${dateLabel(booking)} | Time: ${booking?.startTime || ""} - ${booking?.endTime || ""}`,
+      `Date: ${dateLabel(booking)} | Time: ${slotLabel(booking)}`,
       `Venue: ${booking?.address || ""}`,
       booking?._id ? `Booking ID: ${booking._id}` : null,
       "The customer has 5 minutes to complete payment. Please keep this slot free.",
@@ -165,7 +169,7 @@ const buildAcceptedMessage = ({ cookName, cookPhone, booking, forCook = false, c
     `Cook: ${cookName || "Your cook"}`,
     `Cook's number: ${cookPhone || "will be shared shortly"}`,
     `Service: ${serviceLabel(booking)}`,
-    `Date: ${dateLabel(booking)} | Time: ${booking?.startTime || ""} - ${booking?.endTime || ""}`,
+    `Date: ${dateLabel(booking)} | Time: ${slotLabel(booking)}`,
     booking?._id ? `Booking ID: ${booking._id}` : null,
     "Please complete payment within 5 minutes to confirm your slot.",
   ]
@@ -177,7 +181,7 @@ const buildRejectedMessage = ({ booking, refundNote }) => {
   return [
     "*Cook Mitra: Booking request declined*",
     `Service: ${serviceLabel(booking)}`,
-    `Date: ${dateLabel(booking)}${booking?.startTime ? ` | ${booking.startTime} - ${booking.endTime || ""}` : ""}`,
+    `Date: ${dateLabel(booking)}${booking?.startTime ? ` | ${slotRange(booking.startTime, booking.endTime)}` : ""}`,
     booking?._id ? `Booking ID: ${booking._id}` : null,
     "Your booking request was declined by the cook. Please try another cook or slot.",
     refundNote || null,
@@ -196,7 +200,7 @@ const buildCancelledMessage = ({ booking, cancelledBy, refundNote }) => {
   return [
     "*Cook Mitra: Booking cancelled*",
     `Service: ${serviceLabel(booking)}`,
-    `Date: ${dateLabel(booking)}${booking?.startTime ? ` | ${booking.startTime} - ${booking.endTime || ""}` : ""}`,
+    `Date: ${dateLabel(booking)}${booking?.startTime ? ` | ${slotRange(booking.startTime, booking.endTime)}` : ""}`,
     booking?._id ? `Booking ID: ${booking._id}` : null,
     who,
     refundNote || null,
@@ -211,9 +215,9 @@ const buildRescheduledMessage = ({ booking, oldDate, oldStart, oldEnd }) => {
     `Service: ${serviceLabel(booking)}`,
   ];
   if (oldDate || oldStart) {
-    lines.push(`Old slot: ${oldDate || ""}${oldStart ? ` | ${oldStart} - ${oldEnd || ""}` : ""}`);
+    lines.push(`Old slot: ${oldDate || ""}${oldStart ? ` | ${slotRange(oldStart, oldEnd)}` : ""}`);
   }
-  lines.push(`New slot: ${dateLabel(booking)} | ${booking?.startTime || ""} - ${booking?.endTime || ""}`);
+  lines.push(`New slot: ${dateLabel(booking)} | ${slotLabel(booking)}`);
   if (booking?._id) lines.push(`Booking ID: ${booking._id}`);
   lines.push("Please note the new date and time.");
   return lines.join("\n");
@@ -223,7 +227,7 @@ const buildExpiredMessage = ({ booking, reason }) => {
   return [
     "*Cook Mitra: Booking request expired* ⏰",
     `Service: ${serviceLabel(booking)}`,
-    `Date: ${dateLabel(booking)}${booking?.startTime ? ` | ${booking.startTime} - ${booking.endTime || ""}` : ""}`,
+    `Date: ${dateLabel(booking)}${booking?.startTime ? ` | ${slotRange(booking.startTime, booking.endTime)}` : ""}`,
     booking?._id ? `Booking ID: ${booking._id}` : null,
     reason || "The cook did not respond within 5 minutes. Please find another cook.",
   ]
@@ -235,7 +239,7 @@ const buildServiceStartedMessage = ({ booking, cookName, forCook = false }) => {
   if (forCook) {
     return [
       "*Cook Mitra: Service started* 🍳",
-      `Service: ${serviceLabel(booking)} | ${booking?.startTime || ""} - ${booking?.endTime || ""}`,
+      `Service: ${serviceLabel(booking)} | ${slotLabel(booking)}`,
       booking?._id ? `Booking ID: ${booking._id}` : null,
       "Your service clock is running. Enjoy the session!",
     ]
@@ -245,7 +249,7 @@ const buildServiceStartedMessage = ({ booking, cookName, forCook = false }) => {
   return [
     "*Cook Mitra: Your service has started!* 🍳",
     `Cook ${cookName || "your cook"} has started the session.`,
-    `Service: ${serviceLabel(booking)} | ${booking?.startTime || ""} - ${booking?.endTime || ""}`,
+    `Service: ${serviceLabel(booking)} | ${slotLabel(booking)}`,
     booking?._id ? `Booking ID: ${booking._id}` : null,
     "The cooking hours are now being counted. Enjoy your meal!",
   ]

@@ -27,6 +27,7 @@ const {
   timeToMinutes,
   intervalsOverlap,
 } = require("../utils/slots");
+const { slotRange } = require("../utils/time");
 
 const VERIFY_TOKEN = () =>
   String(
@@ -131,7 +132,7 @@ const findCookByWaId = async (waId) => {
 
 const bookingLine = (booking) => {
   const date = booking?.date ? new Date(booking.date).toLocaleDateString("en-IN") : "";
-  return `${String(booking?.serviceType || "").replace(/_/g, " ")} on ${date} ${booking?.startTime || ""}–${booking?.endTime || ""} (ID …${String(booking?._id || "").slice(-6)})`;
+  return `${String(booking?.serviceType || "").replace(/_/g, " ")} on ${date} ${slotRange(booking?.startTime, booking?.endTime)} (ID …${String(booking?._id || "").slice(-6)})`;
 };
 
 const reply = async (to, text) => {
@@ -152,14 +153,45 @@ const seenMessageBefore = async (wamid) => {
   }
 };
 
+// Keyword fallback for taps/text that carry no booking id (Marathi button
+// titles, approved-template quick replies). Template payloads are free-form
+// static strings from WhatsApp Manager ("Accept", "ACCEPT_BOOKING", ...),
+// so latin matching is normalized (case/punctuation-insensitive) instead of
+// \b-anchored. Marathi matches by substring (uses \b-unfriendly Devanagari).
+const parseKeywordAction = (s) => {
+  const t = String(s || "").trim();
+  if (!t) return null;
+  if (/स्वीकार/.test(t)) return "accept";
+  if (/नकार/.test(t)) return "reject";
+  const norm = t.toLowerCase().replace(/[^a-z]/g, "");
+  if (/^accept/.test(norm) || norm === "yes") return "accept";
+  if (/^(decline|reject)/.test(norm) || norm === "no") return "reject";
+  return null;
+};
+
 const parseInboundAction = (msg) => {
   const interactive = msg?.interactive?.button_reply;
-  if (interactive?.id) {
-    const m = String(interactive.id).match(/^(accept|reject):([0-9a-fA-F]{24})$/);
+  if (interactive?.id || interactive?.title) {
+    const m = String(interactive.id || "").match(/^(accept|reject):([0-9a-fA-F]{24})$/);
     if (m) return { action: m[1], bookingId: m[2] };
+    // Fallback: Marathi-titled buttons or clients echoing title as id.
+    const kw = parseKeywordAction(interactive.id) || parseKeywordAction(interactive.title);
+    if (kw) return { action: kw, bookingId: null };
+  }
+  // Approved-template quick-reply taps (WHATSAPP_REQUEST_TEMPLATE path):
+  // Meta delivers `{ type: "button", button: { payload, text } }` where the
+  // payload is the static string configured in WhatsApp Manager — it never
+  // carries a booking id, so resolution falls through to the cook's pending
+  // list (1 pending = act directly, N = list, 0 = "no pending").
+  const btn = msg?.button;
+  if (btn && (btn.payload || btn.text)) {
+    const kw = parseKeywordAction(btn.payload) || parseKeywordAction(btn.text);
+    if (kw) return { action: kw, bookingId: null };
   }
   const text = String(msg?.text?.body || "").trim();
   if (!text) return { action: null, bookingId: null };
+  const mm = text.match(/^स्वीकार[^\w]*([0-9a-fA-F]{24})?/) || text.match(/^नकार[^\w]*([0-9a-fA-F]{24})?/);
+  if (mm) return { action: /^स्वीकार/.test(text) ? "accept" : "reject", bookingId: mm[1] || null };
   const m = text.match(/^(accept|decline|reject|yes|no)\b[^\w]*([0-9a-fA-F]{24})?/i);
   if (!m) return { action: null, bookingId: null };
   const word = m[1].toLowerCase();
@@ -318,7 +350,7 @@ const acceptViaWhatsApp = async (cook, booking, senderE164) => {
     "",
     `ग्राहक: ${customerName || "ग्राहक"}`,
     `तारीख: ${marathi.formatMarathiDate(fresh?.date)}`,
-    `वेळ: ${fresh?.startTime || ""} ते ${fresh?.endTime || ""}`,
+    `वेळ: ${slotRange(fresh?.startTime, fresh?.endTime) || "माहिती उपलब्ध नाही"}`,
     "",
     "कृपया Cook Mitra वेबसाइट/अॅपवर बुकिंगचे पुढील तपशील पहा.",
   ];
@@ -447,13 +479,9 @@ const handleOneMessage = async (msg) => {
     const senderE164 = from.replace(/\D/g, "") || null;
     const { action, bookingId } = parseInboundAction(msg);
     if (!action) {
-      const cook = senderE164 ? await findCookByWaId(senderE164) : null;
-      if (cook && senderE164) {
-        await reply(
-          senderE164,
-          "To decide on a booking, tap Accept ✅ or Decline ❌ on its request message, or reply ACCEPT / DECLINE here."
-        );
-      }
+      // Unrecognized text (not ACCEPT/DECLINE) — stay silent by design
+      // (admin opt-out: no instruction spam on the cook's WhatsApp).
+      // The cook acts via the Accept/Decline buttons or the dashboard.
       return { ok: false, reason: "unrecognized" };
     }
     const cook = senderE164 ? await findCookByWaId(senderE164) : null;

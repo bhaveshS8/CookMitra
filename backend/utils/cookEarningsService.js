@@ -22,10 +22,32 @@ const audit = async ({ actor, actorRole, event, cook, refId, refModel, detail })
   }
 };
 
-const notifyCook = async ({ cookId, type, message, booking, link }) => {
+const notifyCook = async ({ cookId, type, message, booking, link, whatsapp }) => {
   try {
     await Notification.create({ user: cookId, type, message, booking: booking || null, link: link || "" });
   } catch {
+  }
+  // These notices stay in-app only — never push them to the cook's
+  // WhatsApp (admin decision: cooks check the earnings screen; WhatsApp
+  // is reserved for time-sensitive booking ops + payouts).
+  // Pass { whatsapp: true } explicitly to override for a specific call.
+  // Suppressed: rejections (spam-safe) + the info-only earnings updates
+  // the admin opted out of: lead_submitted, lead_verified,
+  // incentive_qualified, incentive_approved, incentive_held,
+  // referral_approved.
+  if (whatsapp === false) return;
+  if (whatsapp !== true) {
+    if (
+      type === "incentive_rejected" ||
+      type === "lead_rejected" ||
+      type === "lead_submitted" ||
+      type === "lead_verified" ||
+      type === "incentive_qualified" ||
+      type === "incentive_approved" ||
+      type === "incentive_held" ||
+      type === "referral_approved"
+    )
+      return;
   }
   try {
     const { sendWhatsAppText } = require("./whatsappApi");
@@ -188,6 +210,7 @@ const refreshIncentiveEligibility = async (cookUserId, now = new Date()) => {
         type: "incentive_qualified",
         message: `Incentive target reached: ${verifiedLeadCount}/${inc.target} verified leads (${inc.code}, ₹${inc.reward}). Awaiting admin approval.`,
         link: "/cook/earnings",
+        whatsapp: false,
       });
     }
     out.push({ ...inc, verifiedLeadCount, eligible, status });

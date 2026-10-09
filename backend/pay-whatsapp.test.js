@@ -205,8 +205,8 @@ const next = (e) => {
       "no live pin"
     );
     check(
-      "confirmation includes service hours",
-      selfMsg.includes("Service hours: 10:00 - 13:00 (3 hrs)"),
+      "confirmation includes service hours (12-hour clock)",
+      selfMsg.includes("Service hours: 10:00 AM - 1:00 PM (3 hrs)"),
       "service hours"
     );
     check(
@@ -234,7 +234,7 @@ const next = (e) => {
         selfMsg.includes("Cook: Priya Sharma") &&
         selfMsg.includes("Cook's number: 9876543210") &&
         !selfMsg.includes("Cook's live location: https://www.google.com/maps") &&
-        selfMsg.includes("Service hours: 10:00 - 13:00 (3 hrs)") &&
+        selfMsg.includes("Service hours: 10:00 AM - 1:00 PM (3 hrs)") &&
         !selfMsg.includes("Live tracking link:")
         ? 0
         : 1

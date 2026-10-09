@@ -18,6 +18,28 @@ const parseTimeStrict = (t) => {
 const isOnGrid = (minutes, step = 30) =>
   Number.isInteger(minutes) && minutes % step === 0;
 
+// Display helper: "15:30" -> "3:30 PM", "10:00" -> "10:00 AM".
+// Used by every user-visible message (WhatsApp builders, template params).
+// Unparseable input passes through unchanged so nothing ever blanks.
+const to12h = (hm) => {
+  const m = String(hm || "").trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return String(hm || "");
+  const h24 = Number(m[1]);
+  const min = m[2];
+  if (!Number.isInteger(h24) || h24 < 0 || h24 > 23) return String(hm || "");
+  const suffix = h24 < 12 ? "AM" : "PM";
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}:${min} ${suffix}`;
+};
+
+// "15:30"+"16:30" -> "3:30 PM - 4:30 PM". Empty sides collapse gracefully.
+const slotRange = (start, end) => {
+  const s = to12h(start);
+  const e = to12h(end);
+  if (s && e) return `${s} - ${e}`;
+  return s || e || "";
+};
+
 const parseDayStrict = (s) => {
   const m = String(s || "").match(DAY_RE);
   if (!m) return null;
@@ -144,6 +166,8 @@ module.exports = {
   OTP_VALIDITY_AFTER_END_MS,
   parseTimeStrict,
   isOnGrid,
+  to12h,
+  slotRange,
   parseDayStrict,
   istDayString,
   istNowMinutes,

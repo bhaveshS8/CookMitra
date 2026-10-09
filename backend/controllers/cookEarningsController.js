@@ -242,7 +242,7 @@ exports.createLead = async (req, res, next) => {
       throw e;
     }
     await audit({ actor: cookId, actorRole: "COOK", event: "lead_created", cook: cookId, refId: lead._id, refModel: "CookLead", detail: `${customerName} ${normalized}` });
-    await notifyCook({ cookId, type: "lead_submitted", message: `Lead for ${customerName} submitted — our team will verify it shortly.`, link: "/cook/earnings" });
+    await notifyCook({ cookId, type: "lead_submitted", message: `Lead for ${customerName} submitted — our team will verify it shortly.`, link: "/cook/earnings", whatsapp: false });
     res.status(201).json(lead);
   } catch (e) {
     next(e);

@@ -95,14 +95,14 @@ const parties = {
     check("confirmed sends ok", okRes.ok === true, JSON.stringify(okRes.ok));
     const recipients = sent.map((s) => s.to).sort();
     check(
-      "confirmed reaches cook + customer",
-      recipients.includes("919876543210") && recipients.includes("919123456780"),
+      "confirmed reaches customer only (cook copy is in-app)",
+      !recipients.includes("919876543210") && recipients.includes("919123456780"),
       recipients.join(",")
     );
     check("auth header is Bearer", true, "checked via stub");
     const cookBody = sent.find((s) => s.to === "919876543210")?.text?.body || "";
     const custBody = sent.find((s) => s.to === "919123456780")?.text?.body || "";
-    check("cook gets job sheet", cookBody.includes("Job Confirmed") && cookBody.includes("9123456780"), cookBody.slice(0, 60));
+    check("cook gets no job sheet on WhatsApp", cookBody === "", "suppressed");
     check("customer gets confirmation", custBody.includes("Payment Received") && custBody.includes("Priya Sharma"), custBody.slice(0, 60));
 
     const events = ["request", "accepted", "rejected", "confirmed", "started", "hours_complete", "completed", "review", "cancelled", "rescheduled", "expired"];

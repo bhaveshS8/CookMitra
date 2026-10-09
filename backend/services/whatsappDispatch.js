@@ -14,6 +14,7 @@
 const Booking = require("../models/Booking");
 const User = require("../models/User");
 const { normalizeIndianMobile } = require("../utils/whatsapp");
+const { slotRange } = require("../utils/time");
 const {
   isWhatsAppEnabled,
   sendInteractiveButtons,
@@ -208,6 +209,33 @@ const isRetryableResult = (res) => {
 // built ONLY by buildBookingRequestMessage() from named live fields. Only
 // a Meta-accepted message marks delivery `sent`; anything else stays
 // retryable.
+// Param order override: comma-separated names from
+// customer | date | weekday | time | duration | address.
+// Default matches the documented `new_booking_request` (mr) example order:
+// [customer, date dd/mm/yyyy, weekday, time-range, duration-hours, address].
+// If your approved template lists the placeholders in a different order
+// (e.g. address third), set e.g.
+// WHATSAPP_TEMPLATE_PARAM_ORDER=customer,date,address,weekday,time,duration
+// and the values are reordered to fit — no template re-approval needed.
+const DEFAULT_TEMPLATE_PARAM_ORDER = ["customer", "date", "weekday", "time", "duration", "address"];
+const templateParamOrder = () => {
+  try {
+    const raw = String(process.env.WHATSAPP_TEMPLATE_PARAM_ORDER || "").trim();
+    if (!raw) return DEFAULT_TEMPLATE_PARAM_ORDER;
+    const known = new Set(DEFAULT_TEMPLATE_PARAM_ORDER);
+    const clean = raw
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter((p) => known.has(p));
+    if (!clean.length) return DEFAULT_TEMPLATE_PARAM_ORDER;
+    // Append any missing slots so no value is ever dropped.
+    for (const k of DEFAULT_TEMPLATE_PARAM_ORDER) if (!clean.includes(k)) clean.push(k);
+    return clean;
+  } catch {
+    return DEFAULT_TEMPLATE_PARAM_ORDER;
+  }
+};
+
 const templateParamsForBooking = (booking, customerName) => {
   // Param order matches the approved `new_booking_request` (mr) example:
   // [customer, date dd/mm/yyyy, weekday, time-range, duration-hours, address].
@@ -230,7 +258,7 @@ const templateParamsForBooking = (booking, customerName) => {
     }
     const start = String(booking?.startTime || "").slice(0, 5);
     const end = String(booking?.endTime || "").slice(0, 5);
-    const timeRange = start && end ? `${start} - ${end}` : start || end || "";
+    const timeRange = slotRange(start, end) || start || end || "";
     const duration = booking?.durationHours != null ? String(booking.durationHours) : "";
     const address = String(booking?.address || "").trim();
     let weekday = "";
@@ -240,14 +268,15 @@ const templateParamsForBooking = (booking, customerName) => {
       weekday = "";
     }
     if (weekday === "माहिती उपलब्ध नाही") weekday = "";
-    return [
-      String(customerName || "ग्राहक"),
-      dateStr,
+    const byName = {
+      customer: String(customerName || "ग्राहक"),
+      date: dateStr,
       weekday,
-      timeRange,
+      time: timeRange,
       duration,
       address,
-    ];
+    };
+    return templateParamOrder().map((k) => byName[k] ?? "");
   } catch {
     return [String(customerName || "ग्राहक")];
   }
@@ -486,7 +515,9 @@ const fanOutBookingRequest = async (booking, eligibleCooks, opts = {}) => {
   }
 };
 
-// Cook scheduled message (requested -> accepted). Idempotent per cook.
+// Cook scheduled message (requested -> accepted -> paid). Idempotent per cook.
+// Gate: sent only after payment is done — the cook gets this job sheet once
+// the booking is real money, never on bare acceptance.
 const sendCookScheduledMessage = async (booking, opts = {}) => {
   try {
     if (!booking?._id || !booking?.cook) return { ok: false, reason: "no-cook" };
@@ -494,6 +525,8 @@ const sendCookScheduledMessage = async (booking, opts = {}) => {
     const cookId = String(booking.cook);
     const fresh = (await loadFreshBooking(booking._id)) || booking;
     if (isSent(fresh, cookId, SCHEDULED_KIND)) return { ok: true, skipped: true, reason: "already-sent" };
+    const paid = String(fresh?.payment?.status || booking?.payment?.status || "").toLowerCase() === "paid";
+    if (!paid) return { ok: false, skipped: true, reason: "payment-pending" };
     const phones = await resolveCookPhones([cookId]);
     const contact = phones.get(cookId);
     if (!contact) return { ok: false, reason: "no-whatsapp-number" };
@@ -650,4 +683,5 @@ module.exports = {
   notifyWhatsAppEvent,
   findDispatchEntry,
   isSent,
+  templateParamOrder,
 };

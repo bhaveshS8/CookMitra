@@ -215,9 +215,36 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       );
       Booking.findById = async () => full;
       Booking.updateOne = async () => { full.status = "accepted"; return { modifiedCount: 1 }; };
-      const raw = inboundBody([textMsg(COOK_WA, "ACCEPT please")]);
+      // Approved-template quick-reply tap: Meta sends type/button, static payload.
+      const qr = { from: COOK_WA, id: "wamid.qr1", type: "button", button: { payload: "Accept", text: "✅ बुकिंग स्वीकारा" } };
+      const raw = inboundBody([qr]);
       const r = await postInbound(raw, sign(raw));
-      check("text ACCEPT (single pending) works", r.statusCode === 200 && r.body?.handled === 1 && full.status === "accepted", JSON.stringify(r.body));
+      check("template Accept tap (single pending) accepts directly", r.statusCode === 200 && r.body?.handled === 1 && full.status === "accepted", JSON.stringify(r.body));
+    }
+
+    {
+      sent.length = 0; notifs.length = 0;
+      const full = mkBooking();
+      mockParties();
+      Booking.find = mockFind(
+        [{ _id: BID, serviceType: "cook_for_me", date: full.date, startTime: "10:00", endTime: "12:00" }],
+        []
+      );
+      Booking.findById = async () => full;
+      Booking.updateOne = async () => { full.status = "accepted"; return { modifiedCount: 1 }; };
+      const raw = inboundBody([textMsg(COOK_WA, "स्वीकारा")]);
+      const r = await postInbound(raw, sign(raw));
+      check("Marathi text ACCEPT works", r.statusCode === 200 && r.body?.handled === 1 && full.status === "accepted", JSON.stringify(r.body));
+    }
+
+    {
+      // Marathi-titled interactive button without an accept:<id> payload.
+      const p = ctrl.__test.parseInboundAction({ interactive: { button_reply: { id: "tap", title: "✅ बुकिंग स्वीकारा" } } });
+      check("Marathi button title parses to accept", p.action === "accept" && p.bookingId === null, JSON.stringify(p));
+      const q = ctrl.__test.parseInboundAction({ type: "button", button: { payload: "Decline", text: "❌ नकार द्या" } });
+      check("template Decline tap parses to reject", q.action === "reject" && q.bookingId === null, JSON.stringify(q));
+      const u = ctrl.__test.parseInboundAction({ type: "text", text: { body: "hello, any work today?" } });
+      check("unrelated text stays unrecognized (silent)", u.action === null, JSON.stringify(u));
     }
 
     {

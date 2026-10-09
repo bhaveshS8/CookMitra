@@ -73,7 +73,7 @@ exports.verifyLead = async (req, res, next) => {
     } catch {
     }
     await audit({ actor: req.user.id, actorRole: "ADMIN", event: "lead_verified", cook: lead.cook, refId: lead._id, refModel: "CookLead", detail: `${lead.customerName} verified` });
-    await notifyCook({ cookId: lead.cook, type: "lead_verified", message: `Lead for ${lead.customerName} is verified — it now counts toward your incentives.`, link: "/cook/earnings" });
+    await notifyCook({ cookId: lead.cook, type: "lead_verified", message: `Lead for ${lead.customerName} is verified — it now counts toward your incentives.`, link: "/cook/earnings", whatsapp: false });
     res.json(updated);
   } catch (e) {
     next(e);
@@ -91,7 +91,8 @@ exports.rejectLead = async (req, res, next) => {
       leadId: lead._id, adminId: req.user.id, status: "rejected", verificationStatus: "rejected", reason,
     });
     await audit({ actor: req.user.id, actorRole: "ADMIN", event: "lead_rejected", cook: lead.cook, refId: lead._id, refModel: "CookLead", detail: reason });
-    await notifyCook({ cookId: lead.cook, type: "lead_rejected", message: `Lead for ${lead.customerName} was not approved: ${reason}`, link: "/cook/earnings" });
+    // In-app only — same no-WhatsApp-on-rejection rule as incentives.
+    await notifyCook({ cookId: lead.cook, type: "lead_rejected", message: `Lead for ${lead.customerName} was not approved: ${reason}`, link: "/cook/earnings", whatsapp: false });
     res.json(updated);
   } catch (e) {
     next(e);
@@ -158,7 +159,7 @@ exports.approveIncentive = async (req, res, next) => {
     inc.approvedBy = req.user.id;
     await inc.save();
     await audit({ actor: req.user.id, actorRole: "ADMIN", event: "incentive_approved", cook: inc.cook, refId: inc._id, refModel: "CookIncentive", detail: `${inc.code} ₹${inc.reward} approved` });
-    await notifyCook({ cookId: inc.cook, type: "incentive_approved", message: `Incentive approved: ${inc.code} — ₹${inc.reward} will be included in your payout.`, link: "/cook/earnings" });
+    await notifyCook({ cookId: inc.cook, type: "incentive_approved", message: `Incentive approved: ${inc.code} — ₹${inc.reward} will be included in your payout.`, link: "/cook/earnings", whatsapp: false });
     res.json(inc);
   } catch (e) {
     next(e);
@@ -172,11 +173,14 @@ exports.rejectIncentive = async (req, res, next) => {
     const inc = await CookIncentive.findById(req.params.id);
     if (!inc) return res.status(404).json({ message: "Incentive not found" });
     if (["paid"].includes(inc.status)) return res.status(400).json({ message: "Paid incentives cannot be rejected" });
+    if (inc.status === "rejected") return res.json(inc); // idempotent: no duplicate cook spam
     inc.status = "rejected";
     inc.rejectionReason = reason;
     await inc.save();
     await audit({ actor: req.user.id, actorRole: "ADMIN", event: "incentive_rejected", cook: inc.cook, refId: inc._id, refModel: "CookIncentive", detail: reason });
-    await notifyCook({ cookId: inc.cook, type: "incentive_rejected", message: `Incentive ${inc.code} was not approved: ${reason}`, link: "/cook/earnings" });
+    // In-app notification only — notifyCook() deliberately skips WhatsApp
+    // for incentive_rejected (see utils/cookEarningsService.js).
+    await notifyCook({ cookId: inc.cook, type: "incentive_rejected", message: `Incentive ${inc.code} was not approved: ${reason}`, link: "/cook/earnings", whatsapp: false });
     res.json(inc);
   } catch (e) {
     next(e);
@@ -190,7 +194,7 @@ exports.holdIncentive = async (req, res, next) => {
     inc.status = "held";
     if (req.body?.reason) inc.rejectionReason = String(req.body.reason).slice(0, 300);
     await inc.save();
-    await notifyCook({ cookId: inc.cook, type: "incentive_rejected", message: `Incentive ${inc.code} is on hold — our team will review it shortly.`, link: "/cook/earnings" });
+    await notifyCook({ cookId: inc.cook, type: "incentive_held", message: `Incentive ${inc.code} is on hold — our team will review it shortly.`, link: "/cook/earnings", whatsapp: false });
     res.json(inc);
   } catch (e) {
     next(e);
@@ -238,7 +242,7 @@ exports.approveReferral = async (req, res, next) => {
     ref.approvedBy = req.user.id;
     await ref.save();
     await audit({ actor: req.user.id, actorRole: "ADMIN", event: "referral_approved", cook: ref.referrer, refId: ref._id, refModel: "CookReferral", detail: `₹${ref.reward} approved (${live} bookings)` });
-    await notifyCook({ cookId: ref.referrer, type: "referral_approved", message: `Referral reward approved: ₹${ref.reward} — your referred cook completed ${live} verified bookings.`, link: "/cook/earnings" });
+    await notifyCook({ cookId: ref.referrer, type: "referral_approved", message: `Referral reward approved: ₹${ref.reward} — your referred cook completed ${live} verified bookings.`, link: "/cook/earnings", whatsapp: false });
     res.json(ref);
   } catch (e) {
     next(e);

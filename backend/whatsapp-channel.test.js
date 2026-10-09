@@ -281,7 +281,7 @@ const errOf = async (fn) => {
       const msg = marathi.buildBookingRequestMessage({ booking: b, customerName: "Aditi Rao" });
       check("T1 template has required header", msg.startsWith("🍳 नवीन Cook Mitra बुकिंग विनंती"), msg.slice(0, 40));
       check("T1 customer name mapped", msg.includes("👤 ग्राहक: Aditi Rao"), "name");
-      check("T1 time and duration separate", msg.includes("🕐 वेळ: 10:00 ते 12:00") && msg.includes("⏱️ कालावधी: 2 तास"), "slot");
+      check("T1 time and duration separate (12-hour clock)", msg.includes("🕐 वेळ: 10:00 AM ते 12:00 PM") && msg.includes("⏱️ कालावधी: 2 तास"), "slot");
       check("T1 address/guests/notes mapped", msg.includes("Flat 7, Sunshine Society, Pune") && msg.includes("👥 व्यक्ती: 4") && msg.includes("less spicy"), "fields");
       check("T1 no extra booking info", !msg.includes("594") && !msg.includes("cook_for_me") && !msg.includes("माझ्यासाठी") && !msg.includes("मानधन") && !msg.includes("कालबाह्य") && !/Booking ID|requestExpires|Expiry/i.test(msg), "allowlist");
       check("T1 serviceType Marathi mapping intact", marathi.serviceTypeMarathi("cook_for_me") === "माझ्यासाठी स्वयंपाक", marathi.serviceTypeMarathi("cook_for_me"));
@@ -482,17 +482,30 @@ const errOf = async (fn) => {
       check("T12 has booking link", body.includes("/bookings/"), "link");
     }
 
-    // ---- T13: cook scheduled message idempotent ----
+    // ---- T13: cook scheduled message idempotent (paid only) ----
     {
       reset();
-      const b = mkBooking({ status: "accepted", cook: COOK_A });
+      const b = mkBooking({ status: "accepted", cook: COOK_A, payment: { status: "paid", paidAmount: 699 } });
       sentPayloads.length = 0;
       const r1 = await dispatch.sendCookScheduledMessage(b, { customerName: "Aditi Rao" });
       const body = (sentPayloads.find((p) => p.type === "text")?.text?.body) || "";
-      check("T13 scheduled sent to cook", r1?.ok === true && body.includes("बुकिंग निश्चित"), body.slice(0, 50));
+      check("T13 scheduled sent to cook", r1?.ok === true && body.includes("नमस्कार") && body.includes("google.com/maps/dir"), body.slice(0, 80));
+      check("T13 scheduled drops service/payout/url blocks", !body.includes("🍽️ सेवा:") && !body.includes("मानधन") && !body.includes("बुकिंग तपशील"), "trimmed");
       sentPayloads.length = 0;
       const r2 = await dispatch.sendCookScheduledMessage(b, { customerName: "Aditi Rao" });
       check("T13 scheduled resend skipped", sentPayloads.length === 0 && r2?.reason === "already-sent", r2?.reason || "sent");
+    }
+
+    // ---- T13b: unpaid booking -> scheduled message held until payment ----
+    {
+      reset();
+      const b = mkBooking({ status: "accepted", cook: COOK_A, payment: { status: "pending", paidAmount: 0 } });
+      sentPayloads.length = 0;
+      const r = await dispatch.sendCookScheduledMessage(b, { customerName: "Aditi Rao" });
+      check("T13b unpaid holds scheduled message", r?.reason === "payment-pending" && sentPayloads.length === 0, `${r?.reason} sends=${sentPayloads.length}`);
+      b.payment = { status: "paid", paidAmount: 699 };
+      const r2 = await dispatch.sendCookScheduledMessage(b, { customerName: "Aditi Rao" });
+      check("T13b paid releases scheduled message", r2?.ok === true && sentPayloads.length === 1, `ok=${r2?.ok} sends=${sentPayloads.length}`);
     }
 
     // ---- T14: expiry + payment-expiry Marathi notices exist ----

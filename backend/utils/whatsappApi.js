@@ -15,6 +15,7 @@ const {
   buildServiceCompletedMessage,
   bookingUrl,
 } = require("./whatsapp");
+const { slotRange } = require("./time");
 
 const API_VERSION = process.env.WHATSAPP_API_VERSION || "v22.0";
 
@@ -230,7 +231,7 @@ const sendCookRequestInteractive = async (cookPhone, { customerName, booking }) 
             parameters: [
               { type: "text", text: String(customerName || "Customer").slice(0, 100) },
               { type: "text", text: String(booking?.serviceType || "").replace(/_/g, " ").slice(0, 100) },
-              { type: "text", text: `${dateStr} ${booking?.startTime || ""}-${booking?.endTime || ""}`.slice(0, 100) },
+              { type: "text", text: `${dateStr} ${slotRange(booking?.startTime, booking?.endTime)}`.slice(0, 100) },
               { type: "text", text: bookingId.slice(-6) },
             ],
           },
@@ -301,16 +302,10 @@ const sendBookingWhatsApp = async (event, booking, opts = {}) => {
 
     switch (event) {
       case "request":
+        // Customer copy suppressed (admin opt-out) — in-app only.
+        // Cooks still get the interactive Accept/Decline request below.
         cookMessage = null;
-        customerMessage = [
-          "*Cook Mitra: Booking request sent* ✅",
-          `Service: ${String(booking?.serviceType || "").replace(/_/g, " ")}`,
-          `Date: ${booking?.date ? new Date(booking.date).toLocaleDateString("en-IN") : ""}${booking?.startTime ? ` | ${booking.startTime} - ${booking.endTime || ""}` : ""}`,
-          booking?._id ? `Booking ID: ${booking._id}` : null,
-          "The cook has 5 minutes to accept. We will notify you on WhatsApp the moment they respond.",
-        ]
-          .filter(Boolean)
-          .join("\n");
+        customerMessage = null;
         break;
       case "accepted":
         customerMessage = buildAcceptedMessage({ cookName, cookPhone, booking });
@@ -322,7 +317,9 @@ const sendBookingWhatsApp = async (event, booking, opts = {}) => {
         customerMessage = buildRejectedMessage({ booking, refundNote: opts.refundNote });
         break;
       case "confirmed":
-        cookMessage = buildCookJobSheetMessage({ customerName, customerPhone, booking });
+        // Customer still gets the confirmation; the cook's job-sheet copy
+        // is in-app only (admin opted out of cook WhatsApp for this event).
+        cookMessage = null;
         customerMessage = buildCustomerConfirmationMessage({ cookName, cookPhone, booking });
         break;
       case "started":
@@ -334,8 +331,10 @@ const sendBookingWhatsApp = async (event, booking, opts = {}) => {
         cookMessage = buildHoursCompleteMessage({ booking, cookName, cookPhone, customerName });
         break;
       case "completed":
+        // Customer still gets the completion + review nudge; the cook's
+        // copy is in-app only (admin opted out of cook WhatsApp here).
         customerMessage = buildServiceCompletedMessage({ booking, cookName });
-        cookMessage = buildServiceCompletedMessage({ booking, forCook: true });
+        cookMessage = null;
         break;
       case "review": {
         const link = opts.reviewUrl || bookingUrl(booking?._id);
@@ -361,7 +360,9 @@ const sendBookingWhatsApp = async (event, booking, opts = {}) => {
         });
         break;
       case "expired":
-        customerMessage = buildExpiredMessage({ booking, reason: opts.reason });
+        // Customer copy suppressed (admin opt-out) — in-app only.
+        // Cook still gets the "slot open again" notice below.
+        customerMessage = null;
         cookMessage = buildExpiredMessage({
           booking,
           reason: "A booking request expired without a response — the slot is open again.",

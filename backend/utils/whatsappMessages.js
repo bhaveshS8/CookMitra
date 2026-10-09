@@ -10,6 +10,7 @@
 // interactive flows should use the builders below.
 
 const { FRONTEND_BASE_URL } = require("./whatsapp");
+const { to12h, slotRange } = require("./time");
 
 const SERVICE_TYPE_MARATHI = {
   cook_for_me: "माझ्यासाठी स्वयंपाक",
@@ -131,8 +132,35 @@ const formatAddress = (booking) => {
   ]
     .map((part) => String(part).trim())
     .filter(Boolean);
-  const joined = parts.join(", ");
+  // De-dup: detail fields often repeat the full address text verbatim.
+  const out = [];
+  for (const p of parts) {
+    const low = p.toLowerCase();
+    if (out.some((q) => q.toLowerCase().includes(low) || low.includes(q.toLowerCase()))) continue;
+    out.push(p);
+  }
+  const joined = out.join(", ");
   return joined || "—";
+};
+
+// Tappable Google Maps route to the venue — the cook taps and follows
+// navigation directly. Prefers the stored GPS pin, falls back to an
+// address search when no coordinates exist.
+const mapsDirLink = (booking) => {
+  try {
+    const lat = booking?.location?.lat;
+    const lng = booking?.location?.lng;
+    if (lat != null && lng != null && String(lat) !== "" && String(lng) !== "") {
+      return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+    }
+    const addr = formatAddress(booking);
+    if (addr && addr !== "—") {
+      return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 };
 
 const formatNotes = (booking) => {
@@ -176,11 +204,11 @@ const buildBookingRequestMessage = ({ booking, customerName } = {}) => {
   const weekday = booking?.date ? calculateMarathiWeekday(booking.date) : NOT_AVAILABLE;
   const startTime =
     booking?.startTime != null && String(booking.startTime).trim() !== ""
-      ? String(booking.startTime).trim().slice(0, 5)
+      ? to12h(String(booking.startTime).trim().slice(0, 5))
       : "";
   const endTime =
     booking?.endTime != null && String(booking.endTime).trim() !== ""
-      ? String(booking.endTime).trim().slice(0, 5)
+      ? to12h(String(booking.endTime).trim().slice(0, 5))
       : "";
   const timeLine = startTime && endTime ? `${startTime} ते ${endTime}` : NOT_AVAILABLE;
   const durationHours =
@@ -223,39 +251,32 @@ const buildBookingRequestMessage = ({ booking, customerName } = {}) => {
   ].join("\n");
 };
 
-const buildCookBookingScheduledMessage = ({ booking, cookName, customerName, bookingUrl } = {}) =>
-  [
-    "✅ Cook Mitra — बुकिंग निश्चित झाली!",
-    "",
+const buildCookBookingScheduledMessage = ({ booking, cookName, customerName, bookingUrl } = {}) => {
+  const dirLink = mapsDirLink(booking);
+  return [
     `नमस्कार ${cookName || "कुक"} 🙏`,
     "",
     "तुमची बुकिंग यशस्वीपणे निश्चित झाली आहे.",
     "",
     `👤 ग्राहक: ${customerName || "ग्राहक"}`,
     `📅 तारीख: ${formatServiceDate(booking)}`,
-    `⏰ वेळ: ${booking?.startTime || ""} ते ${booking?.endTime || ""}`,
+    `⏰ वेळ: ${slotRange(booking?.startTime, booking?.endTime) || "माहिती उपलब्ध नाही"}`,
     `⏱️ कालावधी: ${booking?.durationHours ?? ""} तास`,
-    "",
-    "🍽️ सेवा:",
-    serviceTypeMarathi(booking?.serviceType),
     "",
     `👥 व्यक्ती: ${booking?.guests ?? ""}`,
     "",
     "📍 पत्ता:",
     formatAddress(booking),
+    ...(dirLink ? ["", "🗺️ रस्ता पहा (Google Maps):", dirLink] : []),
     "",
     "📝 अतिरिक्त माहिती:",
     formatNotes(booking),
     "",
-    `💰 तुमचे मानधन: ₹${formatPayout(booking)}`,
-    "",
     "कृपया दिलेल्या वेळेवर ग्राहकाच्या पत्त्यावर पोहोचा.",
-    "",
-    "📌 बुकिंग तपशील:",
-    bookingUrl || bookingUrlFor(booking?._id),
     "",
     "— Cook Mitra",
   ].join("\n");
+};
 
 const buildCustomerBookingConfirmedMessage = ({ booking, cookName, customerName, paidAmount, bookingUrl } = {}) => {
   const amount =
@@ -269,7 +290,7 @@ const buildCustomerBookingConfirmedMessage = ({ booking, cookName, customerName,
     "",
     `👩‍🍳 कुक: ${cookName || "नियुक्त कुक"}`,
     `📅 तारीख: ${formatServiceDate(booking)}`,
-    `⏰ वेळ: ${booking?.startTime || ""} ते ${booking?.endTime || ""}`,
+    `⏰ वेळ: ${slotRange(booking?.startTime, booking?.endTime) || "माहिती उपलब्ध नाही"}`,
     `⏱️ कालावधी: ${booking?.durationHours ?? ""} तास`,
     "",
     "🍽️ सेवा:",
@@ -355,4 +376,5 @@ module.exports = {
   buildBookingRejectedMessage,
   buildPaymentExpiredMessage,
   bookingUrlFor,
+  mapsDirLink,
 };

@@ -3825,6 +3825,11 @@ exports.payBooking = async (req, res, next) => {
         });
         await booking.save();
       }
+      // Webhook-confirmed stragglers reach the cook's scheduled message here.
+      try {
+        require("../services/whatsappDispatch").notifyWhatsAppEvent("booking.accepted", booking);
+      } catch {
+      }
       const paidObj = booking.toObject ? booking.toObject() : booking;
       return res.json({ ...paidObj, alreadyPaid: true });
     }
@@ -4118,6 +4123,12 @@ exports.payBooking = async (req, res, next) => {
       customerName: customer?.name,
       customerPhone: customer?.phone,
     });
+    // Cook's scheduled job sheet goes out only now — after payment is done
+    // (sendCookScheduledMessage skips while unpaid; already-sent is deduped).
+    try {
+      require("../services/whatsappDispatch").notifyWhatsAppEvent("booking.accepted", booking);
+    } catch {
+    }
 
     const obj = booking.toObject ? booking.toObject() : booking;
     res.json({ ...obj, cookWhatsappUrl, customerWhatsappUrl });

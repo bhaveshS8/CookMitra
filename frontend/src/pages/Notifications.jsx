@@ -83,7 +83,6 @@ const Notifications = () => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [filter, setFilter] = useState("all");
 
   const fetchNotifications = async () => {
     try {
@@ -146,14 +145,6 @@ const Notifications = () => {
     }
   };
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
-  const filtered =
-    filter === "unread"
-      ? notifications.filter((n) => !n.read)
-      : filter === "read"
-        ? notifications.filter((n) => n.read)
-        : notifications;
-
   const backTo = user?.role === "cook" ? "/dashboard/cook-bookings" : user?.role === "admin" ? "/admin" : "/dashboard/my-bookings";
   const backLabel = user?.role === "cook" ? "Back to Cook Dashboard" : user?.role === "admin" ? "Back to Admin Dashboard" : "Back to My Bookings";
 
@@ -169,18 +160,6 @@ const Notifications = () => {
       </div>
       </div>
 
-      <div className="tabs-navigation-bar">
-        <button className={`tab-btn ${filter === "all" ? "active" : ""}`} onClick={() => setFilter("all")}>
-          All ({notifications.length})
-        </button>
-        <button className={`tab-btn ${filter === "unread" ? "active" : ""}`} onClick={() => setFilter("unread")}>
-          Unread ({unreadCount})
-        </button>
-        <button className={`tab-btn ${filter === "read" ? "active" : ""}`} onClick={() => setFilter("read")}>
-          Read ({notifications.length - unreadCount})
-        </button>
-      </div>
-
       {error && (
         <div className="error-alert-banner">
           <AlertCircle size={18} /> {error}
@@ -192,9 +171,9 @@ const Notifications = () => {
           <div className="spinner"></div>
           <p style={{ color: "var(--slate-500)", fontWeight: 600 }}>Loading notifications...</p>
         </div>
-      ) : filtered.length > 0 ? (
+      ) : notifications.length > 0 ? (
         <div className="bookings-list-modern">
-          {filtered.map((n) => {
+          {notifications.map((n) => {
             const meta = TYPE_META[n.type] || TYPE_META.general;
             const Icon = meta.icon;
             const target = targetFor(n);
@@ -261,16 +240,10 @@ const Notifications = () => {
           <div className="empty-state-icon">
             <Bell size={28} />
           </div>
-          <h3>{filter === "all" ? "No notifications yet" : `No ${filter} notifications`}</h3>
+          <h3>No notifications yet</h3>
           <p style={{ fontSize: "0.95rem", color: "var(--slate-600)", marginBottom: "1rem" }}>
-            {filter === "all" ? (
-              <>
-                Booking requests, acceptances, arrivals, and reviews show up here as activity
-                happens on your account.
-              </>
-            ) : (
-              <>Try a different filter — or check back after your next booking update.</>
-            )}
+            Booking requests, acceptances, arrivals, and reviews show up here as activity
+            happens on your account.
           </p>
           <Link to={backTo} className="btn btn-primary">
             {user?.role === "cook" ? <ChefHat size={16} /> : <Calendar size={16} />}
