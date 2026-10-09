@@ -20,10 +20,15 @@ const codeRule = (field = "code", optional = false) => {
     .isString()
     .withMessage("Coupon code must be text")
     .trim()
-    .isLength({ min: 3, max: 24 })
-    .withMessage("Coupon code must be 3–24 characters")
-    .matches(/^[A-Za-z0-9\s\-_]+$/)
-    .withMessage("Coupon code may only contain letters, numbers, spaces and hyphens");
+    .custom((v) => {
+      // Forgiving: strip separators/invisible junk first, then require
+      // 3-24 letters-or-numbers (mirrors normalizeCode in utils/coupons).
+      const clean = String(v || "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
+      if (!/^[A-Z0-9]{3,24}$/.test(clean)) {
+        throw new Error("Coupon code must be 3-24 letters or numbers");
+      }
+      return true;
+    });
 };
 const couponBodyRules = () => {
   const O = (field) => body(field).optional();

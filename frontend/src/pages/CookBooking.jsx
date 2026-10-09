@@ -210,6 +210,14 @@ const CookBooking = () => {
   const recommendedSlot = useMemo(() => pickRecommendedSlot(visibleSlotOptions), [visibleSlotOptions]);
   const [totalCooksFound, setTotalCooksFound] = useState(null);
 
+  // After 8 PM there is nothing bookable for today (service day is 8 AM -
+  // 8 PM) — step 2 names the hours instead of a generic "no slots" note.
+  const pastServiceDay = useMemo(() => {
+    if (form.date !== localTodayStr()) return false;
+    const n = new Date(nowTick);
+    return n.getHours() * 60 + n.getMinutes() >= SERVICE_END_MIN;
+  }, [form.date, nowTick]);
+
   useEffect(() => {
     const hasFix =
       Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng);
@@ -1042,13 +1050,29 @@ const CookBooking = () => {
           {searched && visibleSlotOptions.length === 0 && (
             <div className="no-data">
               <p>
-                {totalCooksFound === 0
+                {pastServiceDay
+                  ? "Our service is available 8 AM – 8 PM — today's slots are over. Please book for tomorrow or another date."
+                  : totalCooksFound === 0
                   ? "No cooks available yet — please try another date."
                   : slotSuggestions.length > 0
                     ? `No ${form.durationHours}-hour slots on this date — but shorter sessions are free.`
                     : "No free slots on this date — try another date or duration."}
               </p>
-              {slotSuggestions.length > 0 && (
+              {pastServiceDay ? (
+                <div className="od-suggest-row" role="group" aria-label="Book another day">
+                  <button
+                    key="tomorrow"
+                    type="button"
+                    className="bk-dur-chip"
+                    onClick={() => {
+                      setForm((f) => ({ ...f, date: localTomorrowStr() }));
+                      setStep(1);
+                    }}
+                  >
+                    Book for tomorrow
+                  </button>
+                </div>
+              ) : slotSuggestions.length > 0 && (
                 <div className="od-suggest-row" role="group" aria-label="Durations with free slots">
                   {slotSuggestions.map((h) => (
                     <button

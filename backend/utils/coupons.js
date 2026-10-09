@@ -1,9 +1,13 @@
 
+// Forgiving normalization: uppercase + drop spaces, hyphens, underscores
+// and invisible copy-paste junk (zero-width spaces, BOM). Every lookup and
+// every stored code goes through this, so "welcome-50", "WELCOME 50" and
+// "WELCOME50" are one coupon.
 const normalizeCode = (code) =>
   String(code || "")
     .trim()
     .toUpperCase()
-    .replace(/[\s\-_]+/g, "");
+    .replace(/[^A-Z0-9]+/g, "");
 
 const rejectionReason = (
   coupon,

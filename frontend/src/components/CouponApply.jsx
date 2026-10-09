@@ -35,7 +35,7 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
   }, [initialCode, amount, serviceType]);
 
   const apply = async (override, auto = false) => {
-    const c = String(override ?? code).trim().toUpperCase().replace(/[\s\-_]+/g, "");
+    const c = String(override ?? code).trim().toUpperCase().replace(/[^A-Za-z0-9]+/g, "");
     if (!c || applying) return;
     setApplying(true);
     setError("");
@@ -101,7 +101,7 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
           className="form-control coupon-input"
           value={code}
           onChange={(e) => {
-            setCode(e.target.value.toUpperCase().replace(/\s+/g, ""));
+            setCode(e.target.value.toUpperCase().replace(/[^A-Za-z0-9]+/g, ""));
             setError("");
           }}
           onKeyDown={(e) => {
