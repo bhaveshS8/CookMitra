@@ -41,6 +41,24 @@ const CITY_AREA_OPTIONS = ["Hadapsar", "Manjri", "Shewalwadi", "Loni"];
 // otherwise leave blank so the user picks from the dropdown.
 const normCity = (c) => (CITY_AREA_OPTIONS.includes(String(c || "").trim()) ? String(c).trim() : "");
 
+// Remembered city/area: once the user picks (or a valid city is applied),
+// it stays the form default across visits until the user picks another one.
+const CITY_MEMORY_KEY = "cm-booking-city-v1";
+const loadRememberedCity = () => {
+  try {
+    return normCity(localStorage.getItem(CITY_MEMORY_KEY));
+  } catch {
+    return "";
+  }
+};
+const rememberCity = (v) => {
+  try {
+    const c = normCity(v);
+    if (c) localStorage.setItem(CITY_MEMORY_KEY, c);
+  } catch {
+  }
+};
+
 // A GPS fix older than this no longer counts as "detected" — the user gets
 // the manual address form (prefilled where possible) instead of a stale pin.
 const DETECTED_VENUE_FRESH_MS = 2 * 3600 * 1000;
@@ -138,7 +156,7 @@ const CookBooking = () => {
     flatNo: "",
     society: "",
     landmark: "",
-    city: "",
+    city: loadRememberedCity(),
     guests: "4",
     durationHours: "1",
     customDishes: "",
@@ -209,7 +227,9 @@ const CookBooking = () => {
     }
     autoFilled.current = true;
     setForm((f) => {
-      if (f.flatNo || f.society || f.landmark || f.city) return f;
+      // City intentionally excluded: a remembered/manual city always wins
+      // over GPS, while street fields still auto-fill around it.
+      if (f.flatNo || f.society || f.landmark) return f;
       const exact = siteLocation.hasHouseNumber ? (siteLocation.exactLine || "").trim() : "";
       return {
         ...f,
@@ -220,6 +240,12 @@ const CookBooking = () => {
       };
     });
   }, [siteLocation?.city, siteLocation?.area, siteLocation?.state, siteLocation?.street, siteLocation?.exactLine, siteLocation?.hasHouseNumber, siteLocation?.timestamp, siteLocation?.savedAt, siteLocation?.lat, siteLocation?.lng, user?.role, user?.address, savedLoaded, savedLocations]);
+
+  // Whatever sets a valid city (manual pick, saved place, draft, GPS)
+  // becomes the remembered default until the user picks another one.
+  useEffect(() => {
+    rememberCity(form.city);
+  }, [form.city]);
 
   const profileAddress = String(user?.address || "").trim();
   const [addrEditing, setAddrEditing] = useState(false);
@@ -272,7 +298,7 @@ const CookBooking = () => {
       flatNo: src.flatNo || "",
       society: src.society || "",
       landmark: src.landmark || "",
-      city: normCity(src.city),
+      city: normCity(src.city) || f.city,
     }));
     setSavedIdx(String(idx));
     if (saved.location?.lat != null) {
@@ -288,13 +314,13 @@ const CookBooking = () => {
     if (autoFilled.current || user?.role !== "customer") return;
     const fill = (src) =>
       setForm((f) => {
-        if (f.flatNo || f.society || f.landmark || f.city) return f;
+        if (f.flatNo || f.society || f.landmark) return f;
         return {
           ...f,
           flatNo: src.flatNo || "",
           society: src.society || "",
           landmark: src.landmark || "",
-          city: normCity(src.city),
+          city: normCity(src.city) || f.city,
         };
       });
     const profileAddr = String(user?.address || "").trim();

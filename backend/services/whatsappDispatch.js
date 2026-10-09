@@ -202,7 +202,7 @@ const isRetryableResult = (res) => {
 // Send one Marathi booking-request with Accept/Decline buttons.
 // Cold-start path first: when WHATSAPP_REQUEST_TEMPLATE(_FOR_COOK) is set,
 // the approved template (params built ONLY by templateParamsForBooking()
-// in example order [customer, date, weekday, time, duration, address]) is
+// in live order [customer, date, address, weekday, time, duration]) is
 // tried first — templates are deliverable outside the 24h customer-service
 // window where interactive free-form fails async with 131047. On template
 // failure/misconfiguration it falls back to the interactive button message
@@ -211,13 +211,12 @@ const isRetryableResult = (res) => {
 // retryable.
 // Param order override: comma-separated names from
 // customer | date | weekday | time | duration | address.
-// Default matches the documented `new_booking_request` (mr) example order:
-// [customer, date dd/mm/yyyy, weekday, time-range, duration-hours, address].
-// If your approved template lists the placeholders in a different order
-// (e.g. address third), set e.g.
-// WHATSAPP_TEMPLATE_PARAM_ORDER=customer,date,address,weekday,time,duration
-// and the values are reordered to fit — no template re-approval needed.
-const DEFAULT_TEMPLATE_PARAM_ORDER = ["customer", "date", "weekday", "time", "duration", "address"];
+// Default matches the live approved `new_booking_request` template, whose
+// placeholders consume [customer, date dd/mm/yyyy, address, weekday,
+// time-range, duration-hours] — verified against live deliveries.
+// Override with WHATSAPP_TEMPLATE_PARAM_ORDER if your template differs,
+// e.g. WHATSAPP_TEMPLATE_PARAM_ORDER=customer,date,weekday,time,duration,address
+const DEFAULT_TEMPLATE_PARAM_ORDER = ["customer", "date", "address", "weekday", "time", "duration"];
 const templateParamOrder = () => {
   try {
     const raw = String(process.env.WHATSAPP_TEMPLATE_PARAM_ORDER || "").trim();
@@ -237,8 +236,8 @@ const templateParamOrder = () => {
 };
 
 const templateParamsForBooking = (booking, customerName) => {
-  // Param order matches the approved `new_booking_request` (mr) example:
-  // [customer, date dd/mm/yyyy, weekday, time-range, duration-hours, address].
+  // Param order matches the live approved `new_booking_request` (mr):
+  // [customer, date dd/mm/yyyy, address, weekday, time-range, duration-hours].
   // sendTemplateMessage truncates each to 100 chars.
   try {
     const d = booking?.date ? new Date(booking.date) : null;
