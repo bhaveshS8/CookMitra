@@ -1,12 +1,12 @@
 const Coupon = require("../models/Coupon");
 const Booking = require("../models/Booking");
-const { normalizeCode, rejectionReason, computeDiscount } = require("../utils/coupons");
+const { normalizeCode, rejectionReason, computeDiscount, findCouponByCode } = require("../utils/coupons");
 const { paginationParams, applyPagination, sendList } = require("../utils/pagination");
 
 exports.validateCoupon = async (req, res, next) => {
   try {
     const { code, amount, serviceType } = req.body;
-    const coupon = await Coupon.findOne({ code: normalizeCode(code) });
+    const coupon = await findCouponByCode(code);
     let isFirstBooking;
     if (coupon?.firstBookingOnly && req.user?.id) {
       isFirstBooking =

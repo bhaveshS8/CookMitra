@@ -5,7 +5,7 @@ const CookProfile = require("../models/CookProfile");
 const Coupon = require("../models/Coupon");
 const User = require("../models/User");
 const realtime = require("../utils/realtime");
-const { normalizeCode, rejectionReason, computeDiscount } = require("../utils/coupons");
+const { normalizeCode, rejectionReason, computeDiscount, findCouponByCode } = require("../utils/coupons");
 const { slabPriceForDuration, splitPayout } = require("../utils/pricing");
 const crypto = require("crypto");
 const {
@@ -888,7 +888,7 @@ exports.createBooking = async (req, res, next) => {
     let discount = 0;
     const rawCode = normalizeCode(req.body.couponCode);
     if (rawCode) {
-      const coupon = await Coupon.findOne({ code: rawCode });
+      const coupon = await findCouponByCode(rawCode);
       const isFirstBooking =
         (await Booking.countDocuments({ customer: req.user.id })) === 0;
       const reason = rejectionReason(coupon, {

@@ -63,4 +63,31 @@ const computeDiscount = (coupon, amount) => {
   return Math.max(0, Math.min(capped, fullFee));
 };
 
-module.exports = { normalizeCode, rejectionReason, computeDiscount };
+// Resolve a coupon by user-entered code: exact normalized match first,
+// then a legacy fallback comparing normalized forms (codes stored before
+// separator-stripping, e.g. "FIRST FREE", still resolve). The collection
+// is admin-managed and tiny, so the scan is cheap and runs only on miss.
+const findCouponByCode = async (code) => {
+  const wanted = normalizeCode(code);
+  if (!wanted) return null;
+  let Coupon;
+  try {
+    Coupon = require("../models/Coupon");
+  } catch {
+    return null;
+  }
+  try {
+    const exact = await Coupon.findOne({ code: wanted });
+    if (exact) return exact;
+  } catch {
+    return null;
+  }
+  try {
+    const all = await Coupon.find({});
+    return (all || []).find((c) => normalizeCode(c?.code) === wanted) || null;
+  } catch {
+    return null;
+  }
+};
+
+module.exports = { normalizeCode, rejectionReason, computeDiscount, findCouponByCode };
