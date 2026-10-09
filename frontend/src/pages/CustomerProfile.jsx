@@ -4,13 +4,14 @@ import API from "../api/axios";
 import { useDispatch } from "react-redux";
 import { updateUser } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
-import { ArrowLeft, MapPin, Phone, Save, AlertCircle, UserRound, ShieldCheck } from "lucide-react";
+import { ArrowLeft, MapPin, Phone, Save, AlertCircle, UserRound, ShieldCheck, Mail } from "lucide-react";
 
 const CustomerProfile = () => {
   const dispatch = useDispatch();
   const showToast = useShowToast();
   const [formData, setFormData] = useState({
     name: "",
+    email: "",
     phone: "",
     address: "",
   });
@@ -25,11 +26,13 @@ const CustomerProfile = () => {
         const data = res.data;
         dispatch(updateUser({
           name: data.name,
+          email: data.email,
           phone: data.phone,
           address: data.address,
         }));
         setFormData({
           name: data.name || "",
+          email: data.email || "",
           phone: data.phone || "",
           address: data.address || "",
         });
@@ -60,11 +63,18 @@ const CustomerProfile = () => {
       showToast(msg, "error");
       return;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
+      const msg = "Enter a valid email address";
+      setError(msg);
+      showToast(msg, "error");
+      return;
+    }
     setSaving(true);
     setError("");
 
     const payload = {
       name: formData.name.trim(),
+      email: formData.email.trim().toLowerCase(),
       phone: formData.phone.trim(),
       address: formData.address.trim(),
     };
@@ -74,6 +84,7 @@ const CustomerProfile = () => {
       const data = res.data;
       dispatch(updateUser({
         name: data.name,
+        email: data.email,
         phone: data.phone,
         address: data.address,
       }));
@@ -139,6 +150,23 @@ const CustomerProfile = () => {
               placeholder="Enter your full name"
               required
             />
+          </div>
+
+          <div className="booking-form-group">
+            <label>Email Address</label>
+            <div className="input-with-icon">
+              <Mail size={16} className="input-icon-prefix" />
+              <input
+                name="email"
+                type="email"
+                className="form-control"
+                value={formData.email}
+                onChange={handleChange}
+                placeholder="e.g. you@example.com"
+                required
+              />
+            </div>
+            <span className="field-hint">Used for sign-in and password-reset emails.</span>
           </div>
 
           <div className="booking-form-group">

@@ -536,15 +536,36 @@ exports.updateProfile = async (req, res, next) => {
       }
       phoneVal = core;
     }
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      {
-        ...(name !== undefined ? { name } : {}),
-        ...(phoneVal !== undefined ? { phone: phoneVal, mobile: phoneVal } : {}),
-        ...(address !== undefined ? { address } : {}),
-      },
-      { new: true, runValidators: true }
-    );
+    let emailVal;
+    if (req.body.email !== undefined) {
+      const email = String(req.body.email || "").trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ message: "Enter a valid email address" });
+      }
+      const clash = await findByEmailInsensitive(email);
+      if (clash && String(clash._id) !== String(req.user.id)) {
+        return res.status(400).json({ message: "A user with this email already exists" });
+      }
+      emailVal = email;
+    }
+    let user;
+    try {
+      user = await User.findByIdAndUpdate(
+        req.user.id,
+        {
+          ...(name !== undefined ? { name } : {}),
+          ...(phoneVal !== undefined ? { phone: phoneVal, mobile: phoneVal } : {}),
+          ...(address !== undefined ? { address } : {}),
+          ...(emailVal !== undefined ? { email: emailVal } : {}),
+        },
+        { new: true, runValidators: true }
+      );
+    } catch (error) {
+      if (error?.code === 11000) {
+        return res.status(400).json({ message: "A user with this email already exists" });
+      }
+      throw error;
+    }
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }

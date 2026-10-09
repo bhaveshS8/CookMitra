@@ -14,6 +14,15 @@ const sendResetEmail = async ({ to, name, token }) => {
   }
   const appBase =
     process.env.CLIENT_URL || process.env.FRONTEND_BASE_URL || "http://localhost:3000";
+  if (
+    process.env.NODE_ENV === "production" &&
+    /localhost|127\.0\.0\.1/i.test(String(appBase))
+  ) {
+    console.error(
+      "CONFIG ERROR: reset-email link would point at localhost in production — set FRONTEND_BASE_URL=https://cookmitra.org (or CLIENT_URL) and restart. Refusing to send a broken link."
+    );
+    return { delivered: false, reason: "reset-base-not-configured" };
+  }
   const resetUrl = `${String(appBase).replace(/\/$/, "")}/reset-password?token=${token}`;
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,

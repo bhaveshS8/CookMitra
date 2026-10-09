@@ -169,6 +169,12 @@ router.put(
         return true;
       }),
     body("address").optional().trim().isLength({ max: 500 }).withMessage("Address is too long"),
+    body("email")
+      .optional()
+      .trim()
+      .isEmail()
+      .withMessage("Enter a valid email address")
+      .normalizeEmail(),
   ],
   validate,
   updateProfile
