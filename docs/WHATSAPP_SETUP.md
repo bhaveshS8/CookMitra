@@ -93,7 +93,7 @@ WHATSAPP_PHONE_NUMBER_ID=<live phone number ID>
 #  WHATSAPP_TEMPLATE_LANG_COOK_REQUEST)
 # NOTE: broadcast fan-out (backend/services/whatsappDispatch.js) tries the
 # approved template first (deliverable outside the 24h window, params in
-# example order [customer, date, address, weekday, time, duration]) and
+# example order [customer, date, weekday, time, duration, address]) and
 # falls back to the Marathi interactive message — see T16
 # in backend/whatsapp-channel.test.js. A misconfigured template fails once
 # per fan-out, then remaining cooks skip straight to interactive.

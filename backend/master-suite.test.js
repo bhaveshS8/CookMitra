@@ -9,6 +9,7 @@ const CookProfile = require("./models/CookProfile");
 const Booking = require("./models/Booking");
 const Review = require("./models/Review");
 const Availability = require("./models/Availability");
+const BookingRestriction = require("./models/BookingRestriction");
 const authCtrl = require("./controllers/authController");
 const cookCtrl = require("./controllers/cookController");
 const bookingCtrl = require("./controllers/bookingController");
@@ -113,6 +114,11 @@ async function testCustomer() {
 
   {
     const oCP = CookProfile.findOne, oCPF = CookProfile.find, oAF = Availability.find, oBF = Booking.find, oBC = Booking.create, oN = Notification.create, oUF = User.findById;
+    // Booking creation now requires the mandatory woman-presence gate: fake
+    // a connected DB + an unblocked customer (assertions below are unchanged).
+    const oBR = BookingRestriction.findOne, oRS = mongoose.connection.readyState;
+    BookingRestriction.findOne = () => ({ lean: async () => null });
+    try { mongoose.connection.readyState = 1; } catch {}
     const slots = require("./utils/slots");
     const oW = slots.getDayWindows, oA = slots.resolveCookAvailability;
     slots.getDayWindows = async () => [{ startTime: "08:00", endTime: "20:00" }];
@@ -139,6 +145,7 @@ async function testCustomer() {
           body: {
             cook: cookId, serviceType: "cook_for_me", date: FUTURE_DATE,
             startTime: "09:00", endTime: "11:00", durationHours: 2, address: "Pune",
+            womanPresenceConfirmed: true,
             customer: new Types.ObjectId().toString(),
             cookArrived: true, hoursCompleted: true,
             cookLocation: { lat: 12.34, lng: 56.78 },
@@ -150,7 +157,7 @@ async function testCustomer() {
       check("4.1 booking create ignores customer tamper", r.statusCode === 201 && String(createdDoc.customer) === userId && createdDoc.cook === null, `s=${r.statusCode} customer=${String(createdDoc?.customer) === userId} cook=${createdDoc?.cook}`);
       check("4.1 booking create ignores injected lifecycle flags", createdDoc?.status === "requested" && createdDoc?.cookArrived === undefined && createdDoc?.hoursCompleted === undefined && createdDoc?.cookLocation === undefined && createdDoc?.payment?.status === "pending", `status=${createdDoc?.status} arrived=${createdDoc?.cookArrived}`);
     } catch (e) { check("4.1 booking create escalation", false, e.message); }
-    finally { CookProfile.findOne = oCP; CookProfile.find = oCPF; Availability.find = oAF; Booking.find = oBF; Booking.create = oBC; Notification.create = oN; User.findById = oUF; slots.getDayWindows = oW; slots.resolveCookAvailability = oA; }
+    finally { CookProfile.findOne = oCP; CookProfile.find = oCPF; Availability.find = oAF; Booking.find = oBF; Booking.create = oBC; Notification.create = oN; User.findById = oUF; slots.getDayWindows = oW; slots.resolveCookAvailability = oA; BookingRestriction.findOne = oBR; try { mongoose.connection.readyState = oRS; } catch {} }
   }
 
   {

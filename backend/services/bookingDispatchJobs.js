@@ -40,6 +40,8 @@ const REASONS = {
   NO_COOKS: "no_eligible_cooks",
   MISSING: "booking_missing",
   NOT_REQUESTED: "booking_not_requested",
+  MISSING_CONFIRMATION: "missing_confirmation",
+  CUSTOMER_BLOCKED: "customer_blocked",
   EXPIRED: "booking_expired",
   ASSIGNED: "cook_already_assigned",
   NO_RECIPIENTS: "no_valid_recipients",
@@ -359,6 +361,37 @@ const processJob = async (job, deps = {}) => {
     if (bookingExpired(booking, nowMs)) return skip(REASONS.EXPIRED, { error: "request window elapsed" });
     if (String(booking.status) !== "requested") {
       return skip(REASONS.NOT_REQUESTED, { error: `status=${booking.status}` });
+    }
+
+    // Woman-presence gate: an unconfirmed booking is never dispatched.
+    // Legacy bookings created before the verification rollout are
+    // grandfathered (legitimately created under the old rules). A booking
+    // created at/after an active restriction's start slipped past the
+    // creation gate and must not fan out — while a legitimate booking
+    // created BEFORE a later restriction dispatches normally (a later
+    // restriction never corrupts an already-legitimate booking).
+    try {
+      const vr = require("../utils/bookingRestrictions");
+      const confirmed = booking.womanPresenceConfirmed === true;
+      let legacy = false;
+      try {
+        legacy = new Date(booking.createdAt).getTime() < vr.WOMAN_PRESENCE_LAUNCH_MS;
+      } catch {
+        legacy = false;
+      }
+      if (!confirmed && !legacy) {
+        return skip(REASONS.MISSING_CONFIRMATION, { error: "no persisted woman-presence confirmation" });
+      }
+      const rstate = await vr.getRestrictionState(booking.customer);
+      if (rstate.blocked && rstate.declinedAt) {
+        const createdMs = new Date(booking.createdAt).getTime();
+        const declinedMs = new Date(rstate.declinedAt).getTime();
+        if (Number.isFinite(createdMs) && Number.isFinite(declinedMs) && createdMs >= declinedMs) {
+          return skip(REASONS.CUSTOMER_BLOCKED, { error: "customer blocked before this booking was created" });
+        }
+      }
+    } catch (gateErr) {
+      return retry(REASONS.DB, { error: `restriction check unavailable — fail closed: ${String(gateErr?.message || gateErr).slice(0, 160)}` });
     }
 
     if (!isWhatsAppEnabled()) {

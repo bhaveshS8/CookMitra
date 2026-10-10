@@ -12,6 +12,16 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
   const lastAmount = useRef(amount);
   const lastService = useRef(serviceType);
   const initialTried = useRef(null);
+  // Monotonic validate-request id. Only the latest request may commit its
+  // result: slower older responses are discarded, and changing amount /
+  // service invalidates any in-flight validation for the old price.
+  const reqId = useRef(0);
+  // In-flight request key (code + price + service). An identical submission
+  // while one is pending is ignored (rapid double-click / Enter+click
+  // dedupe); a DIFFERENT code supersedes it — sequencing still guarantees
+  // the oldest result can never overwrite the newest. A plain boolean busy
+  // flag would wrongly block replacing a coupon while one validates.
+  const inflightKey = useRef(null);
 
   useEffect(() => {
     if (applied && (lastAmount.current !== amount || lastService.current !== serviceType)) {
@@ -19,6 +29,11 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
       setCode("");
       setError("");
       onApplied?.(null);
+    }
+    if (lastAmount.current !== amount || lastService.current !== serviceType) {
+      reqId.current += 1; // invalidate in-flight validation for the old price
+      inflightKey.current = null; // a fresh price accepts fresh attempts
+      setApplying(false); // never stick in "Applying…"
     }
     lastAmount.current = amount;
     lastService.current = serviceType;
@@ -35,12 +50,22 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
   }, [initialCode, amount, serviceType]);
 
   const apply = async (override, auto = false) => {
-    const c = String(override ?? code).trim().toUpperCase().replace(/[^A-Za-z0-9]+/g, "");
-    if (!c || applying) return;
+    // NOTE: callers must pass a coupon-code string (or nothing for the
+    // input value). Never pass the click Event itself — String(event) would
+    // serialize to garbage ("[object MouseEvent]") and every button Apply
+    // would fail validation. Non-string overrides fall back to the input.
+    const raw = typeof override === "string" ? override : code;
+    const c = String(raw ?? "").trim().toUpperCase().replace(/[^A-Za-z0-9]+/g, "");
+    if (!c) return;
+    const key = `${c}|${amount}|${serviceType}`;
+    if (inflightKey.current === key) return; // exact duplicate already validating
+    inflightKey.current = key;
+    const myReq = ++reqId.current;
     setApplying(true);
     setError("");
     try {
       const res = await API.post("/coupons/validate", { code: c, amount, serviceType });
+      if (myReq !== reqId.current) return; // stale: a newer request won
       const result = {
         code: res.data.code,
         discount: res.data.discount,
@@ -55,15 +80,25 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
         amount: Number(amount) || 0,
       });
     } catch (err) {
+      if (myReq !== reqId.current) return; // stale: a newer request won
       const status = err.response?.status;
       const msg =
         status === 401
           ? "Please log in as a customer to use coupons."
           : err.response?.data?.message || "This coupon is not valid for this booking.";
       setError(msg);
-      onApplied?.(null);
+      // A failed validation changes nothing: a previously applied coupon
+      // stays applied (and stays in the parent) — the backend revalidates
+      // authoritatively at booking creation either way. In particular, never
+      // wipe the parent with onApplied(null) here while still displaying the
+      // old coupon as applied.
     } finally {
-      setApplying(false);
+      // Release the in-flight slot only if a newer request hasn't taken it;
+      // reset the spinner only if no newer request owns the UI.
+      if (inflightKey.current === key) inflightKey.current = null;
+      if (myReq === reqId.current) {
+        setApplying(false);
+      }
     }
   };
 
@@ -117,7 +152,7 @@ const CouponApply = ({ amount, serviceType, onApplied, initialCode }) => {
         <button
           type="button"
           className="btn btn-outline btn-sm coupon-apply-btn"
-          onClick={apply}
+          onClick={() => apply()}
           disabled={applying || !code.trim()}
         >
           {applying ? (

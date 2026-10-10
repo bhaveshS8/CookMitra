@@ -25,6 +25,10 @@ import {
 import API from "../api/axios";
 import { formatCurrency, localTodayStr, localTomorrowStr, slabPriceForDuration, LAUNCH_SLAB_PRICES } from "../utils/constants";
 import CouponApply from "../components/CouponApply";
+import WomanPresenceCheck from "../components/WomanPresenceCheck";
+import "../components/WomanPresenceCheck.css";
+import { useWomanPresence } from "../utils/useWomanPresence";
+import { presenceGuardMessage, BLOCKED_CODE } from "../utils/womanPresence";
 import CustomCalendar from "../components/CustomCalendar";
 import { useDispatch, useSelector } from "react-redux";
 import { updateUser } from "../store/authSlice";
@@ -180,6 +184,10 @@ const CookBooking = () => {
     requestAnimationFrame(() =>
       venueErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
     );
+  // Mandatory verification: explicit YES authorizes booking; explicit NO
+  // records a server-side one-hour lockout. Never preselected.
+  const wp = useWomanPresence(user, () => setShowLoginModal(true));
+  const wpGate = presenceGuardMessage(wp);
   const [slotOptions, setSlotOptions] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [coupon, setCoupon] = useState(null);
@@ -789,6 +797,14 @@ const CookBooking = () => {
   };
   const handleFindCook = async () => {
     if (findingCook) return;
+    // Authoritative gate first: blocked / unanswered / unresolved must never
+    // reach booking creation (button disabled state alone is not enough).
+    const gate = presenceGuardMessage(wp);
+    if (gate) {
+      setFormError(gate);
+      scrollToVenueError();
+      return;
+    }
     if (!user) {
       saveBookingDraft({ kind: "on-demand", form, selectedSlot, coords, couponCode: coupon?.code || "" });
       setShowLoginModal(true);
@@ -807,6 +823,21 @@ const CookBooking = () => {
     }
     setFieldErrors({});
     setFormError("");
+    // Explicit NO + Find Cooks click: record the decline first. The one-hour
+    // timer starts only when the backend confirms (submitDecline resolves
+    // ok) — selecting NO alone never started anything. Booking creation
+    // never proceeds on this path.
+    if (wp.presence === "no") {
+      const res = await wp.submitDecline();
+      const msg = res?.ok
+        ? "You cannot make a booking for the next 1 hour because a woman will not be present at home."
+        : res?.busy
+          ? "Recording your response — one moment…"
+          : res?.message || "Could not record your response. Please check your connection and retry.";
+      setFormError(msg);
+      scrollToVenueError();
+      return;
+    }
     setFindingCook(true);
     try {
       const hours = Number(form.durationHours);
@@ -844,6 +875,8 @@ const CookBooking = () => {
         notes: form.notes.trim(),
         selectedItems: buildSelectedItems(),
         couponCode: coupon?.code || "",
+        // Explicit YES for THIS request (verified strictly by the backend).
+        womanPresenceConfirmed: true,
       };
       if (useDetectedVenue) {
         payload.location = { lat: detectedVenue.lat, lng: detectedVenue.lng };
@@ -856,7 +889,16 @@ const CookBooking = () => {
       showToast("Finding a cook for you — we're contacting available cooks now.", "success");
       navigate(`/bookings/${res.data?._id}/wait`);
     } catch (err) {
-      const msg = err.response?.data?.message || err.message || "Booking failed";
+      const data = err.response?.data || {};
+      const msg = data?.message || err.message || "Booking failed";
+      if (err.response?.status === 403 && data?.code === BLOCKED_CODE) {
+        // Server-reported lockout (e.g. answered NO elsewhere / another
+        // device): sync the notice + countdown instead of a dead end.
+        if (data?.blockedUntil) wp.applyServerBlock(data.blockedUntil);
+        setFormError(msg);
+        scrollToVenueError();
+        return;
+      }
       if (err.response?.status === 409) {
         setFormError(`${msg} Please pick another time.`);
       } else {
@@ -1397,6 +1439,7 @@ const CookBooking = () => {
 
             {formError && <div ref={venueErrorRef} className="error-message">{formError}</div>}
           </div>
+          <WomanPresenceCheck wp={wp} />
           {!user && (
             <p className="od-review-notice od-review-notice-login">
               <LogIn size={13} /> Login as a customer to find a cook for this slot
@@ -1406,7 +1449,7 @@ const CookBooking = () => {
             <button
               type="button"
               className="btn btn-primary btn-block btn-lg od-cta"
-              disabled={findingCook}
+              disabled={findingCook || Boolean(wpGate)}
               onClick={handleFindCook}
             >
               {findingCook ? (

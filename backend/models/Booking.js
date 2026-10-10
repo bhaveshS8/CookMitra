@@ -106,6 +106,13 @@ const bookingSchema = new mongoose.Schema(
       underVerification: { type: Boolean, default: false },
     },
     clientKey: { type: String, default: "", trim: true },
+    // Explicit woman-presence confirmation for THIS booking request.
+    // Strictly boolean: only `true` (recorded at creation from the request
+    // body, never from query params, profile settings or prior bookings)
+    // authorizes the booking workflow. Legacy bookings created before the
+    // verification rollout predate this field.
+    womanPresenceConfirmed: { type: Boolean, default: false },
+    womanPresenceConfirmedAt: { type: Date, default: null },
     rescheduleCount: { type: Number, default: 0, min: 0 },
     reschedules: [
       {

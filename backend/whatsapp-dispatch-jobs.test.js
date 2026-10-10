@@ -213,6 +213,10 @@ User.findById = (id) => {
   return { select: () => ({ lean: async () => (u ? { ...u } : null) }) };
 };
 User.find = () => ({ select: () => ({ lean: async () => [] }) });
+// No customer is blocked in this suite: fixtures represent legitimately
+// created bookings (mkBookingDoc carries the persisted confirmation).
+const BookingRestriction = require("./models/BookingRestriction");
+BookingRestriction.findOne = () => ({ lean: async () => null });
 
 // Real fan-out touches notifications + realtime: stub the side effects.
 const Notification = require("./models/Notification");
@@ -278,6 +282,10 @@ const mkBookingDoc = (over = {}) => {
     requestExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
     whatsappDispatch: [],
     createdAt: new Date(),
+    // Fixtures represent legitimately created bookings, which now carry
+    // the customer's explicit persisted confirmation.
+    womanPresenceConfirmed: true,
+    womanPresenceConfirmedAt: new Date(Date.now() - 60e3),
     ...over,
   };
   bookingStore.set(String(b._id), b);

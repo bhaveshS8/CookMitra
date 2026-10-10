@@ -711,6 +711,24 @@ exports.retryCookWhatsApp = async (req, res, next) => {
     if (booking.requestExpiresAt && booking.requestExpiresAt <= new Date()) {
       return res.status(410).json({ message: "This cook request has expired." });
     }
+    // Woman-presence gate: unconfirmed bookings are never re-dispatched.
+    // Legacy bookings created before the verification rollout are exempt.
+    {
+      const vr = require("../utils/bookingRestrictions");
+      const confirmed = booking.womanPresenceConfirmed === true;
+      let legacy = false;
+      try {
+        legacy = new Date(booking.createdAt).getTime() < vr.WOMAN_PRESENCE_LAUNCH_MS;
+      } catch {
+        legacy = false;
+      }
+      if (!confirmed && !legacy) {
+        return res.status(403).json({
+          message: "This booking cannot be dispatched without a persisted woman-presence confirmation.",
+          code: "BOOKING_MISSING_CONFIRMATION",
+        });
+      }
+    }
     const eligible = await findEligibleCooks({
       date: booking.date,
       startTime: booking.startTime,
@@ -755,6 +773,47 @@ exports.retryCookWhatsApp = async (req, res, next) => {
 
 exports.createBooking = async (req, res, next) => {
   try {
+    // ---- Woman-presence gate (authoritative, fail-closed) ----
+    // Order matters: restriction + confirmation are verified BEFORE any
+    // side effect (idempotency replay, coupon redemption, booking insert,
+    // notifications, dispatch jobs, payment linkage), so a blocked or
+    // unconfirmed attempt creates nothing and consumes nothing.
+    try {
+      const { getRestrictionState, isValidAffirmation } = require("../utils/bookingRestrictions");
+      const state = await getRestrictionState(req.user.id);
+      if (state.blocked) {
+        const { remainingSeconds, BLOCKED_CODE } = require("../utils/bookingRestrictions");
+        return res.status(403).json({
+          message:
+            "Booking temporarily unavailable. A woman must be present at home throughout the cooking service. Your booking access has been temporarily paused for 1 hour.",
+          code: BLOCKED_CODE,
+          blockedUntil: state.blockedUntil,
+          remainingSeconds: remainingSeconds(state.blockedUntil),
+        });
+      }
+      // Strict check on the BODY field only: never query params, URL params,
+      // profile settings, prior bookings, or truthiness. Older clients that
+      // omit the field are rejected with a clear message (no silent bypass).
+      if (!isValidAffirmation(req.body?.womanPresenceConfirmed)) {
+        const { CONFIRMATION_REQUIRED_CODE } = require("../utils/bookingRestrictions");
+        return res.status(400).json({
+          message: "Please confirm that a woman will be present at home throughout the cooking service.",
+          code: CONFIRMATION_REQUIRED_CODE,
+        });
+      }
+    } catch (gateErr) {
+      if (
+        gateErr?.code === "BOOKING_VERIFICATION_UNAVAILABLE" ||
+        /restriction store unavailable|database not ready/i.test(String(gateErr?.message || gateErr?.cause?.message || ""))
+      ) {
+        return res.status(503).json({
+          message: "Booking verification is temporarily unavailable. Please try again in a moment.",
+          code: "BOOKING_VERIFICATION_UNAVAILABLE",
+        });
+      }
+      throw gateErr;
+    }
+
     const { date, startTime, endTime } = req.body;
 
     const strictStart = parseTimeStrict(startTime);
@@ -990,6 +1049,10 @@ exports.createBooking = async (req, res, next) => {
         discount,
         commission,
         cookPayout,
+        // Persisted atomically with the booking: the explicit YES that
+        // authorized THIS request (verified strictly above).
+        womanPresenceConfirmed: true,
+        womanPresenceConfirmedAt: new Date(),
         payoutInfo: (() => {
           try {
             const { buildPayoutSnapshot } = require("../utils/cookEarnings");

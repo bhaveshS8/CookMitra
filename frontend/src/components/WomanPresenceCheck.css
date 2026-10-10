@@ -1,0 +1,315 @@
+/* Woman-presence verification — scoped wp-* classes only (no globals).
+   Mobile-first fluid layout: verified at 320px, 375px, 425px + desktop. */
+.wp-card {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 12px 0;
+  padding: 14px 14px 16px;
+  border: 1px solid #e5d9c8;
+  border-radius: 12px;
+  background: #fffdf8;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+
+.wp-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 14px;
+  color: #6b5d4f;
+}
+
+/* Slim background-check note: the question stays interactive while the
+   server state resolves (submit remains gated until then). */
+.wp-checking {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: #6b5d4f;
+  overflow-wrap: break-word;
+}
+
+.wp-pulse {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c98a2b;
+  animation: wp-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes wp-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.wp-q-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wp-q-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: #eef6ee;
+  color: #2e7d32;
+}
+
+.wp-question {
+  box-sizing: border-box;
+  min-width: 0;
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.45;
+  color: #2b2118;
+  overflow-wrap: break-word;
+}
+
+.wp-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  margin-top: 12px;
+}
+
+.wp-option {
+  box-sizing: border-box;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 12px;
+  border: 1.5px solid #d9cdbd;
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.45;
+  color: #2b2118;
+  overflow-wrap: break-word;
+}
+
+.wp-option:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.wp-option.selected {
+  border-color: #2e7d32;
+  background: #f1f8f1;
+  box-shadow: 0 0 0 1px #2e7d32 inset;
+}
+
+.wp-option.wp-no.selected {
+  border-color: #b3261e;
+  background: #fdf1f0;
+  box-shadow: 0 0 0 1px #b3261e inset;
+}
+
+.wp-option:focus-visible {
+  outline: 2px solid #14532d;
+  outline-offset: 2px;
+}
+
+.wp-radio {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border: 2px solid #8d7d6b;
+  border-radius: 50%;
+  background: #fff;
+  position: relative;
+}
+
+.wp-option.selected .wp-radio {
+  border-color: #2e7d32;
+}
+
+.wp-option.selected .wp-radio::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: #2e7d32;
+}
+
+.wp-option.wp-no.selected .wp-radio {
+  border-color: #b3261e;
+}
+
+.wp-option.wp-no.selected .wp-radio::after {
+  background: #b3261e;
+}
+
+.wp-option-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.wp-hint {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #6b5d4f;
+  overflow-wrap: break-word;
+}
+
+.wp-hint-ok {
+  color: #2e7d32;
+  font-weight: 600;
+}
+
+.wp-hint-warn {
+  color: #8a3b12;
+  font-weight: 600;
+}
+
+.wp-error {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fdf1f0;
+  color: #7a2018;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
+
+.wp-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid #b3261e;
+  border-radius: 8px;
+  background: #fff;
+  color: #7a2018;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.wp-retry:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+/* ---- Blocked notice ---- */
+.wp-blocked {
+  border-color: #e3b7b2;
+  background: #fdf4f3;
+}
+
+.wp-blocked-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wp-blocked-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: #b3261e;
+  color: #fff;
+}
+
+.wp-blocked-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #7a2018;
+  overflow-wrap: break-word;
+}
+
+.wp-blocked-text {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #5d2a24;
+  overflow-wrap: break-word;
+}
+
+.wp-countdown {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px 10px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px dashed #c98a8a;
+}
+
+.wp-countdown-label {
+  font-size: 13px;
+  color: #6b5d4f;
+}
+
+.wp-countdown-value {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.5px;
+  color: #7a2018;
+}
+
+@media (min-width: 425px) {
+  .wp-card {
+    padding: 16px 18px 18px;
+  }
+  .wp-question {
+    font-size: 16px;
+  }
+  .wp-option {
+    font-size: 14.5px;
+  }
+}

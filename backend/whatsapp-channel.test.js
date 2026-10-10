@@ -19,6 +19,12 @@ const mongoose = require("mongoose");
 const savedReadyState = mongoose.connection.readyState;
 
 const Booking = require("./models/Booking");
+const BookingRestriction = require("./models/BookingRestriction");
+// No customer is blocked in this suite (fixtures represent legitimately
+// created bookings, which now carry a persisted woman-presence
+// confirmation — see mkBooking below).
+const savedBookingRestrictionFindOne = BookingRestriction.findOne;
+BookingRestriction.findOne = () => ({ lean: async () => null });
 const User = require("./models/User");
 const CookProfile = require("./models/CookProfile");
 const Notification = require("./models/Notification");
@@ -237,6 +243,10 @@ const mkBooking = (over = {}) => {
     paymentExpiresAt: null,
     payment: { status: "pending", paidAmount: 0 },
     whatsappDispatch: [],
+    // Fixtures predate nothing: every booking created through the product
+    // must now carry the customer's explicit persisted confirmation.
+    womanPresenceConfirmed: true,
+    womanPresenceConfirmedAt: new Date(Date.now() - 60e3),
     serviceOtp: "4321",
     save: async function () {
       store.bookings.set(String(this._id), this);
@@ -581,8 +591,80 @@ const errOf = async (fn) => {
       check("T16 template sent (no interactive fallback needed)", types.includes("template") && !types.includes("interactive"), JSON.stringify(types));
       check("T16 template name+lang", tpl?.template?.name === "new_booking_request" && tpl?.template?.language?.code === "mr", JSON.stringify(tpl?.template));
       check("T16 template has 6 params", params.length === 6 && params.every((p) => p.type === "text"), `params=${params.length}`);
+      // T16-order: template {{1}}..{{6}} sit in reading order next to the
+      // labels customer, date, weekday, time, duration (" तास" is hardcoded
+      // in the template after the duration marker), address. A rotation here
+      // is exactly the live incident of Oct 2026 (वार showed the duration
+      // number, वेळ the address, कालावधी the weekday, ठिकाण the time range)
+      // after an unverified default-order flip — never reorder without
+      // updating these positions.
+      {
+        const texts = params.map((p) => String(p.text ?? ""));
+        const wantDate = new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric",
+        }).format(new Date(b.date));
+        const wantWeekday = marathi.calculateMarathiWeekday(b.date);
+        check("T16-order params[0..1] are customer + dd/mm/yyyy date",
+          texts[0] === "Aditi Rao" && texts[1] === wantDate, JSON.stringify(texts.slice(0, 2)));
+        check("T16-order params[2] is the Marathi weekday (never a number)",
+          texts[2] === wantWeekday && !/^\d+$/.test(texts[2]), JSON.stringify(texts[2]));
+        check("T16-order params[3] is the 12-hour time range",
+          texts[3] === "10:00 AM - 12:00 PM", JSON.stringify(texts[3]));
+        check("T16-order params[4] is the duration hours",
+          texts[4] === "2", JSON.stringify(texts[4]));
+        check("T16-order params[5] is the venue address",
+          texts[5] === "Flat 7, Sunshine Society, Pune", JSON.stringify(texts[5]));
+      }
       check("T16 delivery marked sent", r.ok === true, String(r.ok));
       delete process.env.WHATSAPP_REQUEST_TEMPLATE_FOR_COOK;
+    }
+    // ---- T16d: empty fields never shift positions (Oct 2026 rotation incident) ----
+    {
+      reset();
+      process.env.WHATSAPP_REQUEST_TEMPLATE_FOR_COOK = "new_booking_request";
+      const b = mkBooking({ address: "" });
+      sentPayloads.length = 0;
+      const r = await dispatch.fanOutBookingRequest(b, [{ userId: COOK_A }], { customerName: "Aditi Rao" });
+      const tpl = sentPayloads.find((p) => p.type === "template");
+      const params = tpl?.template?.components?.[0]?.parameters || [];
+      const texts = params.map((p) => String(p.text ?? ""));
+      check("T16d empty address keeps all 6 positions (nothing dropped)",
+        params.length === 6, `params=${params.length}`);
+      check("T16d weekday/time/duration stay in their slots despite the gap",
+        texts[2] === marathi.calculateMarathiWeekday(b.date) &&
+        texts[3] === "10:00 AM - 12:00 PM" &&
+        texts[4] === "2",
+        JSON.stringify(texts.slice(2, 5)));
+      check("T16d empty slot carries the missing-value marker",
+        texts[5] === "—", JSON.stringify(texts[5]));
+      check("T16d gap message still delivers", r.ok === true, String(r.ok));
+      delete process.env.WHATSAPP_REQUEST_TEMPLATE_FOR_COOK;
+    }
+    // ---- T16c: template param order parsing (env override + safe fallback) ----
+    {
+      reset();
+      const orderOf = dispatch.templateParamOrder;
+      const SEQ = ["customer", "date", "weekday", "time", "duration", "address"];
+      const prev = process.env.WHATSAPP_TEMPLATE_PARAM_ORDER;
+      try {
+        delete process.env.WHATSAPP_TEMPLATE_PARAM_ORDER;
+        check("T16c default order is the sequential template contract",
+          JSON.stringify(orderOf()) === JSON.stringify(SEQ), JSON.stringify(orderOf()));
+        process.env.WHATSAPP_TEMPLATE_PARAM_ORDER = "customer,date,address,weekday,time,duration";
+        check("T16c full env override honored",
+          JSON.stringify(orderOf()) === JSON.stringify(["customer", "date", "address", "weekday", "time", "duration"]),
+          JSON.stringify(orderOf()));
+        process.env.WHATSAPP_TEMPLATE_PARAM_ORDER = "customer,time";
+        check("T16c partial env appends missing slots (nothing dropped)",
+          JSON.stringify(orderOf()) === JSON.stringify(["customer", "time", "date", "weekday", "duration", "address"]),
+          JSON.stringify(orderOf()));
+        process.env.WHATSAPP_TEMPLATE_PARAM_ORDER = "nonsense,,,";
+        check("T16c garbage env falls back to default",
+          JSON.stringify(orderOf()) === JSON.stringify(SEQ), JSON.stringify(orderOf()));
+      } finally {
+        if (prev === undefined) delete process.env.WHATSAPP_TEMPLATE_PARAM_ORDER;
+        else process.env.WHATSAPP_TEMPLATE_PARAM_ORDER = prev;
+      }
     }
     // ---- T16a: no template configured -> interactive only (unchanged warm path) ----
     {
@@ -679,7 +761,7 @@ const errOf = async (fn) => {
       const r = mkRes();
       await bookingCtrl.createBooking(
         {
-          body: { serviceType: "cook_for_me", date: dateStr, startTime: "10:30", endTime: "11:30", durationHours: 1, address: "Flat 1, Pune" },
+          body: { serviceType: "cook_for_me", date: dateStr, startTime: "10:30", endTime: "11:30", durationHours: 1, address: "Flat 1, Pune", womanPresenceConfirmed: true },
           user: { id: CUST, role: "customer", name: "Aditi" },
           params: {},
         },
@@ -777,6 +859,7 @@ const errOf = async (fn) => {
     process.exit(1);
   } finally {
     delete global.fetch;
+    BookingRestriction.findOne = savedBookingRestrictionFindOne;
     try {
       Object.defineProperty(mongoose.connection, "readyState", { value: savedReadyState, configurable: true });
     } catch {

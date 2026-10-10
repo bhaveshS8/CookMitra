@@ -133,9 +133,14 @@ const sendTemplateMessage = async (toPhone, templateName, lang, bodyParams = [])
   if (!name) return { ok: false, skipped: true, reason: "no-template" };
   const code = String(lang || "").trim() || "en";
   const parameters = (Array.isArray(bodyParams) ? bodyParams : [])
-    .map((t) => String(t ?? "").slice(0, 100))
-    .filter((t) => t.length > 0)
-    .map((text) => ({ type: "text", text }));
+    // Positions are sacred: {{n}} fills from the array index, so an empty
+    // value must NEVER be dropped (dropping shifts every later value into
+    // the wrong label — the exact "swapped fields" incident of Oct 2026).
+    // Empties become the codebase's standard missing-value marker instead.
+    .map((t) => {
+      const s = String(t ?? "").slice(0, 100);
+      return { type: "text", text: s.length > 0 ? s : "—" };
+    });
   const payload = {
     messaging_product: "whatsapp",
     recipient_type: "individual",

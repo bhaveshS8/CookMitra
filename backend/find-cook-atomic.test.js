@@ -6,6 +6,14 @@ slots.getDayWindows = async () => [{ startTime: "08:00", endTime: "20:00" }];
 slots.resolveCookAvailability = async () => true;
 
 const Booking = require("./models/Booking");
+const BookingRestriction = require("./models/BookingRestriction");
+// No customer is blocked in this suite: the creation gate reads the fake.
+BookingRestriction.findOne = () => ({ lean: async () => null });
+const DispatchJob = require("./models/DispatchJob");
+// Durable-outbox writes resolve instantly (no real DB in this harness;
+// the gate under test never depends on them).
+DispatchJob.updateOne = async () => ({ modifiedCount: 0 });
+DispatchJob.findOneAndUpdate = async () => null;
 const Notification = require("./models/Notification");
 const CookProfile = require("./models/CookProfile");
 const User = require("./models/User");
@@ -75,7 +83,9 @@ const futureDateStr = () => {
 
 (async () => {
   try {
-    setDbReady(false);
+    // The creation gate is fail-closed without a DB; the store below is
+    // faked, so run connected (all side effects remain stubbed).
+    setDbReady(true);
     createdPayload = null;
     Booking.findOne = async (q) => (q?.clientKey ? null : null);
     Booking.find = () => chainSelect([]);
@@ -101,6 +111,7 @@ const futureDateStr = () => {
         guests: 4,
         address: "Flat 1, Sunshine Society, Pune",
         notes: "less spicy",
+        womanPresenceConfirmed: true,
         cook: "someCookId",
         cookId: "someCookId",
         amount: 1,
@@ -124,7 +135,7 @@ const futureDateStr = () => {
       await controller.createBooking(custReq({
         serviceType: "cook_for_me", date: futureDateStr(),
         startTime: "10:00", endTime: "13:00", durationHours: 3,
-        address: "Flat 1, X, Pune",
+        address: "Flat 1, X, Pune", womanPresenceConfirmed: true,
       }), r, next);
       check("A3 no eligible cooks -> 409 + no booking", r.statusCode === 409 && created === false, `s=${r.statusCode}`);
       CookProfile.find = savedFind;
@@ -138,7 +149,7 @@ const futureDateStr = () => {
       await controller.createBooking(custReq({
         serviceType: "cook_for_me", date: futureDateStr(),
         startTime: "10:00", endTime: "13:00", durationHours: 3,
-        address: "Flat 1, X, Pune", clientKey: "dup-key-1",
+        address: "Flat 1, X, Pune", clientKey: "dup-key-1", womanPresenceConfirmed: true,
       }), r, next);
       check("A4 duplicate clientKey -> 200 alreadyExists", r.statusCode === 200 && r.body?.alreadyExists === true, `s=${r.statusCode}`);
       setDbReady(false);

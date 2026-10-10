@@ -35,6 +35,15 @@ const {
   getRefundEligibility,
   requestRefund,
 } = require("../controllers/refundController");
+const {
+  declineVerification,
+  verificationStatus,
+} = require("../controllers/bookingVerificationController");
+
+// Woman-presence verification (registered before "/:id" so the literal
+// "verification" segment is never captured as a booking id).
+router.post("/verification/decline", auth, authorize("customer"), declineVerification);
+router.get("/verification/status", auth, authorize("customer"), verificationStatus);
 
 router.post(
   "/",
@@ -67,6 +76,12 @@ router.post(
       .isString()
       .isLength({ max: 120 })
       .withMessage("Client key must be text"),
+    // Explicit woman-presence confirmation for THIS request. Strictly
+    // boolean true; anything else (missing, false, "true", 1, …) is
+    // rejected here and again inside the controller (never truthiness).
+    body("womanPresenceConfirmed")
+      .custom((v) => v === true)
+      .withMessage("Please confirm that a woman will be present throughout the service"),
     body("location.lat")
       .optional()
       .isFloat({ min: -90, max: 90 })

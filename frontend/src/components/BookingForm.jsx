@@ -8,6 +8,10 @@ import { AnalyticsEvents, track } from "../utils/analytics";
 import { formatCurrency, localTodayStr, slabPriceForDuration, LAUNCH_SLAB_PRICES } from "../utils/constants";
 import { saveBookingDraft, loadBookingDraft, clearBookingDraft } from "../utils/bookingDraft";
 import CouponApply from "./CouponApply";
+import WomanPresenceCheck from "./WomanPresenceCheck";
+import "./WomanPresenceCheck.css";
+import { useWomanPresence } from "../utils/useWomanPresence";
+import { presenceGuardMessage, BLOCKED_CODE } from "../utils/womanPresence";
 import CustomCalendar from "./CustomCalendar";
 import CookAvatar from "./CookAvatar";
 import {
@@ -138,6 +142,10 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
   const [copiedPin, setCopiedPin] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const { location: siteLocation } = useSiteLocation();
+  // Mandatory verification: explicit YES authorizes booking; explicit NO
+  // records a server-side one-hour lockout. Never preselected.
+  const wp = useWomanPresence(user, () => setShowLoginModal(true));
+  const wpGate = presenceGuardMessage(wp);
 
   useEffect(() => {
     if (cookUserId) { setResolvedCookUserId(cookUserId); return; }
@@ -444,6 +452,11 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
       setError("Only customers can book"); scrollToError(); return;
     }
     const fail = (msg) => { setError(msg); scrollToError(); };
+    // Authoritative gate first: blocked / unanswered / unresolved must never
+    // reach booking creation (button disabled state alone is not enough —
+    // Enter-key, rapid clicks and programmatic submits all land here).
+    const gate = presenceGuardMessage(wp);
+    if (gate) { fail(gate); return; }
     if (!formData.date) { fail("Please choose a date"); return; }
     if (formData.date < minDateStr) { fail("That date already passed — please pick today or a future date"); return; }
     const serviceHours = Number(formData.durationHours);
@@ -461,6 +474,22 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     if (!formData.city.trim()) { fail("Enter city / area"); return; }
     if (formData.guests !== "" && (!Number.isInteger(Number(formData.guests)) || Number(formData.guests) < 1 || Number(formData.guests) > 500)) {
       fail("Guests must be between 1 and 500"); return;
+    }
+
+    // Explicit NO + Find Cooks click: record the decline first. The one-hour
+    // timer starts only when the backend confirms (submitDecline resolves
+    // ok) — selecting NO alone never started anything. Booking creation
+    // never proceeds on this path.
+    if (wp.presence === "no") {
+      const res = await wp.submitDecline();
+      if (res?.ok) {
+        fail("You cannot make a booking for the next 1 hour because a woman will not be present at home.");
+        return;
+      }
+      fail(res?.busy
+        ? "Recording your response — one moment…"
+        : res?.message || "Could not record your response. Please check your connection and retry.");
+      return;
     }
 
     setSubmitting(true); setError(""); setClashBookingId(null);
@@ -483,6 +512,8 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
         guests: formData.guests === "" ? undefined : Number(formData.guests),
         durationHours: serviceHours,
         couponCode: coupon?.code || "",
+        // Explicit YES for THIS request (verified strictly by the backend).
+        womanPresenceConfirmed: true,
       };
       if (coords) payload.location = coords;
       const res = await API.post("/bookings", payload);
@@ -500,6 +531,13 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     } catch (err) {
       const data = err.response?.data || {};
       const msg = data?.message || err.message || "Booking failed.";
+      if (err.response?.status === 403 && data?.code === BLOCKED_CODE) {
+        // Server-reported lockout (e.g. answered NO elsewhere / another
+        // device): sync the notice + countdown instead of a dead end.
+        if (data?.blockedUntil) wp.applyServerBlock(data.blockedUntil);
+        fail(msg); showToast(msg, "error");
+        return;
+      }
       if (err.response?.status === 409 && data?.bookingId) {
         // Self-overlap: the customer already owns a live booking for this
         // slot — notify and take them straight to it instead of a dead end.
@@ -989,6 +1027,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
           </div>
 
           <div className="bk-card bk-pay-card">
+            <WomanPresenceCheck wp={wp} />
             <div className="bk-card-head-row">
               <div className="bk-card-label">
                 <span className="bk-label-icon bk-tint-green"><Wallet size={15} /></span>
@@ -1023,7 +1062,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
                 onApplied={handleCouponApplied}
               />
             )}
-            <button type="submit" className="bk-submit bk-submit-inline" disabled={submitting}>
+            <button type="submit" className="bk-submit bk-submit-inline" disabled={submitting || Boolean(wpGate)}>
               {submitting ? (
                 <span className="bk-submit-loading"><span className="bk-spinner" aria-hidden="true" /> Sending…</span>
               ) : (
@@ -1063,7 +1102,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
             </button>
           )}
           {step === 1 && (
-            <button type="submit" className="bk-next-btn bk-send-btn" disabled={submitting || checkingSlot || Boolean(slotBusyError)}>
+            <button type="submit" className="bk-next-btn bk-send-btn" disabled={submitting || checkingSlot || Boolean(slotBusyError) || Boolean(wpGate)}>
               {submitting ? "Finding…" : (<>Find Cook <ArrowRight size={16} /></>)}
             </button>
           )}
