@@ -261,8 +261,9 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       Booking.updateOne = async () => { wrote = true; return { modifiedCount: 0 }; };
       const raw = inboundBody([textMsg(COOK_WA, "decline")]);
       const r = await postInbound(raw, sign(raw));
-      const cookTexts = textsTo(COOK_WA);
-      check("ambiguous text lists pendings, writes nothing", r.body?.handled === 0 && wrote === false && /2 pending/.test(cookTexts), cookTexts.slice(0, 80));
+      check("ambiguous tap stays silent (no list broadcast), writes nothing",
+        r.body?.handled === 0 && wrote === false && sent.length === 0,
+        `handled=${r.body?.handled} wrote=${wrote} replies=${sent.length}`);
     }
 
     {
@@ -300,6 +301,175 @@ const textsTo = (e164) => sent.filter((s) => s.to === e164 && s.type === "text")
       const r = await postInbound(raw, sign(raw));
       const cookTexts = textsTo(COOK_WA);
       check("lost race replies current truth", r.statusCode === 200 && /already accepted/.test(cookTexts), cookTexts.slice(0, 80));
+    }
+
+    // ---- unknown sender + ID-suffix resolution ----
+    {
+      // Unknown number + explicit action: one guidance reply, zero mutation.
+      sent.length = 0;
+      User.findOne = () => ({ select: async () => null });
+      User.find = () => ({ select: () => ({ lean: async () => [] }) });
+      let touched = false;
+      Booking.findById = async () => { touched = true; return null; };
+      const r = await ctrl.__test.handleOneMessage({
+        from: "910000000001", id: "wamid.unk1", type: "interactive",
+        interactive: { type: "button_reply", button_reply: { id: `accept:${BID}`, title: "Accept" } },
+      });
+      const bodies = textsTo("910000000001");
+      check("unknown action-sender gets guidance, writes nothing",
+        r?.ok === false && r?.reason === "unknown-sender" && touched === false &&
+        /don't recognize/i.test(bodies) && /registered/i.test(bodies),
+        `${r?.reason} touched=${touched}`);
+    }
+    {
+      // Same stranger again: cooldown allows exactly one reply per hour.
+      sent.length = 0;
+      User.findOne = () => ({ select: async () => null });
+      User.find = () => ({ select: () => ({ lean: async () => [] }) });
+      const msg = (id) => ({ from: "910000000002", id, type: "text", text: { body: "accept" } });
+      const r1 = await ctrl.__test.handleOneMessage(msg("wamid.cd1"));
+      const r2 = await ctrl.__test.handleOneMessage(msg("wamid.cd2"));
+      const n = sent.filter((s) => s.type === "text").length;
+      check("unknown-sender reply rate-limited (1/hour)",
+        r1?.reason === "unknown-sender" && r2?.reason === "unknown-sender" && n === 1, `replies=${n}`);
+    }
+    {
+      // Stranger chatter (no action) stays fully silent.
+      sent.length = 0;
+      User.findOne = () => ({ select: async () => null });
+      User.find = () => ({ select: () => ({ lean: async () => [] }) });
+      const r = await ctrl.__test.handleOneMessage({ from: "910000000003", id: "wamid.ch1", type: "text", text: { body: "hello, any work today?" } });
+      check("stranger chatter stays fully silent", r?.ok === false && sent.length === 0, `replies=${sent.length}`);
+    }
+    {
+      // Slow database: never accuse the number, stay silent.
+      sent.length = 0;
+      User.findOne = () => ({ select: () => new Promise(() => {}) });
+      User.find = () => ({ select: () => ({ lean: () => new Promise(() => {}) }) });
+      const r = await ctrl.__test.handleOneMessage({ from: "910000000004", id: "wamid.to1", type: "text", text: { body: "accept" } });
+      check("slow lookup stays silent (no false unknown-sender)", r?.reason === "unknown-sender" && sent.length === 0, `replies=${sent.length}`);
+    }
+    {
+      // Template-tap disambiguation: "accept <6-hex suffix>" commits.
+      sent.length = 0;
+      const full = mkBooking();
+      mockParties();
+      Booking.find = mockFind(
+        [{ _id: BID, serviceType: "cook_for_me", date: full.date, startTime: "10:00", endTime: "12:00" }],
+        []
+      );
+      Booking.findById = async () => full;
+      Booking.updateOne = async () => { full.status = "accepted"; return { modifiedCount: 1 }; };
+      const r = await ctrl.__test.handleOneMessage(textMsg(COOK_WA, "accept 439011"));
+      check("suffix accept commits (template-tap disambiguation)",
+        r?.ok === true && full.status === "accepted", `${r?.reason} st=${full.status}`);
+    }
+    {
+      // Suffix with no live match: clear reply, zero writes.
+      sent.length = 0;
+      mockParties();
+      Booking.find = mockFind(
+        [{ _id: "507f1f77bcf86cd799439022", serviceType: "a", date: new Date(), startTime: "10:00", endTime: "12:00" }],
+        []
+      );
+      let touchedFind = false, wrote = false;
+      Booking.findById = async () => { touchedFind = true; return null; };
+      Booking.updateOne = async () => { wrote = true; return { modifiedCount: 0 }; };
+      const r = await ctrl.__test.handleOneMessage(textMsg(COOK_WA, "accept 439011"));
+      const bodies = textsTo(COOK_WA);
+      check("suffix miss replies not-found, writes nothing",
+        r?.ok === false && r?.reason === "not-found" && touchedFind === false && wrote === false &&
+        /Couldn't find that live request/.test(bodies),
+        r?.reason);
+    }
+    {
+      // Suffix matching two live requests: ambiguous, zero writes.
+      sent.length = 0;
+      mockParties();
+      Booking.find = mockFind(
+        [
+          { _id: BID, serviceType: "a", date: new Date(), startTime: "10:00", endTime: "12:00" },
+          { _id: "607f1f77bcf86cd799439011", serviceType: "b", date: new Date(), startTime: "14:00", endTime: "16:00" },
+        ],
+        []
+      );
+      let wrote = false;
+      Booking.updateOne = async () => { wrote = true; return { modifiedCount: 0 }; };
+      const r = await ctrl.__test.handleOneMessage(textMsg(COOK_WA, "ACCEPT 439011"));
+      const bodies = textsTo(COOK_WA);
+      check("suffix collision stays ambiguous, writes nothing",
+        r?.ok === false && r?.reason === "ambiguous" && wrote === false && /Dashboard/.test(bodies), r?.reason);
+    }
+    {
+      // Replying inside one exact request message resolves through its
+      // dispatch wamid even with several pending (no list broadcast).
+      sent.length = 0;
+      const full = mkBooking();
+      mockParties();
+      Booking.find = mockFind();
+      const withEntry = {
+        ...full,
+        whatsappDispatch: [{ cook: COOK_ID, kind: "request", status: "sent", messageId: "wamid.req1", attempts: 1 }],
+      };
+      Booking.findOne = async (filter) =>
+        filter && filter["whatsappDispatch.messageId"] === "wamid.req1" ? withEntry : null;
+      Booking.findById = async () => full;
+      Booking.updateOne = async () => { full.status = "accepted"; return { modifiedCount: 1 }; };
+      const r = await ctrl.__test.handleOneMessage({
+        from: COOK_WA, id: "wamid.ctx1", type: "text",
+        text: { body: "accept" }, context: { id: "wamid.req1" },
+      });
+      check("reply-context accept commits the exact booking",
+        r?.ok === true && full.status === "accepted", `${r?.reason} st=${full.status}`);
+    }
+    {
+      // Context pointing at a dead request: clear reply, zero writes.
+      sent.length = 0;
+      mockParties();
+      Booking.find = mockFind();
+      const dead = {
+        ...mkBooking(),
+        status: "expired",
+        whatsappDispatch: [{ cook: COOK_ID, kind: "request", status: "sent", messageId: "wamid.dead1", attempts: 1 }],
+      };
+      Booking.findOne = async (filter) =>
+        filter && filter["whatsappDispatch.messageId"] === "wamid.dead1" ? dead : null;
+      let wrote = false;
+      Booking.updateOne = async () => { wrote = true; return { modifiedCount: 0 }; };
+      const r = await ctrl.__test.handleOneMessage({
+        from: COOK_WA, id: "wamid.ctx2", type: "text",
+        text: { body: "accept" }, context: { id: "wamid.dead1" },
+      });
+      check("dead context replies no-longer-live, writes nothing",
+        r?.ok === false && r?.reason === "not-found" && wrote === false && /no longer live/.test(textsTo(COOK_WA)),
+        r?.reason);
+    }
+    {
+      // Another cook's dispatch entry can never resolve for this sender.
+      sent.length = 0;
+      mockParties();
+      const other = {
+        ...mkBooking(),
+        whatsappDispatch: [{ cook: "OTHERCOOK", kind: "request", status: "sent", messageId: "wamid.other1", attempts: 1 }],
+      };
+      Booking.findOne = async (filter) =>
+        filter && filter["whatsappDispatch.messageId"] ? other : null;
+      Booking.find = mockFind([], []);
+      const r = await ctrl.__test.handleOneMessage({
+        from: COOK_WA, id: "wamid.ctx3", type: "text",
+        text: { body: "accept" }, context: { id: "wamid.other1" },
+      });
+      check("foreign context entry ignored (falls through to none-pending)",
+        r?.ok === false && r?.reason === "none-pending", r?.reason);
+    }
+    {
+      // Suffix parsing units (latin + Marathi + full-id compat).
+      const p = ctrl.__test.parseInboundAction({ type: "text", text: { body: "accept 439011" } });
+      check("suffix parses to short booking id", p.action === "accept" && p.bookingId === "439011", JSON.stringify(p));
+      const q = ctrl.__test.parseInboundAction({ type: "text", text: { body: "स्वीकार 439011" } });
+      check("Marathi suffix parses", q.action === "accept" && q.bookingId === "439011", JSON.stringify(q));
+      const f = ctrl.__test.parseInboundAction({ type: "text", text: { body: `accept:${BID}` } });
+      check("full id still parses", f.action === "accept" && f.bookingId === BID, JSON.stringify(f));
     }
 
     // ---- delivery receipts (Meta statuses callbacks) ----

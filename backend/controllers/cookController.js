@@ -272,7 +272,10 @@ exports.getCookAdminOverview = async (req, res, next) => {
     }
 
     const Booking = require("../models/Booking");
-    const bookings = await Booking.find({ cook: profile.user._id })
+    const bookings = await Booking.find({
+      cook: profile.user._id,
+      $or: [{ status: { $ne: "cancelled" } }, { status: "cancelled", "payment.status": "paid" }],
+    })
       .populate("customer", "name email phone")
       .sort({ createdAt: -1 });
 

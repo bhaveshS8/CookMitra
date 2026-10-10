@@ -81,16 +81,17 @@ const timedLookup = async (promise) => {
       Promise.resolve(promise),
       new Promise((resolve) => setTimeout(() => resolve({ __timeout: true }), LOOKUP_TIMEOUT_MS)),
     ]);
-    return winner && winner.__timeout ? null : winner;
+    return winner && winner.__timeout ? { __timeout: true } : winner;
   } catch {
     return null;
   }
 };
+const isLookupTimeout = (v) => !!(v && v.__timeout);
 
 const findCookByWaId = async (waId) => {
   const digits = String(waId || "").replace(/\D/g, "");
   const core = normalizeIndianMobile(digits);
-  if (!core) return null;
+  if (!core) return { cook: null, timedOut: false };
   const variants = [core, `91${core}`, `0${core}`, `+91${core}`];
   const isCookAccount = (user) => {
     if (!user) return false;
@@ -110,7 +111,8 @@ const findCookByWaId = async (waId) => {
       }
     })()
   );
-  if (exact && isCookAccount(exact)) return exact;
+  if (isLookupTimeout(exact)) return { cook: null, timedOut: true };
+  if (exact && isCookAccount(exact)) return { cook: exact, timedOut: false };
   // Fallback: stored numbers may carry formatting (spaces, dashes) that
   // defeats exact matching. Compare digit-normalized values instead so a
   // legitimate cook is never silently dropped at identification time.
@@ -123,11 +125,33 @@ const findCookByWaId = async (waId) => {
       }
     })()
   );
+  if (isLookupTimeout(cooks)) return { cook: null, timedOut: true };
   for (const c of cooks || []) {
     const stored = normalizeIndianMobile(String(c?.phone || "")) || normalizeIndianMobile(String(c?.mobile || ""));
-    if (stored && stored === core && isCookAccount(c)) return c;
+    if (stored && stored === core && isCookAccount(c)) return { cook: c, timedOut: false };
   }
-  return null;
+  return { cook: null, timedOut: false };
+};
+
+// Replies to action-messages from unrecognized numbers are rate-limited:
+// without a cooldown, anyone texting "accept" in a loop could make the
+// business number emit unbounded paid replies. Best-effort per instance.
+const unknownSenderReplyAt = new Map();
+const UNKNOWN_SENDER_REPLY_MS = 60 * 60 * 1000;
+const shouldReplyUnknownSender = (senderE164) => {
+  try {
+    const now = Date.now();
+    const last = unknownSenderReplyAt.get(String(senderE164)) || 0;
+    if (now - last < UNKNOWN_SENDER_REPLY_MS) return false;
+    unknownSenderReplyAt.set(String(senderE164), now);
+    if (unknownSenderReplyAt.size > 2000) {
+      const oldest = [...unknownSenderReplyAt.entries()].sort((a, b) => a[1] - b[1])[0];
+      if (oldest) unknownSenderReplyAt.delete(oldest[0]);
+    }
+    return true;
+  } catch {
+    return true;
+  }
 };
 
 const bookingLine = (booking) => {
@@ -190,15 +214,54 @@ const parseInboundAction = (msg) => {
   }
   const text = String(msg?.text?.body || "").trim();
   if (!text) return { action: null, bookingId: null };
-  const mm = text.match(/^स्वीकार[^\w]*([0-9a-fA-F]{24})?/) || text.match(/^नकार[^\w]*([0-9a-fA-F]{24})?/);
+  // A trailing id may be the full 24-hex booking id or the 6-hex suffix
+  // shown as "ID …xxxxxx" in pending-list messages (template quick replies
+  // carry static payloads, so cooks disambiguate by typing the suffix).
+  const mm = text.match(/^स्वीकार[^\w]*([0-9a-fA-F]{24}|[0-9a-fA-F]{6})?/) || text.match(/^नकार[^\w]*([0-9a-fA-F]{24}|[0-9a-fA-F]{6})?/);
   if (mm) return { action: /^स्वीकार/.test(text) ? "accept" : "reject", bookingId: mm[1] || null };
-  const m = text.match(/^(accept|decline|reject|yes|no)\b[^\w]*([0-9a-fA-F]{24})?/i);
+  const m = text.match(/^(accept|decline|reject|yes|no)\b[^\w]*([0-9a-fA-F]{24}|[0-9a-fA-F]{6})?/i);
   if (!m) return { action: null, bookingId: null };
   const word = m[1].toLowerCase();
   return {
     action: word === "accept" || word === "yes" ? "accept" : "reject",
     bookingId: m[2] || null,
   };
+};
+
+// Resolve a reply-to-message reference (Meta `messages[].context.id`
+// carries the wamid of the request message being answered) to that cook's
+// live booking. Lets "act on the exact request message" actually work when
+// several requests are pending. Returns { found, actionable, booking }.
+const resolveContextBooking = async (contextWamid, cookId) => {
+  try {
+    const id = String(contextWamid || "").trim();
+    if (!id) return { found: false };
+    const doc = await Booking.findOne({ "whatsappDispatch.messageId": id });
+    if (!doc) return { found: false };
+    const entry = (doc.whatsappDispatch || []).find((e) => String(e?.messageId || "") === id);
+    // The referenced message must have gone to THIS cook — never resolve
+    // another cook's dispatch entry.
+    if (!entry || String(entry.cook || "") !== String(cookId)) return { found: false };
+    const now = new Date();
+    const live =
+      String(doc.status) === "requested" &&
+      doc.requestExpiresAt &&
+      new Date(doc.requestExpiresAt) > now;
+    const ignored = (doc.ignoredBy || []).map(String).includes(String(cookId));
+    const visible =
+      (doc.cook && String(doc.cook) === String(cookId)) || (!doc.cook && !ignored);
+    if (!live || !visible) return { found: true, actionable: false };
+    let booking = null;
+    try {
+      booking = await Booking.findById(doc._id);
+    } catch {
+      booking = null;
+    }
+    if (!booking) return { found: true, actionable: false };
+    return { found: true, actionable: true, booking };
+  } catch {
+    return { found: false };
+  }
 };
 
 // Full pending list for a cook replying by text (no booking id).
@@ -484,12 +547,30 @@ const handleOneMessage = async (msg) => {
       // The cook acts via the Accept/Decline buttons or the dashboard.
       return { ok: false, reason: "unrecognized" };
     }
-    const cook = senderE164 ? await findCookByWaId(senderE164) : null;
+    const cookRes = senderE164 ? await findCookByWaId(senderE164) : { cook: null, timedOut: false };
+    const cook = cookRes?.cook || null;
     if (!cook) {
+      // Pure chatter from strangers stays fully silent. But a clear
+      // ACCEPT/DECLINE action from an unrecognized number used to vanish
+      // without a trace (cook taps, nothing happens, website unchanged) —
+      // now it gets one guidance reply per hour. A slow database says
+      // nothing rather than wrongly claiming the number is unknown.
+      if (action && !cookRes?.timedOut && senderE164 && shouldReplyUnknownSender(senderE164)) {
+        await reply(
+          senderE164,
+          "We don't recognize this WhatsApp number. If you're a Cook Mitra cook, please reply from your registered mobile number, or accept from your Cook Dashboard."
+        );
+      }
       return { ok: false, reason: "unknown-sender" };
     }
+    // A 6-hex suffix ("ID …xxxxxx" as shown in pending lists) resolves
+    // within this cook's live requests — the only way to disambiguate when
+    // template quick replies (static payloads, no booking id) meet several
+    // pending requests.
+    const shortId =
+      bookingId && bookingId.length === 6 ? String(bookingId).toLowerCase() : null;
     let booking = null;
-    if (bookingId) {
+    if (bookingId && !shortId) {
       try {
         booking = await Booking.findById(bookingId);
       } catch {
@@ -499,37 +580,61 @@ const handleOneMessage = async (msg) => {
         await reply(senderE164, "Couldn't find that booking — please use your Cook Dashboard.");
         return { ok: false, reason: "not-found" };
       }
-    } else {
+    } else if (shortId) {
       const pending = await loadPendingForCook(cook._id);
-      if (!pending.length) {
-        await reply(senderE164, "You have no pending booking requests right now.");
-        return { ok: false, reason: "none-pending" };
+      const matches = (pending || []).filter((b) =>
+        String(b?._id || "").toLowerCase().endsWith(shortId)
+      );
+      if (!matches.length) {
+        await reply(senderE164, "Couldn't find that live request — it may have expired or been taken. Please check your Cook Dashboard.");
+        return { ok: false, reason: "not-found" };
       }
-      if (pending.length > 1) {
-        // WhatsApp text messages cap at 4096 chars: show the first lines
-        // plus an exact remainder count — the total is never understated.
-        const SHOWN = 10;
-        const shown = pending.slice(0, SHOWN);
-        const list = shown
-          .map((b) => `• ${bookingLine(b)}`)
-          .join("\n");
-        const more = pending.length > shown.length
-          ? `\n…and ${pending.length - shown.length} more.`
-          : "";
-        await reply(
-          senderE164,
-          `You have ${pending.length} pending requests — please tap Accept/Decline on the exact request message:\n${list}${more}`
-        );
+      if (matches.length > 1) {
+        await reply(senderE164, "That ID matches more than one request — please accept from your Cook Dashboard.");
         return { ok: false, reason: "ambiguous" };
       }
       try {
-        booking = await Booking.findById(pending[0]._id);
+        booking = await Booking.findById(matches[0]._id);
       } catch {
         booking = null;
       }
       if (!booking) {
         await reply(senderE164, "Couldn't load that booking — please use your Cook Dashboard.");
         return { ok: false, reason: "not-found" };
+      }
+    } else {
+      // Replying to (or tapping inside) one exact request message carries
+      // its wamid as context — resolve that first so the action lands on
+      // the intended booking even with several pending.
+      const ctx = await resolveContextBooking(msg?.context?.id, cook._id);
+      if (ctx.actionable) {
+        booking = ctx.booking;
+      } else if (ctx.found) {
+        await reply(senderE164, "That request is no longer live — please check your Cook Dashboard.");
+        return { ok: false, reason: "not-found" };
+      } else {
+        const pending = await loadPendingForCook(cook._id);
+        if (!pending.length) {
+          await reply(senderE164, "You have no pending booking requests right now.");
+          return { ok: false, reason: "none-pending" };
+        }
+        if (pending.length > 1) {
+          // Deliberately silent (no pending-list broadcast): the cook acts
+          // on the exact request message (resolved above via context), by
+          // typing ACCEPT with the request ID from the Cook Dashboard, or
+          // from the dashboard itself. Committing to a guessed booking
+          // would be worse than doing nothing.
+          return { ok: false, reason: "ambiguous" };
+        }
+        try {
+          booking = await Booking.findById(pending[0]._id);
+        } catch {
+          booking = null;
+        }
+        if (!booking) {
+          await reply(senderE164, "Couldn't load that booking — please use your Cook Dashboard.");
+          return { ok: false, reason: "not-found" };
+        }
       }
     }
     if (action === "accept") return acceptViaWhatsApp(cook, booking, senderE164);
@@ -596,4 +701,4 @@ exports.handleInbound = async (req, res) => {
   }
 };
 
-exports.__test = { verifySignature, parseInboundAction, findCookByWaId, handleOneMessage, applyDeliveryStatus };
+exports.__test = { verifySignature, parseInboundAction, findCookByWaId, handleOneMessage, applyDeliveryStatus, resolveContextBooking };

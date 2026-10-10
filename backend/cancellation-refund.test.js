@@ -345,8 +345,11 @@ const runCancel = async (user, body) => {
   // (`requested`) booking — one tap, no reason, no cutoff.
   storeDoc = mkDoc({ cook: null, status: "requested", payment: { status: "pending", paidAmount: 0, refundStatus: "none" } });
   {
+    const n0 = notifications.length;
+    const a0 = audits.length;
     const r = await runCancel(CUSTOMER, {});
-    check("requested withdrawal needs no reason", r.statusCode === 200 && r.body.status === "cancelled", `s=${r.statusCode}`);
+    check("requested withdrawal (unpaid) deleted, not tracked", r.statusCode === 200 && r.body.deleted === true, `s=${r.statusCode}`);
+    check("unpaid withdrawal writes no audit/notify", audits.length === a0 && notifications.length === n0, `a=${audits.length - a0} n=${notifications.length - n0}`);
   }
   storeDoc = mkDoc({ cook: null, status: "requested", payment: { status: "pending", paidAmount: 0, refundStatus: "none" } });
   {
@@ -358,7 +361,7 @@ const runCancel = async (user, body) => {
     const { isWithin30MinCutoff } = require("./utils/cancellationPolicy");
     const insideCutoff = isWithin30MinCutoff(storeDoc, Date.now());
     const r = await runCancel(CUSTOMER, {});
-    check("requested withdrawal ignores 30-min cutoff", insideCutoff && r.statusCode === 200 && r.body.status === "cancelled", `cutoff=${insideCutoff} s=${r.statusCode}`);
+    check("requested withdrawal (unpaid) ignores cutoff + deleted", insideCutoff && r.statusCode === 200 && r.body.deleted === true, `cutoff=${insideCutoff} s=${r.statusCode}`);
   }
   storeDoc = mkDoc({ cook: "cook1", status: "confirmed" });
   {
@@ -369,8 +372,11 @@ const runCancel = async (user, body) => {
 
   storeDoc = mkDoc({ payment: { status: "pending", paidAmount: 0, refundStatus: "none" } });
   {
+    const n0 = notifications.length;
+    const a0 = audits.length;
     const r = await runCancel(CUSTOMER, { reason: "CHANGE_OF_PLANS" });
-    check("unpaid cancel allowed, no refund", r.statusCode === 200 && r.body.cancellationInfo.refundStatus === "NOT_APPLICABLE" && r.body.payment.refundStatus === "none");
+    check("unpaid cancel deleted, not tracked", r.statusCode === 200 && r.body.deleted === true, `s=${r.statusCode}`);
+    check("unpaid cancel writes no audit/notify", audits.length === a0 && notifications.length === n0, `a=${audits.length - a0} n=${notifications.length - n0}`);
   }
 
   storeDoc = mkDoc({ cookArrived: true, serviceStartedAt: new Date() });

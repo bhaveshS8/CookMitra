@@ -126,8 +126,39 @@ const stripServiceOtp = (payload) => {
   return Array.isArray(payload) ? payload.map(stripOne) : stripOne(payload);
 };
 
-const attachCookPhotoUrls = async (objs) => {
+// Unpaid cancelled bookings are neither shown nor tracked: cancelling an
+// unpaid booking permanently deletes it (see cancelBooking / markNoShow).
+const isUnpaidBooking = (b) => b?.payment?.status !== "paid";
+// Mongo exclusion clause for legacy rows: hide status=cancelled unless paid.
+const NOT_UNPAID_CANCELLED_CLAUSE = {
+  $or: [{ status: { $ne: "cancelled" } }, { status: "cancelled", "payment.status": "paid" }],
+};
+const excludeUnpaidCancelled = (filter = {}) => ({
+  ...filter,
+  $and: [...(Array.isArray(filter.$and) ? filter.$and : []), NOT_UNPAID_CANCELLED_CLAUSE],
+});
+// Permanently remove an unpaid booking: coupon usage released, its
+// notifications removed, doc deleted. No audit/CancellationAudit is written.
+const destroyUnpaidBooking = async (booking) => {
+  const id = booking?._id;
   try {
+    await releaseCouponUsage(booking);
+  } catch {
+  }
+  if (id && dbReady()) {
+    try {
+      await Notification.deleteMany({ booking: id });
+    } catch {
+    }
+    try {
+      await Booking.deleteOne({ _id: id });
+    } catch {
+    }
+  }
+  return id;
+};
+
+const attachCookPhotoUrls = async (objs) => {  try {
     const list = Array.isArray(objs) ? objs : [objs];
     const ids = [
       ...new Set(
@@ -531,6 +562,19 @@ const pickBookingCustomerFields = (obj) => {
   const out = {};
   for (const key of BOOKING_CUSTOMER_FIELDS) {
     if (obj[key] !== undefined) out[key] = obj[key];
+  }
+  // Coordinates must be a complete, finite, in-range pair or absent —
+  // partial pairs (lat without lng), NaN/Infinity, out-of-range values, and
+  // non-numeric strings never persist (a typed address still books fine).
+  const loc = out.location;
+  if (loc !== undefined) {
+    const lat = typeof loc?.lat === "string" && loc.lat.trim() !== "" ? Number(loc.lat) : loc?.lat;
+    const lng = typeof loc?.lng === "string" && loc.lng.trim() !== "" ? Number(loc.lng) : loc?.lng;
+    const ok =
+      Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
+      Number.isFinite(lng) && lng >= -180 && lng <= 180;
+    if (ok) out.location = { lat, lng };
+    else delete out.location;
   }
   return out;
 };
@@ -1287,13 +1331,13 @@ exports.normalizeRescheduleReason = normalizeRescheduleReason;
 exports.getMyBookings = async (req, res, next) => {  try {
     const EXPIRY_GRACE_MS = 10 * 60 * 1000;
     const graceCutoff = new Date(Date.now() - EXPIRY_GRACE_MS);
-    const filter = {
+    const filter = excludeUnpaidCancelled({
       customer: req.user.id,
       $or: [
         { status: { $ne: "expired" } },
         { status: "expired", requestExpiresAt: { $gt: graceCutoff } },
       ],
-    };
+    });
     const pg = paginationParams(req);
     const bookings = await applyPagination(
       Booking.find(filter).populate("cook", "name email phone").sort({ createdAt: -1 }).limit(HARD_CAP),
@@ -1377,6 +1421,7 @@ exports.getMyBookings = async (req, res, next) => {  try {
       return o;
     });
     const visibleOut = finalOut.filter((o) => {
+      if (isUnpaidBooking(o) && o.status === "cancelled") return false;
       if (o.status !== "expired") return true;
       const expiryRef = o.requestExpiresAt || o.updatedAt || o.createdAt;
       return expiryRef && new Date(expiryRef).getTime() > Date.now() - EXPIRY_GRACE_MS;
@@ -1389,7 +1434,7 @@ exports.getMyBookings = async (req, res, next) => {  try {
 
 exports.getCookBookings = async (req, res, next) => {
   try {
-    const filter = { cook: req.user.id, status: { $ne: "expired" } };
+    const filter = excludeUnpaidCancelled({ cook: req.user.id, status: { $ne: "expired" } });
     const pg = paginationParams(req);
     const bookings = await applyPagination(
       Booking.find(filter).populate("customer", "name email phone").sort({ createdAt: -1 }).limit(HARD_CAP),
@@ -1453,7 +1498,7 @@ exports.getCookBookings = async (req, res, next) => {
     });
     const now = Date.now();
     const visibleCookOut = finalCookOut.filter(
-      (o) => o.status !== "expired" && !isNoShowPastHours(o, now)
+      (o) => o.status !== "expired" && !isNoShowPastHours(o, now) && !(o.status === "cancelled" && isUnpaidBooking(o))
     );
     return sendList(res, visibleCookOut, pg, () => Booking.countDocuments(filter));
   } catch (error) {
@@ -2488,6 +2533,10 @@ exports.cancelBooking = async (req, res, next) => {
 
     await expireBookingIfNeeded(booking);
     if (booking.status === "cancelled") {
+      if (isUnpaidBooking(booking)) {
+        const id = await destroyUnpaidBooking(booking);
+        return res.json({ deleted: true, id, message: "Booking cancelled and removed (no payment was made)." });
+      }
       return res.json({ ...(stripServiceOtp(booking).toObject ? stripServiceOtp(booking) : stripServiceOtp(booking)), alreadyCancelled: true });
     }
     if (["completed", "rejected", "expired", "unattended"].includes(booking.status)) {
@@ -2587,6 +2636,10 @@ exports.cancelBooking = async (req, res, next) => {
           return res.status(404).json({ message: "Booking not found" });
         }
         if (latest.status === "cancelled") {
+          if (isUnpaidBooking(latest)) {
+            const id = await destroyUnpaidBooking(latest);
+            return res.json({ deleted: true, id, message: "Booking cancelled and removed (no payment was made)." });
+          }
           return res.json({ ...(stripServiceOtp(latest).toObject ? stripServiceOtp(latest) : stripServiceOtp(latest)), alreadyCancelled: true });
         }
         if (["completed", "rejected", "expired", "unattended"].includes(latest.status)) {
@@ -2604,6 +2657,13 @@ exports.cancelBooking = async (req, res, next) => {
       booking.status = "cancelled";
       booking.cancelledBy = cancelledByValue;
       booking.statusHistory.push({ status: "cancelled" });
+    }
+
+    // Unpaid cancelled bookings are neither shown nor tracked: remove the
+    // record instead of keeping a cancelled stub (no refund/audit/notify).
+    if (isUnpaidBooking(booking)) {
+      const id = await destroyUnpaidBooking(booking);
+      return res.json({ deleted: true, id, message: "Booking cancelled and removed (no payment was made)." });
     }
 
     const snap = {
@@ -2854,6 +2914,11 @@ exports.markNoShow = async (req, res, next) => {
       refundStatus: "NOT_APPLICABLE",
     };
     fresh.statusHistory.push({ status: "cancelled", note: `Customer no-show recorded (${reason}) — 0% refund` });
+    // Unpaid cancelled bookings are neither shown nor tracked.
+    if (isUnpaidBooking(fresh)) {
+      const id = await destroyUnpaidBooking(fresh);
+      return res.json({ deleted: true, id, message: "No-show recorded — unpaid booking removed." });
+    }
     await fresh.save();
     try {
       const CancellationAudit = require("../models/CancellationAudit");
@@ -3767,6 +3832,10 @@ exports.getBookingById = async (req, res, next) => {
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
     }
+    // Unpaid cancelled bookings are neither shown nor tracked.
+    if (booking.status === "cancelled" && isUnpaidBooking(booking)) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
     const isCustomer = booking.customer?._id?.toString() === req.user.id;
     const isCook = booking.cook?._id?.toString() === req.user.id;
     const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
@@ -4215,13 +4284,20 @@ exports.getMyLocations = async (req, res, next) => {
     for (const b of bookings) {
       const address = String(b.address || "").trim();
       if (!address) continue;
-      const key = address.toLowerCase();
-      const hasPin = b.location?.lat != null && b.location?.lng != null;
+      const lat = Number(b.location?.lat);
+      const lng = Number(b.location?.lng);
+      const hasPin = Number.isFinite(lat) && lat >= -90 && lat <= 90 &&
+        Number.isFinite(lng) && lng >= -180 && lng <= 180;
+      // Dedup by address text AND pin: materially different pins for one
+      // address label stay separate entries instead of collapsing.
+      const key = hasPin
+        ? `${address.toLowerCase()}||${lat.toFixed(4)},${lng.toFixed(4)}`
+        : address.toLowerCase();
       if (!seen.has(key)) {
         seen.set(key, {
           address,
           addressDetails: b.addressDetails || {},
-          location: hasPin ? { lat: b.location.lat, lng: b.location.lng } : null,
+          location: hasPin ? { lat, lng } : null,
           lastUsed: b.createdAt,
           timesUsed: 1,
         });
@@ -4229,7 +4305,7 @@ exports.getMyLocations = async (req, res, next) => {
         const entry = seen.get(key);
         entry.timesUsed += 1;
         if (hasPin && !entry.location) {
-          entry.location = { lat: b.location.lat, lng: b.location.lng };
+          entry.location = { lat, lng };
           entry.addressDetails = b.addressDetails || entry.addressDetails;
         }
       }
@@ -4244,8 +4320,9 @@ exports.getMyLocations = async (req, res, next) => {
 exports.getAdminBookings = async (req, res, next) => {
   try {
     const pg = paginationParams(req);
+    const adminFilter = excludeUnpaidCancelled();
     const bookings = await applyPagination(
-      Booking.find()
+      Booking.find(adminFilter)
         .populate("customer", "name email phone")
         .populate("cook", "name email phone")
         .sort({ createdAt: -1 }),
@@ -4279,7 +4356,7 @@ exports.getAdminBookings = async (req, res, next) => {
         return { ...obj, review: reviewByBookingId[b._id.toString()] || null };
       }),
       pg,
-      () => Booking.countDocuments()
+      () => Booking.countDocuments(adminFilter)
     );
   } catch (error) {
     next(error);

@@ -2,7 +2,7 @@ import React from "react";
 import { Link, useParams } from "react-router-dom";
 import { useFetch } from "../hooks/useFetch";
 import AdminDocViewer from "../components/AdminDocViewer";
-import { formatCurrency, formatDate, SERVICE_DETAILS, formatTimeRange12 } from "../utils/constants";
+import { formatCurrency, formatDate, SERVICE_DETAILS, formatTimeRange12, isUnpaidCancelled } from "../utils/constants";
 import {
   ArrowLeft,
   ChefHat,
@@ -144,8 +144,9 @@ const AdminCookProfile = () => {
   const byNewest = (a, b) =>
     new Date(b?.createdAt).getTime() - new Date(a?.createdAt).getTime() ||
     String(b?._id || "").localeCompare(String(a?._id || ""));
-  const current = bookings.filter((b) => CURRENT_STATUSES.includes(b.status)).sort(byNewest);
-  const past = bookings.filter((b) => !CURRENT_STATUSES.includes(b.status)).sort(byNewest);
+  const trackable = (bookings || []).filter((b) => !isUnpaidCancelled(b));
+  const current = trackable.filter((b) => CURRENT_STATUSES.includes(b.status)).sort(byNewest);
+  const past = trackable.filter((b) => !CURRENT_STATUSES.includes(b.status)).sort(byNewest);
   const serviceRows = Object.entries(summary?.earningsByService || {});
   const avgRating = profile.rating?.average
     ? Number(profile.rating.average).toFixed(1)

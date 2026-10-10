@@ -54,6 +54,7 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-}
+      FRONTEND_URL: ${FRONTEND_URL:-${FRONTEND_BASE_URL:-}}
       # WhatsApp Cloud API (Meta) — REQUIRED for webhook verification.
       # Without these the container sees empty VERIFY_TOKEN and every
       # Meta GET /api/whatsapp/webhook returns 403 ("callback not accepted").

@@ -5,7 +5,7 @@ import { useFetch } from "../hooks/useFetch";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { normalizeRole } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
-import { formatCurrency, formatDate, formatTimeRange12, playAlarmSound } from "../utils/constants";
+import { formatCurrency, formatDate, formatTimeRange12, playAlarmSound, isUnpaidCancelled } from "../utils/constants";
 import AddCookModal from "../components/AddCookModal";
 import BookingRequestModal from "../components/BookingRequestModal";
 import CouponManagement from "../components/CouponManagement";
@@ -530,16 +530,19 @@ const BookingManagement = () => {
   const isPast = (b) => ["completed", "cancelled", "rejected", "expired", "unattended"].includes(b.status);
   const isUpcoming = (b) => ["accepted", "confirmed", "in_progress"].includes(b.status);
 
-  const newCount = (bookings || []).filter((b) => b.status === "requested").length;
-  const upcomingCount = (bookings || []).filter(isUpcoming).length;
-  const pastCount = (bookings || []).filter(isPast).length;
+  // Unpaid cancelled bookings are neither shown nor tracked (backend deletes
+  // them on cancel; this guards every list against legacy rows).
+  const trackableBookings = (bookings || []).filter((b) => !isUnpaidCancelled(b));
+  const newCount = trackableBookings.filter((b) => b.status === "requested").length;
+  const upcomingCount = trackableBookings.filter(isUpcoming).length;
+  const pastCount = trackableBookings.filter(isPast).length;
 
   const createdMs = (b) => {
     const t = new Date(b?.createdAt).getTime();
     return Number.isFinite(t) ? t : 0;
   };
 
-  const visibleBookings = [...(bookings || [])]
+  const visibleBookings = [...trackableBookings]
     .filter((b) => {
       if (bookingFilter === "new") return b.status === "requested";
       if (bookingFilter === "upcoming") return isUpcoming(b);
@@ -585,7 +588,7 @@ const BookingManagement = () => {
       <div className="admin-bookings-head">
         <div className="admin-bookings-title">
           <h2>All Platform Bookings</h2>
-          <p>{(bookings || []).length} total • {newCount} awaiting cook decision</p>
+          <p>{trackableBookings.length} total • {newCount} awaiting cook decision</p>
           {!loading && refreshing && (
             <span className="dashboard-syncing-pill" aria-live="polite" aria-label="Auto-refreshing bookings">
               <span className="dashboard-syncing-dot" />
@@ -595,7 +598,7 @@ const BookingManagement = () => {
         </div>
         <div className="admin-bookings-filters" role="tablist" aria-label="Filter bookings">
           {[
-            { id: "all", label: "All", count: (bookings || []).length },
+            { id: "all", label: "All", count: trackableBookings.length },
             { id: "new", label: "New", count: newCount },
             { id: "upcoming", label: "Upcoming", count: upcomingCount },
             { id: "past", label: "Past", count: pastCount },
@@ -792,8 +795,8 @@ const BookingManagement = () => {
       ) : (
         <div className="admin-bookings-empty">
           <span className="admin-bookings-empty-ico"><Calendar size={22} /></span>
-          <h3>{bookings && bookings.length > 0 ? "Nothing matches this filter" : "No bookings yet"}</h3>
-          <p>{bookings && bookings.length > 0 ? "Try a different filter to see more platform activity." : "New customer requests will appear here as soon as they are created."}</p>
+          <h3>{trackableBookings.length > 0 ? "Nothing matches this filter" : "No bookings yet"}</h3>
+          <p>{trackableBookings.length > 0 ? "Try a different filter to see more platform activity." : "New customer requests will appear here as soon as they are created."}</p>
         </div>
       )}
 

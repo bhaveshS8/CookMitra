@@ -6,18 +6,30 @@ import {
   formatAccuracy,
   accuracyGrade,
   fetchIpLocation,
+  withTimeout,
+  LOCATION_FRESH_MS,
 } from "../utils/geolocation";
 
 const STORAGE_KEY = "cm-user-location-v1";
 const AUTO_ASK_KEY = "cm-loc-auto-asked";
 // A saved precise GPS fix younger than this is reused as-is on entry.
-const FRESH_GPS_MS = 2 * 3600 * 1000;
+const FRESH_GPS_MS = LOCATION_FRESH_MS;
+// Hard cap for the whole GPS acquisition stage (watch + fallbacks).
+const GPS_BUDGET_MS = 22000;
 
 const isFreshGps = (stored) =>
   stored?.source === "gps" &&
   Number.isFinite(stored?.lat) &&
   Number.isFinite(stored?.lng) &&
   Date.now() - Number(stored?.savedAt || 0) < FRESH_GPS_MS;
+
+// A saved pin (any source) is worth reusing only while fresh. An explicit
+// manual choice is never auto-overwritten — it is handled separately.
+const isFreshEnough = (stored) =>
+  stored != null &&
+  Number.isFinite(stored?.lat) &&
+  Number.isFinite(stored?.lng) &&
+  Date.now() - Number(stored?.savedAt || 0) < LOCATION_FRESH_MS;
 
 const queryGeoPermission = async () => {
   try {
@@ -93,34 +105,59 @@ export const initLocation = createAsyncThunk(
 
 export const requestPreciseLocation = createAsyncThunk(
   "location/requestPrecise",
-  async (opts, { rejectWithValue }) => {
+  async (opts, { getState, rejectWithValue }) => {
+    // Revision guard: concurrent detections (StrictMode double-mount, rapid
+    // retries) and intervening user actions (manual pick, clear) bump
+    // state.generation — a stale run must never commit over newer state.
+    const myGen = getState()?.location?.generation ?? 0;
+    const alive = () => (getState()?.location?.generation ?? -1) === myGen;
+    const superseded = () => rejectWithValue({ superseded: true });
     try {
       const forceRefine = Boolean(opts?.forceRefine);
-      const c = await getCurrentPositionRobust();
-      const geo = await reverseGeocode(c.lat, c.lng);
-      const area = geo.area || geo.suburb || geo.street || "";
+      // 1. Coordinates first, hard-capped. A reverse-geocode outage must
+      // never make working GPS look broken.
+      const c = await withTimeout(
+        getCurrentPositionRobust(),
+        GPS_BUDGET_MS,
+        "Location timed out — try again outdoors with a clear sky view, or type your address manually"
+      );
+      if (!c || !Number.isFinite(c.lat) || !Number.isFinite(c.lng)) {
+        throw new Error("Could not determine your position — please type your address manually");
+      }
+      if (!alive()) return superseded();
+      // 2. Address enrichment is best-effort and isolated: slow, failed, or
+      // empty geocoding still commits the validated coordinates with a
+      // neutral label instead of hanging or discarding the fix.
+      let geo = null;
+      try {
+        geo = await reverseGeocode(c.lat, c.lng);
+      } catch {
+        geo = null;
+      }
+      if (!alive()) return superseded();
+      const area = geo?.area || geo?.suburb || geo?.street || "";
       const grade = accuracyGrade(c.accuracy);
-      const houseLine = [geo.houseNumber, geo.street].filter(Boolean).join(" ").trim();
-      const displayShort = geo.displayName ? String(geo.displayName).split(",").slice(0, 2).join(",").trim() : "";
+      const houseLine = [geo?.houseNumber, geo?.street].filter(Boolean).join(" ").trim();
+      const displayShort = geo?.displayName ? String(geo.displayName).split(",").slice(0, 2).join(",").trim() : "";
       const exactOk = grade !== "poor";
       const label =
-        formatLocationLabel({ area, city: geo.city, state: geo.state }) || "Current location";
+        formatLocationLabel({ area, city: geo?.city, state: geo?.state }) || "Current location";
       // Full detected address in text form (exact street address when GPS is good).
       const fullAddress = (
-        geo.displayName ||
-        [houseLine, area, geo.city, geo.state, geo.postcode].filter(Boolean).join(", ")
+        geo?.displayName ||
+        [houseLine, area, geo?.city, geo?.state, geo?.postcode].filter(Boolean).join(", ")
       ).trim();
       const next = {
         label,
         fullAddress,
-        city: geo.city || "",
+        city: geo?.city || "",
         area,
-        state: geo.state || "",
-        street: geo.street || "",
-        postcode: geo.postcode || "",
+        state: geo?.state || "",
+        street: geo?.street || "",
+        postcode: geo?.postcode || "",
         exactLine: exactOk ? houseLine || displayShort || "" : "",
-        hasHouseNumber: exactOk && Boolean(geo.houseNumber),
-        displayName: geo.displayName || "",
+        hasHouseNumber: exactOk && Boolean(geo?.houseNumber),
+        displayName: geo?.displayName || "",
         accuracyNote:
           grade === "poor"
             ? `GPS accuracy is ${formatAccuracy(c.accuracy)} — the pin is approximate. Step outdoors with a clear sky view and re-detect for an exact address.`
@@ -133,30 +170,42 @@ export const requestPreciseLocation = createAsyncThunk(
       };
       if (grade === "poor" && !forceRefine) {
         const prev = loadStoredPin();
-        if (prev) {
+        // An explicit manual choice always wins; otherwise only a FRESH
+        // saved pin outranks a new poor fix (a stale pin must not bury it).
+        if (prev?.source === "manual") {
+          return {
+            location: { ...prev, source: prev.source || "stored" },
+            error: "GPS is approximate right now — kept the location you chose. Step outdoors and tap Re-detect for an exact fix.",
+          };
+        }
+        if (prev && isFreshEnough(prev)) {
           return {
             location: { ...prev, source: prev.source || "stored" },
             error: `GPS is approximate right now (${formatAccuracy(next.accuracy)}) — kept your saved pin. Step outdoors and tap Re-detect for an exact fix.`,
           };
         }
       }
+      if (!alive()) return superseded();
       persist(next);
       return { location: next, error: "" };
     } catch (err) {
       const msg = err?.message || "Could not detect your location";
       const denied = /permission|blocked|denied|secure page/i.test(msg);
-      // Never replace a saved precise pin with a coarse IP guess.
+      // Never replace a saved precise pin with a coarse IP guess, and never
+      // resurrect a stale pin over an explicit clear.
       const prev = loadStoredPin();
-      if (prev) {
+      if (prev?.source === "manual" || (prev && isFreshEnough(prev))) {
+        if (!alive()) return superseded();
         return {
           location: { ...prev, source: prev.source || "stored" },
           error: denied
-            ? "Precise location is off — kept your saved pin. Enable GPS to refresh it."
+            ? "Precise location is off — kept the location you chose. Enable GPS to refresh it."
             : "GPS unavailable — kept your saved pin. Tap Re-detect for a fresh fix.",
         };
       }
       try {
         const ip = await fetchIpLocation();
+        if (!alive()) return superseded();
         if (ip?.label) {
           const approx = {
             label: ip.label,
@@ -177,6 +226,7 @@ export const requestPreciseLocation = createAsyncThunk(
         }
       } catch {
       }
+      if (!alive()) return superseded();
       if (denied) {
         return rejectWithValue({
           location: null,
@@ -219,6 +269,11 @@ const locationSlice = createSlice({
     location: null,
     status: "idle",
     error: "",
+    // Revision counter: every new detection attempt, manual selection, or
+    // clear bumps it. In-flight async work commits only while its captured
+    // revision is still current (see requestPreciseLocation) — this is what
+    // stops late GPS/geocode responses overwriting newer choices.
+    generation: 0,
   },
   reducers: {
     locationRestored(state, action) {
@@ -234,6 +289,7 @@ const locationSlice = createSlice({
       state.location = null;
       state.status = "idle";
       state.error = "";
+      state.generation += 1;
     },
   },
   extraReducers: (builder) => {
@@ -241,6 +297,7 @@ const locationSlice = createSlice({
       .addCase(requestPreciseLocation.pending, (state) => {
         state.status = "locating";
         state.error = "";
+        state.generation += 1;
       })
       .addCase(requestPreciseLocation.fulfilled, (state, action) => {
         state.location = action.payload.location;
@@ -248,6 +305,8 @@ const locationSlice = createSlice({
         state.status = "ready";
       })
       .addCase(requestPreciseLocation.rejected, (state, action) => {
+        // A superseded run must not touch UI state owned by newer work.
+        if (action.payload?.superseded) return;
         const payload = action.payload;
         if (payload) {
           state.error = payload.error;
@@ -262,6 +321,7 @@ const locationSlice = createSlice({
         state.location = action.payload;
         state.status = "ready";
         state.error = "";
+        state.generation += 1;
       });
   },
 });

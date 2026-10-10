@@ -744,7 +744,9 @@ const stubPhonesFor = (cooks) => {
       check("diagnostics: default call shape still an array", Array.isArray(compatShape), "compat");
     }
 
-    // 23. inbound pending list uncapped: 7 live pendings -> reply names all 7
+    // 23. inbound ambiguous taps stay silent: 7 live pendings resolve to
+    // no commit and no list broadcast (per product decision — cooks act on
+    // the exact message, by ID suffix, or from the dashboard).
     {
       reset();
       const waCtrl = require("./controllers/whatsappController");
@@ -762,11 +764,12 @@ const stubPhonesFor = (cooks) => {
       metaMode = "ok";
       const before = sentBodies.length;
       const r = await waCtrl.__test.handleOneMessage({ from: "919000000020", id: "wamid-t1", text: { body: "ACCEPT" } });
-      const replyBody = sentBodies.slice(before).map((b) => b.text?.body || "").join("\n");
+      const newReplies = sentBodies.slice(before);
       User.findOne = realUserFindOne;
       User.find = realUserFind;
       Booking.find = realBookingFind;
-      check("7 pendings -> ambiguous names true total", r && r.reason === "ambiguous" && /7 pending requests/.test(replyBody), `${r?.reason} totalled=${/7 pending requests/.test(replyBody)}`);
+      check("7 pendings -> ambiguous, silent, writes nothing",
+        r && r.reason === "ambiguous" && newReplies.length === 0, `${r?.reason} replies=${newReplies.length}`);
     }
 
     // 24. static guard: no recipient-count caps remain in dispatch sources

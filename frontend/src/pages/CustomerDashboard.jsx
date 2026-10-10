@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useFetch } from "../hooks/useFetch";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import API from "../api/axios";
-import { formatDate, formatTimeRange12, formatCurrency, canRescheduleBooking, getBookingDisplayState } from "../utils/constants";
+import { formatDate, formatTimeRange12, formatCurrency, canRescheduleBooking, getBookingDisplayState, isUnpaidCancelled } from "../utils/constants";
 import { buildRetryState } from "../utils/bookingRetry";
 import CookAvatar from "../components/CookAvatar";
 import {
@@ -109,7 +109,7 @@ const CustomerDashboard = () => {
     };
   }, [bookings, now]);
   const expiredBookings = (bookings?.filter((b) => b.status === "expired") || []).sort(byNewest);
-  const cancelledBookings = (bookings?.filter((b) => b.status === "cancelled") || []).sort(byNewest);
+  const cancelledBookings = (bookings?.filter((b) => b.status === "cancelled" && !isUnpaidCancelled(b)) || []).sort(byNewest);
   const rejectedBookings = (bookings?.filter((b) => b.status === "rejected") || []).sort(byNewest);
   const unattendedBookings = (bookings?.filter((b) => UNATTENDED_STATUSES.includes(b.status)) || []).sort(byNewest);
 

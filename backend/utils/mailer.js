@@ -1,6 +1,8 @@
 
 const canDeliver = () => Boolean(process.env.SMTP_HOST && process.env.SMTP_USER);
 
+const { resolveFrontendBaseUrl, isLocalhost } = require("./frontendBase");
+
 const sendResetEmail = async ({ to, name, token }) => {
   if (!canDeliver()) return { delivered: false, reason: "smtp-not-configured" };
   let nodemailer;
@@ -12,14 +14,10 @@ const sendResetEmail = async ({ to, name, token }) => {
     );
     return { delivered: false, reason: "nodemailer-missing" };
   }
-  const appBase =
-    process.env.CLIENT_URL || process.env.FRONTEND_BASE_URL || "http://localhost:3000";
-  if (
-    process.env.NODE_ENV === "production" &&
-    /localhost|127\.0\.0\.1/i.test(String(appBase))
-  ) {
+  const appBase = resolveFrontendBaseUrl() || "http://localhost:3000";
+  if (process.env.NODE_ENV === "production" && isLocalhost(appBase)) {
     console.error(
-      "CONFIG ERROR: reset-email link would point at localhost in production — set FRONTEND_BASE_URL=https://cookmitra.org (or CLIENT_URL) and restart. Refusing to send a broken link."
+      "CONFIG ERROR: reset-email link would point at localhost in production — set FRONTEND_BASE_URL=https://<your-live-domain> (FRONTEND_URL/CLIENT_URL also honored) and restart/redeploy. Refusing to send a broken link."
     );
     return { delivered: false, reason: "reset-base-not-configured" };
   }

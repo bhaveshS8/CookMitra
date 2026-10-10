@@ -2,6 +2,25 @@
 export const ACCURACY_GOOD_M = 50;
 export const ACCURACY_OK_M = 150;
 
+// Single documented GPS-freshness policy (also used by the location slice
+// and both booking flows — do not invent parallel freshness windows).
+export const LOCATION_FRESH_MS = 2 * 3600 * 1000;
+// Bounded network budgets so a stalled provider can never hang detection.
+export const GEOCODE_TIMEOUT_MS = 7000;
+export const IP_TIMEOUT_MS = 6000;
+
+// Bounded race: rejects after ms so a hung operation can never stall its
+// caller forever. The timer is always cleared on settle; never unref'd.
+export const withTimeout = (promise, ms, message = "Timed out") => {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    }),
+  ]);
+};
+
 export const formatAccuracy = (accuracy) => {
   if (accuracy == null || !Number.isFinite(accuracy)) return "unknown accuracy";
   if (accuracy < 1000) return `±${Math.round(accuracy)} m`;
@@ -20,7 +39,7 @@ const singleShot = (options) =>
     navigator.geolocation.getCurrentPosition(resolve, reject, options);
   });
 
-const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M, maxAgeMs = 120000 } = {}) =>
+const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M, maxAgeMs = 30000 } = {}) =>
   new Promise((resolve, reject) => {
     let best = null;
     let done = false;
@@ -76,7 +95,15 @@ const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M, maxAgeMs =
     }, watchMs);
   });
 
-export const reverseGeocode = async (lat, lng) => {
+// Bounded fetch: rejects after timeoutMs so a stalled provider can never
+// hang detection forever. Never throws synchronously.
+const fetchWithTimeout = (url, timeoutMs) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+};
+
+export const reverseGeocode = async (lat, lng, { timeoutMs = GEOCODE_TIMEOUT_MS } = {}) => {
   const out = {
     city: "",
     area: "",
@@ -91,8 +118,9 @@ export const reverseGeocode = async (lat, lng) => {
 
   const fromBigDataCloud = (async () => {
     try {
-      const r = await fetch(
-        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
+      const r = await fetchWithTimeout(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+        timeoutMs
       );
       if (!r.ok) return {};
       const d = await r.json();
@@ -108,8 +136,9 @@ export const reverseGeocode = async (lat, lng) => {
 
   const fromNominatim = (async () => {
     try {
-      const r = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=18&addressdetails=1`
+      const r = await fetchWithTimeout(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=18&addressdetails=1`,
+        timeoutMs
       );
       if (!r.ok) return {};
       const body = await r.json();
@@ -150,41 +179,9 @@ export const formatLocationLabel = ({ area, city, state } = {}) => {
   return c || a || s || "";
 };
 
-export const searchLocations = async (query, limit = 5) => {
-  const q = (query || "").trim();
-  if (q.length < 2) return [];
+export const fetchIpLocation = async ({ timeoutMs = IP_TIMEOUT_MS } = {}) => {
   try {
-    const r = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=${limit}&q=${encodeURIComponent(q)}`
-    );
-    if (!r.ok) return [];
-    const list = await r.json();
-    if (!Array.isArray(list)) return [];
-    return list
-      .filter((p) => p && p.lat != null && p.lon != null)
-      .map((p) => {
-        const a = p.address || {};
-        const city = a.city || a.town || a.village || a.county || a.state || (p.display_name || "").split(",")[0].trim();
-        const state = a.state || "";
-        const area = a.suburb || a.neighbourhood || a.hamlet || a.quarter || "";
-        return {
-          label: formatLocationLabel({ area, city, state }) || (p.display_name || "").split(",").slice(0, 2).join(",").trim(),
-          city,
-          state,
-          area,
-          lat: Number(p.lat),
-          lng: Number(p.lon),
-        };
-      })
-      .filter((p) => p.label && Number.isFinite(p.lat) && Number.isFinite(p.lng));
-  } catch {
-    return [];
-  }
-};
-
-export const fetchIpLocation = async () => {
-  try {
-    const r = await fetch("https://ipwho.is/");
+    const r = await fetchWithTimeout("https://ipwho.is/", timeoutMs);
     if (r.ok) {
       const d = await r.json();
       if (d && d.success !== false) {
@@ -198,7 +195,7 @@ export const fetchIpLocation = async () => {
   } catch {
   }
   try {
-    const r2 = await fetch("https://get.geojs.io/v1/ip/geo.json");
+    const r2 = await fetchWithTimeout("https://get.geojs.io/v1/ip/geo.json", timeoutMs);
     if (!r2.ok) return null;
     const d2 = await r2.json();
     const city = d2.city || "";
@@ -212,19 +209,22 @@ export const fetchIpLocation = async () => {
   }
 };
 
-export const getCurrentPositionRobust = ({ highAccuracyTimeout = 12000 } = {}) =>
+export const getCurrentPositionRobust = ({ highAccuracyTimeout = 12000, watchMs = 10000 } = {}) =>
   new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(
-        new Error("Geolocation is not supported by this browser — please type your address manually")
-      );
-      return;
-    }
+    // Secure-context first: on plain-HTTP origins the API may be hidden
+    // entirely, and "unsupported" would mislead — the real problem is the
+    // insecure page.
     if (typeof window !== "undefined" && window.isSecureContext === false) {
       reject(
         new Error(
           "Location needs a secure page (HTTPS or localhost) — please type your address manually or open the site over HTTPS"
         )
+      );
+      return;
+    }
+    if (!navigator.geolocation) {
+      reject(
+        new Error("Geolocation is not supported by this browser — please type your address manually")
       );
       return;
     }
@@ -258,7 +258,7 @@ export const getCurrentPositionRobust = ({ highAccuracyTimeout = 12000 } = {}) =
       try {
         // Watch for up to 10s, settling early on a ≤50m fix, so entry
         // detection lands on the most precise reading available.
-        const best = await bestOfWatch({ watchMs: 10000 });
+        const best = await bestOfWatch({ watchMs });
         if (best && Number.isFinite(best.lat) && Number.isFinite(best.lng)) {
           resolve(best);
           return;

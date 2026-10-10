@@ -1,0 +1,204 @@
+/* Place search box + detected-venue suggestion — scoped classes only.
+   Mobile-first fluid layout: verified at 320px, 375px, 425px + desktop. */
+.place-search {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 10px 0 0;
+}
+
+.place-search-label {
+  display: block;
+  min-width: 0;
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: #44403c;
+  overflow-wrap: break-word;
+}
+
+.place-search-row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.place-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.place-search-spin {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #d6d3d1;
+  border-top-color: #c2410c;
+  animation: place-spin 0.9s linear infinite;
+}
+
+@keyframes place-spin {
+  to { transform: rotate(360deg); }
+}
+
+.place-search-list {
+  box-sizing: border-box;
+  list-style: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 6px 0 0;
+  padding: 4px;
+  border: 1px solid #e7e5e4;
+  border-radius: 10px;
+  background: #fff;
+  max-height: 220px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.place-search-opt {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.4;
+  color: #292524;
+  overflow-wrap: break-word;
+}
+
+.place-search-opt.active,
+.place-search-opt:hover {
+  background: #fff7ed;
+}
+
+.place-search-opt:focus-visible {
+  outline: 2px solid #14532d;
+  outline-offset: -2px;
+}
+
+.place-search-opt-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.place-search-opt-kind {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: #78716c;
+  white-space: nowrap;
+}
+
+.place-search-empty {
+  padding: 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #78716c;
+  overflow-wrap: break-word;
+}
+
+.place-search-error {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #7a2018;
+  overflow-wrap: break-word;
+}
+
+.place-search-retry {
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid #b3261e;
+  border-radius: 8px;
+  background: #fff;
+  color: #7a2018;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.place-search-attr {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #a8a29e;
+  overflow-wrap: break-word;
+}
+
+/* Detected-venue suggestion card (CookBooking step 3). */
+.od-detected-box {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid #e5d9c8;
+  border-radius: 10px;
+  background: #fffdf8;
+}
+
+.od-detected-text {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #44403c;
+  overflow-wrap: break-word;
+}
+
+.od-detected-text strong {
+  display: block;
+  overflow-wrap: break-word;
+}
+
+.od-detected-box .loc-gps-btn {
+  flex: 0 0 auto;
+  min-height: 44px;
+}
+
+.loc-attr {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--slate-400);
+  overflow-wrap: break-word;
+}
+
+@media (min-width: 425px) {
+  .place-search-label {
+    font-size: 13.5px;
+  }
+}

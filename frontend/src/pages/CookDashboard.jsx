@@ -4,7 +4,7 @@ import { useFetch } from "../hooks/useFetch";
 import API from "../api/axios";
 import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
-import { formatDate, playAlarmSound, localTomorrowStr, mapsNavigateUrl, formatTimeRange12, dayTagLabel, getLocalDateStr, isCancelLocked } from "../utils/constants";
+import { formatDate, playAlarmSound, localTomorrowStr, mapsNavigateUrl, formatTimeRange12, dayTagLabel, getLocalDateStr, isCancelLocked, isUnpaidCancelled } from "../utils/constants";
 import { useLocalDay } from "../hooks/useLocalDay";
 import CookProfileForm from "../components/CookProfileForm";
 import CookAvailabilityToggle from "../components/CookAvailabilityToggle";
@@ -187,8 +187,8 @@ const CookDashboard = () => {
     setPendingCancelId(null);
     setCancellingId(bookingId);
     try {
-      await API.patch(`/bookings/${bookingId}/cancel`);
-      showToast("Booking cancelled successfully", "info");
+      const res = await API.patch(`/bookings/${bookingId}/cancel`);
+      showToast(res.data?.deleted ? "Booking cancelled and removed (no payment was made)." : "Booking cancelled successfully", "info");
       refetchBookings();
     } catch (err) {
       showToast(err.response?.data?.message || "Failed to cancel booking", "error");
@@ -302,6 +302,7 @@ const CookDashboard = () => {
         ? scheduledTomorrowList
         : [...(bookings || [])]
   )
+    .filter((b) => !isUnpaidCancelled(b))
     .filter((b) => {
       if (view === 'today') return isTodayBooking(b) && isNotCancelled(b) && isScheduledBooking(b);
       if (view === 'tomorrow') return isTomorrowBooking(b) && isNotCancelled(b) && isScheduledBooking(b);
@@ -315,10 +316,10 @@ const CookDashboard = () => {
         ? String(a.startTime || "").localeCompare(String(b.startTime || "")) || byNewest(a, b)
         : byNewest(a, b)
     );
-  const previousCount = (bookings || []).filter(isPrevious).length;
+  const previousCount = (bookings || []).filter((b) => isPrevious(b) && !isUnpaidCancelled(b)).length;
   const todayCount = scheduledTodayList.length;
   const tomorrowCount = scheduledTomorrowList.length;
-  const upcomingCount = (bookings || []).filter((b) => !isPrevious(b)).length;
+  const upcomingCount = (bookings || []).filter((b) => !isPrevious(b) && !isUnpaidCancelled(b)).length;
   const ratingCount = cookProfile?.rating?.count ?? myReviews?.length ?? 0;
   const avgRating =
     cookProfile?.rating?.average ||

@@ -466,8 +466,12 @@ const errOf = async (fn) => {
       const b = mkBooking({ _id: HEX_ID, cook: COOK_A });
       const strangerMsg = { from: "911111111111", id: "wamid.t11a", type: "interactive", interactive: { type: "button_reply", button_reply: { id: `accept:${b._id}`, title: "Accept" } } };
       const r1 = await waCtrl.__test.handleOneMessage(strangerMsg);
-      check("T11 unknown sender silent", r1?.ok === false && r1?.reason === "unknown-sender", r1?.reason);
+      check("T11 unknown sender refused (no impersonation)", r1?.ok === false && r1?.reason === "unknown-sender", r1?.reason);
       check("T11 unknown sender no mutation", String(store.bookings.get(b._id).cook) === COOK_A, "cook");
+      // ...but an explicit action no longer vanishes without a trace: the
+      // stranger gets one guidance reply (hourly cooldown), still no state.
+      const strangerReply = sentPayloads.filter((p) => p.type === "text").map((p) => p.text.body).join("\n");
+      check("T11 unknown sender gets guidance reply", /don't recognize/i.test(strangerReply) && /registered/i.test(strangerReply), strangerReply.slice(0, 80));
       const before = sentPayloads.length;
       const otherCookMsg = { from: "9822222222", id: "wamid.t11b", type: "text", text: { body: `accept:${b._id}` } };
       // text path without booking id would be ambiguous; use button payload instead
@@ -849,7 +853,10 @@ const errOf = async (fn) => {
       const doc = store.bookings.get(b._id);
       check("T22 auto-cancel still transitions", doc.status === "cancelled", doc.status);
       check("T22 no WhatsApp to cook or customer", sentPayloads.length === 0, `${sentPayloads.length} sends`);
-      check("T22 in-app notifications kept", notifs.filter((n) => n.type === "booking_cancelled").length === 2, notifs.map((n) => n.type).join(","));
+      // Unpaid cancelled bookings are neither shown nor tracked: the
+      // payment-window release deletes the booking and keeps no
+      // notifications/audit.
+      check("T22 unpaid auto-release keeps no notifications", notifs.filter((n) => n.type === "booking_cancelled").length === 0, notifs.map((n) => n.type).join(",") || "none");
     }
 
     console.log(`\n${passes} passed, ${failures} failed`);

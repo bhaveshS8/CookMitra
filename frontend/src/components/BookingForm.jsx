@@ -12,6 +12,10 @@ import WomanPresenceCheck from "./WomanPresenceCheck";
 import "./WomanPresenceCheck.css";
 import { useWomanPresence } from "../utils/useWomanPresence";
 import { presenceGuardMessage, BLOCKED_CODE } from "../utils/womanPresence";
+import { VENUE_FIELDS, pinFingerprint, buildBookingLocation, fingerprintForRestore } from "../utils/venuePin";
+import PlaceSearchBox, { localPlaceSource } from "./PlaceSearchBox";
+import "./PlaceSearchBox.css";
+import { LOCATION_FRESH_MS } from "../utils/geolocation";
 import CustomCalendar from "./CustomCalendar";
 import CookAvatar from "./CookAvatar";
 import {
@@ -118,7 +122,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
   const [step, setStep] = useState(0);
 
   useEffect(() => {
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
     window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
   }, [step]);
 
@@ -132,12 +136,15 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
   const [slotBusyError, setSlotBusyError] = useState("");
   const [checkingSlot, setCheckingSlot] = useState(false);
   const [coords, setCoords] = useState(null);
+  // Fingerprint binding the CURRENT venue fields to coords (see venuePin).
+  // Null = no pin may be submitted (manual typing, unaccepted GPS, edits).
+  const [pinFP, setPinFP] = useState(null);
+  const [searchText, setSearchText] = useState("");
   const [locMsg, setLocMsg] = useState("");
   const [resolvedCookUserId, setResolvedCookUserId] = useState(cookUserId || null);
   const [savedLocations, setSavedLocations] = useState([]);
   const [savedIdx, setSavedIdx] = useState("");
   const autoFilled = useRef(false);
-  const explicitPlacePick = useRef(false);
   const errorRef = useRef(null);
   const [copiedPin, setCopiedPin] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -175,6 +182,9 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+    // Typing a venue field breaks the pin binding (see pinFP): the edited
+    // address must never silently submit the previous coordinates.
+    if (VENUE_FIELDS.includes(name)) setPinFP(null);
   };
 
   
@@ -328,7 +338,6 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
   const applySavedLocation = (idx) => {
     const saved = savedLocations[Number(idx)];
     if (!saved) return;
-    explicitPlacePick.current = true;
     const d = saved.addressDetails || {};
     const parts = String(saved.address || "").split(",").map((p) => p.trim()).filter(Boolean);
     const src = Object.keys(d).length > 0
@@ -338,20 +347,48 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
         : parts.length === 2
           ? { flatNo: parts[0], society: parts[1] }
           : { flatNo: parts[0], society: parts.slice(1, -1).join(", "), city: parts[parts.length - 1] };
-    setFormData((prev) => ({
-      ...prev,
+    const fields = {
       flatNo: src.flatNo || "",
       society: src.society || "",
       landmark: src.landmark || "",
       city: src.city || "",
-    }));
+    };
+    setFormData((prev) => ({ ...prev, ...fields }));
     setSavedIdx(String(idx));
-    if (saved.location?.lat != null) {
-      setCoords({ lat: saved.location.lat, lng: saved.location.lng });
+    if (Number.isFinite(saved.location?.lat) && Number.isFinite(saved.location?.lng)) {
+      const pin = { lat: saved.location.lat, lng: saved.location.lng };
+      setCoords(pin);
+      // Bind the pin to exactly these fields — later edits break the bond.
+      setPinFP(pinFingerprint(fields, pin));
       setLocMsg("Previous location applied with saved pin.");
     } else {
       setCoords(null);
+      setPinFP(null);
       setLocMsg("Previous location applied — verify the address below.");
+    }
+  };
+
+  // A saved place picked from the search box behaves identically.
+  const applyPickedPlace = (place) => {
+    if (!place) return;
+    const d = place.details || {};
+    const fields = {
+      flatNo: d.flatNo || "",
+      society: d.society || place.area || "",
+      landmark: d.landmark || "",
+      city: d.city || place.city || "",
+    };
+    setFormData((prev) => ({ ...prev, ...fields }));
+    setSavedIdx("");
+    if (Number.isFinite(place.lat) && Number.isFinite(place.lng)) {
+      const pin = { lat: place.lat, lng: place.lng };
+      setCoords(pin);
+      setPinFP(pinFingerprint(fields, pin));
+      setLocMsg(place.kind === "saved" ? "" : "Area selected — type your flat / house number below.");
+    } else {
+      setCoords(null);
+      setPinFP(null);
+      setLocMsg(place.kind === "saved" ? "" : "Area selected — type your flat / house number below.");
     }
   };
 
@@ -396,12 +433,12 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     const hasFix =
       Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng);
     if (!hasFix && !siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
-    if (hasFix && !explicitPlacePick.current) {
-      setCoords((c) => c || { lat: siteLocation.lat, lng: siteLocation.lng });
-    }
+    // NOTE: background GPS never seeds coords here — a pin attaches only
+    // through a saved place or a restored draft (see pinFP). Text prefill
+    // below is suggestion-only.
     if (!siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
     const stamp = Number(siteLocation?.savedAt || siteLocation?.timestamp || 0);
-    if (stamp && Date.now() - stamp > 12 * 60 * 60 * 1000) return;
+    if (stamp && Date.now() - stamp > LOCATION_FRESH_MS) return;
     if (autoFilled.current) return;
     if (user?.role === "customer") {
       const profileAddr = String(user?.address || "").trim();
@@ -434,7 +471,17 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     resumedDraft.current = true;
     autoFilled.current = true;
     setFormData((prev) => ({ ...prev, ...d.form }));
-    if (d.coords?.lat != null) setCoords(d.coords);
+    // Restore the draft's pin binding: recompute from the restored pair so
+    // a consistent restore keeps its pin while a mismatched one drops it.
+    // Bootstrap GPS never overwrites draft venues (autoFilled above).
+    if (Number.isFinite(d.coords?.lat) && Number.isFinite(d.coords?.lng)) {
+      const pin = { lat: d.coords.lat, lng: d.coords.lng };
+      setCoords(pin);
+      setPinFP(d.pinFP ?? fingerprintForRestore(d.form, pin));
+    } else {
+      setCoords(null);
+      setPinFP(null);
+    }
     setStep(1);
     showToast("Welcome back — your booking details were restored. Just tap Find Cook.", "success");
     clearBookingDraft();
@@ -444,7 +491,7 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!user) {
-      saveBookingDraft({ kind: "cook-profile", cookId: cookId ?? resolvedCookUserId, form: formData, coords });
+      saveBookingDraft({ kind: "cook-profile", cookId: cookId ?? resolvedCookUserId, form: formData, coords, pinFP });
       setShowLoginModal(true);
       return;
     }
@@ -495,18 +542,18 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
     setSubmitting(true); setError(""); setClashBookingId(null);
     try {
       const selectedItems = formData.notes.split(/[,;]+/).map((d) => d.trim()).filter(Boolean);
+      const { addressDetails, location } = buildBookingLocation({
+        fields: formData,
+        coords,
+        pinFP,
+      });
       const payload = {
         serviceType: DEFAULT_SERVICE_TYPE,
         date: formData.date,
         startTime: formData.startTime,
         endTime: derivedEndTime,
         address: buildAddress(),
-        addressDetails: {
-          flatNo: formData.flatNo.trim(),
-          society: formData.society.trim(),
-          landmark: formData.landmark.trim(),
-          city: formData.city.trim(),
-        },
+        addressDetails,
         notes: formData.notes,
         selectedItems,
         guests: formData.guests === "" ? undefined : Number(formData.guests),
@@ -515,7 +562,9 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
         // Explicit YES for THIS request (verified strictly by the backend).
         womanPresenceConfirmed: true,
       };
-      if (coords) payload.location = coords;
+      // Coordinates ride along ONLY when bound to these exact fields —
+      // manual edits, unaccepted GPS, and IP approximations never pin.
+      if (location) payload.location = location;
       const res = await API.post("/bookings", payload);
       clearBookingDraft();
       track(AnalyticsEvents.BOOKING_REQUESTED, {
@@ -892,6 +941,13 @@ const BookingForm = ({ cookId, cookUserId, cookName, cookPhotoUrl, onSubmit }) =
                 </select>
               </label>
             )}
+            <PlaceSearchBox
+              id="bk-place-search"
+              value={searchText}
+              onChange={setSearchText}
+              onPick={(place) => { applyPickedPlace(place); setSearchText(place.label); }}
+              getSuggestions={async (q) => localPlaceSource({ savedPlaces: savedLocations })(q)}
+            />
             {profileAddress && !addrEditing ? (
               <div className="bk-profile-addr">
                 <MapPin size={16} />

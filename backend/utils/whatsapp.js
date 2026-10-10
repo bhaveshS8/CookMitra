@@ -1,9 +1,7 @@
 
-const FRONTEND_BASE_URL = (
-  process.env.FRONTEND_URL ||
-  process.env.CLIENT_URL ||
-  "http://localhost:3000"
-).replace(/\/$/, "");
+const { resolveFrontendBaseUrl } = require("./frontendBase");
+
+const FRONTEND_BASE_URL = (resolveFrontendBaseUrl() || "http://localhost:3000").replace(/\/$/, "");
 
 const bookingUrl = (bookingId) =>
   bookingId ? `${FRONTEND_BASE_URL}/bookings/${bookingId}` : null;
@@ -318,6 +316,7 @@ const buildReviewWhatsAppUrl = ({ customerPhone, cookName, booking, reviewUrl })
 };
 
 module.exports = {
+  getFrontendBaseUrl: () => (resolveFrontendBaseUrl() || "http://localhost:3000").replace(/\/$/, ""),
   normalizeIndianMobile,
   buildBookingWhatsAppUrl,
   buildCustomerWhatsAppUrl,

@@ -193,6 +193,28 @@ const expireBookingIfNeeded = async (booking) => {
       booking.paymentExpiresAt &&
       booking.paymentExpiresAt < now
     ) {
+      // Unpaid slot-release is never shown nor tracked: the booking is
+      // permanently removed (coupon released, notifications purged, doc
+      // deleted). No CancellationAudit, no refund, no WhatsApp, no in-app
+      // notification is kept for it.
+      const destroyUnpaidReleased = async () => {
+        try {
+          await releaseCouponUsage(booking);
+        } catch {
+        }
+        if (booking?._id && dbReady()) {
+          try {
+            await Notification.deleteMany({ booking: booking._id });
+          } catch {
+          }
+          try {
+            await Booking.deleteOne({ _id: booking._id });
+          } catch {
+          }
+        }
+        booking.status = "cancelled";
+        booking.__deletedUnpaidCancelled = true;
+      };
       if (dbReady() && booking._id) {
         let releasedClaimed = false;
         try {
@@ -220,6 +242,11 @@ const expireBookingIfNeeded = async (booking) => {
         if (!releasedClaimed) {
           try {
             const latest = await Booking.findById(booking._id);
+            if (!latest) {
+              booking.status = "cancelled";
+              booking.__deletedUnpaidCancelled = true;
+              return booking;
+            }
             if (latest && (latest.status !== "accepted" || latest.payment?.status === "paid")) {
               booking.status = latest.status;
               return booking;
@@ -228,41 +255,30 @@ const expireBookingIfNeeded = async (booking) => {
           }
           return null;
         }
-        booking.status = "cancelled";
-        booking.statusHistory.push({
-          status: "cancelled",
-          note: "Payment not completed within 5 minutes — slot released",
-        });
+        try {
+          booking.statusHistory.push({
+            status: "cancelled",
+            note: "Payment not completed within 5 minutes — slot released",
+          });
+        } catch {
+        }
+        await destroyUnpaidReleased();
       } else {
-        booking.status = "cancelled";
-        booking.statusHistory.push({
-          status: "cancelled",
-          note: "Payment not completed within 5 minutes — slot released",
-        });
-        await booking.save();
+        try {
+          booking.status = "cancelled";
+          booking.statusHistory.push({
+            status: "cancelled",
+            note: "Payment not completed within 5 minutes — slot released",
+          });
+        } catch {
+          booking.status = "cancelled";
+        }
+        try {
+          if (typeof booking.save === "function") await booking.save();
+        } catch {
+        }
+        await destroyUnpaidReleased();
       }
-      await releaseCouponUsage(booking);
-      try {
-        await Notification.create({
-          user: booking.customer,
-          type: "booking_cancelled",
-          booking: booking._id,
-          message: "Payment was not completed within 5 minutes — the slot was released. Please book again.",
-        });
-      } catch {
-      }
-      try {
-        await Notification.create({
-          user: booking.cook,
-          type: "booking_cancelled",
-          booking: booking._id,
-          message: "A held slot was released (the customer didn't pay in time) — it is bookable again.",
-        });
-      } catch {
-      }
-      // No WhatsApp message for the payment-window auto-cancel: neither
-      // the cook nor the customer is messaged on WhatsApp here. In-app
-      // notifications above remain the channel for this event.
       return booking;
     }
   } catch {

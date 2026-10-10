@@ -338,6 +338,14 @@ export const getBookingDisplayState = (booking, now = Date.now()) => {
 export const isBookingOverdue = (booking, now = Date.now()) =>
   getBookingDisplayState(booking, now) === "OVERDUE";
 
+// Unpaid cancelled bookings are neither shown nor tracked: the backend deletes
+// them on cancel, and this guards every list against legacy rows.
+export const isUnpaidCancelled = (booking) =>
+  booking?.status === "cancelled" && booking?.payment?.status !== "paid";
+
+export const withoutUnpaidCancelled = (rows) =>
+  (rows || []).filter((b) => !isUnpaidCancelled(b));
+
 export const hasServiceHoursStarted = (obj) => {
   if (obj?.serviceStartedAt) return true;
   const start = sessionStartDate(obj);

@@ -29,6 +29,13 @@ import WomanPresenceCheck from "../components/WomanPresenceCheck";
 import "../components/WomanPresenceCheck.css";
 import { useWomanPresence } from "../utils/useWomanPresence";
 import { presenceGuardMessage, BLOCKED_CODE } from "../utils/womanPresence";
+import { LOCATION_FRESH_MS } from "../utils/geolocation";
+import {
+  VENUE_FIELDS,
+  pinFingerprint,
+  buildBookingLocation,
+  fingerprintForRestore,
+} from "../utils/venuePin";
 import CustomCalendar from "../components/CustomCalendar";
 import { useDispatch, useSelector } from "react-redux";
 import { updateUser } from "../store/authSlice";
@@ -63,9 +70,8 @@ const rememberCity = (v) => {
   }
 };
 
-// A GPS fix older than this no longer counts as "detected" — the user gets
-// the manual address form (prefilled where possible) instead of a stale pin.
-const DETECTED_VENUE_FRESH_MS = 2 * 3600 * 1000;
+// GPS freshness follows the single documented policy in
+// utils/geolocation (LOCATION_FRESH_MS) — no parallel windows.
 
 const DURATION_QUICK = [1, 2, 3, 4];
 
@@ -148,7 +154,7 @@ const CookBooking = () => {
   const [step, setStep] = useState(1);
 
   useEffect(() => {
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
     window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
   }, [step]);
   useEffect(() => {
@@ -173,11 +179,16 @@ const CookBooking = () => {
   const [findingCook, setFindingCook] = useState(false);
   const [locMsg, setLocMsg] = useState("");
   const [coords, setCoords] = useState(null);
+  // Fingerprint binding the CURRENT venue fields to coords (see venuePin).
+  // Null = no pin may be submitted (manual typing, unaccepted GPS, edits).
+  const [pinFP, setPinFP] = useState(null);
+  // Explicitly accepted detected venue (snapshot, not live GPS): GPS is a
+  // suggestion until the customer taps "Use detected location".
+  const [acceptedVenue, setAcceptedVenue] = useState(null);
   const [savedLocations, setSavedLocations] = useState([]);
   const [savedLoaded, setSavedLoaded] = useState(false);
   const [savedIdx, setSavedIdx] = useState("");
   const autoFilled = useRef(false);
-  const explicitPlacePick = useRef(false);
   const venueErrorRef = useRef(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const scrollToVenueError = () =>
@@ -230,12 +241,12 @@ const CookBooking = () => {
     const hasFix =
       Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng);
     if (!hasFix && !siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
-    if (hasFix && !explicitPlacePick.current) {
-      setCoords((c) => c || { lat: siteLocation.lat, lng: siteLocation.lng });
-    }
+    // NOTE: background GPS never seeds coords here — a pin attaches only
+    // through explicit accept (detected suggestion), a saved place, or a
+    // restored draft (see pinFP). Text prefill below is suggestion-only.
     if (!siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
     const stamp = Number(siteLocation?.savedAt || siteLocation?.timestamp || 0);
-    if (stamp && Date.now() - stamp > 12 * 60 * 60 * 1000) return;
+    if (stamp && Date.now() - stamp > LOCATION_FRESH_MS) return;
     if (autoFilled.current) return;
     if (user?.role === "customer") {
       const profileAddr = String(user?.address || "").trim();
@@ -299,7 +310,6 @@ const CookBooking = () => {
   const applySavedLocation = (idx) => {
     const saved = savedLocations[Number(idx)];
     if (!saved) return;
-    explicitPlacePick.current = true;
     const d = saved.addressDetails || {};
     const parts = String(saved.address || "").split(",").map((p) => p.trim()).filter(Boolean);
     const src = Object.keys(d).length > 0
@@ -309,19 +319,24 @@ const CookBooking = () => {
         : parts.length === 2
           ? { flatNo: parts[0], society: parts[1] }
           : { flatNo: parts[0], society: parts.slice(1, -1).join(", "), city: parts[parts.length - 1] };
-    setForm((f) => ({
-      ...f,
+    const nextFields = {
       flatNo: src.flatNo || "",
       society: src.society || "",
       landmark: src.landmark || "",
-      city: normCity(src.city) || f.city,
-    }));
+    };
+    const nextCity = normCity(src.city) || form.city;
+    setForm((f) => ({ ...f, ...nextFields, city: nextCity }));
     setSavedIdx(String(idx));
-    if (saved.location?.lat != null) {
-      setCoords({ lat: saved.location.lat, lng: saved.location.lng });
+    setAcceptedVenue(null); // an explicit saved choice replaces any detected one
+    if (Number.isFinite(saved.location?.lat) && Number.isFinite(saved.location?.lng)) {
+      const pin = { lat: saved.location.lat, lng: saved.location.lng };
+      setCoords(pin);
+      // Bind the pin to exactly these fields — later edits break the bond.
+      setPinFP(pinFingerprint({ ...nextFields, city: nextCity }, pin));
       setLocMsg("");
     } else {
       setCoords(null);
+      setPinFP(null);
       setLocMsg("Previous location applied — verify the address below for precise navigation");
     }
   };
@@ -388,7 +403,18 @@ const CookBooking = () => {
     resumedDraft.current = true;
     autoFilled.current = true;
     setForm((f) => ({ ...f, ...d.form, serviceType: DEFAULT_SERVICE_TYPE }));
-    if (d.coords?.lat != null) setCoords(d.coords);
+    // Restore the draft's pin binding: recompute from the restored pair so
+    // a consistent restore keeps its pin while a mismatched one drops it.
+    // Bootstrap GPS never overwrites draft venues (autoFilled above).
+    if (Number.isFinite(d.coords?.lat) && Number.isFinite(d.coords?.lng)) {
+      const pin = { lat: d.coords.lat, lng: d.coords.lng };
+      setCoords(pin);
+      setPinFP(d.pinFP ?? fingerprintForRestore(d.form, pin));
+    } else {
+      setCoords(null);
+      setPinFP(null);
+    }
+    setAcceptedVenue(null);
     if (d.couponCode) setCouponRestore(d.couponCode);
     setSearching(true);
     (async () => {
@@ -432,6 +458,12 @@ const CookBooking = () => {
   const handleChange = (e) => {
     const { name, value } = e.target;
     setForm({ ...form, [name]: value });
+    // Typing a venue field breaks the pin binding (see pinFP): the edited
+    // address must never silently submit the previous coordinates.
+    if (VENUE_FIELDS.includes(name)) {
+      setPinFP(null);
+      setAcceptedVenue(null);
+    }
     if (fieldErrors[name]) {
       setFieldErrors((prev) => {
         const next = { ...prev };
@@ -469,15 +501,9 @@ const CookBooking = () => {
     return "";
   };
 
-  // Manual-venue override: the user can always type the address instead of
-  // using the detected GPS pin (e.g. pin looks wrong, booking for family).
-  const [manualVenue, setManualVenue] = useState(false);
-
-  // Precise GPS fix detected on entry (coords + reverse-geocoded address).
-  // Only a FRESH fix counts as a detected venue — a stale saved pin falls
-  // back to the manual address form so the user can type the real address.
-  // When a fresh fix is present, the booking is sent with this detected venue
-  // silently unless the user opts for manual entry.
+  // Detected GPS venue is a SUGGESTION until the customer explicitly taps
+  // "Use detected location" (acceptedVenue snapshot below). It is never
+  // auto-applied to the booking — see Phase 4 venue policy.
   const detectedVenue =
     Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng)
       ? siteLocation
@@ -503,8 +529,33 @@ const CookBooking = () => {
   const hasFreshFix =
     detectedVenue != null &&
     Number.isFinite(detectedVenueAge) &&
-    detectedVenueAge < DETECTED_VENUE_FRESH_MS;
-  const useDetectedVenue = Boolean(hasFreshFix && !manualVenue);
+    detectedVenueAge < LOCATION_FRESH_MS;
+  const useDetectedVenue = Boolean(hasFreshFix && acceptedVenue);
+  const showDetectedSuggestion = Boolean(hasFreshFix && !acceptedVenue);
+
+  const acceptDetectedVenue = () => {
+    if (!detectedVenue || !hasFreshFix) return;
+    const details = {
+      flatNo: detectedVenue.exactLine || detectedVenue.street || "",
+      society: detectedVenue.area || detectedVenue.street || "",
+      landmark: "",
+      city: detectedVenue.city || "",
+    };
+    const pin = { lat: detectedVenue.lat, lng: detectedVenue.lng };
+    // Snapshot (not live GPS): later position updates must not silently
+    // move an already-accepted venue.
+    setAcceptedVenue({
+      addressText: detectedAddressText,
+      details,
+      coords: pin,
+      fp: pinFingerprint(details, pin),
+      at: Date.now(),
+    });
+    setCoords(pin);
+    setPinFP(pinFingerprint(details, pin));
+    setSavedIdx("");
+    setLocMsg("");
+  };
 
   const validateVenue = () => {
     const errs = {};
@@ -693,7 +744,17 @@ const CookBooking = () => {
     }
     autoFilled.current = true;
     setForm((f) => ({ ...f, ...retry.form, serviceType: DEFAULT_SERVICE_TYPE }));
-    if (retry.coords?.lat != null) setCoords(retry.coords);
+    // Retry state derives coords + address from the same persisted booking
+    // record, so the recomputed binding matches and the pin is kept.
+    if (Number.isFinite(retry.coords?.lat) && Number.isFinite(retry.coords?.lng)) {
+      const pin = { lat: retry.coords.lat, lng: retry.coords.lng };
+      setCoords(pin);
+      setPinFP(fingerprintForRestore(retry.form, pin));
+    } else {
+      setCoords(null);
+      setPinFP(null);
+    }
+    setAcceptedVenue(null);
     if (retry.couponCode) setCouponRestore(retry.couponCode);
     setSearching(true);
     (async () => {
@@ -806,7 +867,14 @@ const CookBooking = () => {
       return;
     }
     if (!user) {
-      saveBookingDraft({ kind: "on-demand", form, selectedSlot, coords, couponCode: coupon?.code || "" });
+      saveBookingDraft({
+        kind: "on-demand",
+        form,
+        selectedSlot,
+        coords,
+        pinFP,
+        couponCode: coupon?.code || "",
+      });
       setShowLoginModal(true);
       return;
     }
@@ -856,20 +924,6 @@ const CookBooking = () => {
         date: form.date,
         startTime: selectedSlot.startTime,
         endTime: selectedSlot.endTime,
-        address: useDetectedVenue ? detectedAddressText : buildAddress(),
-        addressDetails: useDetectedVenue
-          ? {
-              flatNo: detectedVenue.exactLine || detectedVenue.street || "",
-              society: detectedVenue.area || detectedVenue.street || "",
-              landmark: "",
-              city: detectedVenue.city || "",
-            }
-          : {
-              flatNo: form.flatNo.trim(),
-              society: form.society.trim(),
-              landmark: form.landmark.trim(),
-              city: form.city.trim(),
-            },
         guests: Number(form.guests),
         durationHours: hours,
         notes: form.notes.trim(),
@@ -878,10 +932,28 @@ const CookBooking = () => {
         // Explicit YES for THIS request (verified strictly by the backend).
         womanPresenceConfirmed: true,
       };
-      if (useDetectedVenue) {
-        payload.location = { lat: detectedVenue.lat, lng: detectedVenue.lng };
-      } else if (coords) {
-        payload.location = coords;
+      if (useDetectedVenue && acceptedVenue) {
+        // Explicitly accepted detected venue (snapshot). Refuse a stale
+        // snapshot rather than silently sending old coordinates.
+        if (Date.now() - Number(acceptedVenue.at || 0) > LOCATION_FRESH_MS) {
+          setFormError("Your detected location is no longer fresh — please tap “Use detected location” again or enter the address manually.");
+          scrollToVenueError();
+          return;
+        }
+        payload.address = acceptedVenue.addressText;
+        payload.addressDetails = { ...acceptedVenue.details };
+        payload.location = { lat: acceptedVenue.coords.lat, lng: acceptedVenue.coords.lng };
+      } else {
+        payload.address = buildAddress();
+        const { addressDetails, location } = buildBookingLocation({
+          fields: form,
+          coords,
+          pinFP,
+        });
+        payload.addressDetails = addressDetails;
+        // Omitted unless the pin is bound to these exact fields: manual
+        // edits, unaccepted GPS, and IP approximations never become pins.
+        if (location) payload.location = location;
       }
       payload.clientKey = clientKeyFor(`${form.date}_${selectedSlot.startTime}_${selectedSlot.endTime}`);
       const res = await API.post("/bookings", payload);
@@ -1213,21 +1285,21 @@ const CookBooking = () => {
       {step === 3 && selectedSlot && (
         <div>
           <div className="ondemand-form-card od-venue-card">
-            {useDetectedVenue ? (
+            {useDetectedVenue && acceptedVenue ? (
               <>
                 <SecTitle icon={<MapPin size={15} />}>Where should the cook come?</SecTitle>
                 <div className="bk-profile-addr">
                   <MapPin size={16} />
                   <div className="bk-profile-addr-text">
                     <strong>Using your current location</strong>
-                    <span>{detectedAddressText}</span>
+                    <span>{acceptedVenue.addressText}</span>
                   </div>
                 </div>
-                <p className="ondemand-form-sub">No typing needed — we&apos;ll share this location with the cook.</p>
+                <p className="ondemand-form-sub">You confirmed this location — we&apos;ll share it with the cook.</p>
                 <button
                   type="button"
                   className="bk-recap-edit"
-                  onClick={() => setManualVenue(true)}
+                  onClick={() => { setAcceptedVenue(null); setPinFP(null); }}
                   aria-label="Enter the location address manually instead"
                 >
                   <Pencil size={12} /> Enter address manually instead
@@ -1236,17 +1308,22 @@ const CookBooking = () => {
             ) : (
             <>
             <SecTitle icon={<MapPin size={15} />}>Where should the cook come?</SecTitle>
-            {(hasFreshFix || savedLocations.length > 0 || locMsg) && (
-            <div className="ondemand-locate-box">
-              {hasFreshFix && (
+            {showDetectedSuggestion && (
+              <div className="od-detected-box" data-testid="od-detected-suggestion">
+                <div className="od-detected-text" style={{ flexBasis: "100%", display: "flex", gap: "6px", alignItems: "flex-start" }}>
+                  <MapPin size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <span>{detectedAddressText}</span>
+                </div>
                 <button
                   type="button"
                   className="btn btn-outline btn-sm loc-gps-btn"
-                  onClick={() => { setManualVenue(false); setLocMsg(""); }}
+                  onClick={acceptDetectedVenue}
                 >
-                  <MapPin size={15} /> Use my detected location
+                  Use detected location
                 </button>
-              )}
+              </div>
+            )}
+            <div className="ondemand-locate-box">
               {savedLocations.length > 0 && (
                 <div className="form-group od-saved-group">
                   <label htmlFor="od-saved-select">
@@ -1281,7 +1358,6 @@ const CookBooking = () => {
                 </p>
               )}
               </div>
-            )}
             {profileAddress && !addrEditing ? (
               <div className="bk-profile-addr">
                 <MapPin size={16} />

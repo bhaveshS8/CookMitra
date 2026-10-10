@@ -131,6 +131,7 @@ const LocationPicker = () => {
               ? "GPS is blocked for this site — nothing else on the site is affected."
               : "Denying GPS never blocks browsing."}
           </p>
+          <p className="loc-attr">Address data © OpenStreetMap contributors</p>
         </div>
       )}
     </div>

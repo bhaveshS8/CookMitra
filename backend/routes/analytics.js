@@ -62,7 +62,16 @@ router.get("/bookings", auth, authorize("admin"), async (req, res, next) => {
     const hasScope = Object.keys(scopeMatch).length > 0;
     const matchStage = hasScope ? [{ $match: scopeMatch }] : [];
 
+    // Unpaid cancelled bookings are neither shown nor tracked: exclude them
+    // from status counts (money facets are already paid-only).
+    const visibilityStage = {
+      $match: {
+        $or: [{ status: { $ne: "cancelled" } }, { status: "cancelled", "payment.status": "paid" }],
+      },
+    };
+
     const facetResult = await Booking.aggregate([
+      visibilityStage,
       ...matchStage,
       {
         $facet: {

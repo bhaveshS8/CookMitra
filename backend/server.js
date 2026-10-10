@@ -39,6 +39,13 @@ const cspDirectives = {
     "https://checkout.razorpay.com",
     "https://cdn.razorpay.com",
     "https://accounts.google.com",
+    // Location enrichment endpoints used by the frontend (reverse
+    // geocoding + IP fallback). Without these, production browsers block
+    // the fetches and detected pins arrive with no address text.
+    "https://api.bigdatacloud.net",
+    "https://nominatim.openstreetmap.org",
+    "https://ipwho.is",
+    "https://get.geojs.io",
   ],
   frameSrc: ["'self'", "https://checkout.razorpay.com", "https://api.razorpay.com"],
   objectSrc: ["'none'"],
@@ -246,7 +253,7 @@ app.use((req, res, next) => {
 });
 morgan.token("scrubbed-url", (req) => {
   const url = req.originalUrl || req.url || "";
-  return url.replace(/([?&]docToken=)[^&\s]*/g, "$1[REDACTED]");
+  return require("./utils/scrubUrl").scrubRequestUrl(url);
 });
 morgan.token("req-id", (req) => req.id || "-");
 app.use(

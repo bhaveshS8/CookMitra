@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowRight,
   CheckCircle2,
-  ChefHat,
   Clock,
   CreditCard,
   Landmark,
@@ -34,13 +33,6 @@ const METHODS = [
   { id: "netbanking", label: "Net Banking", desc: "All major banks", icon: Landmark },
   { id: "wallet", label: "Wallet", desc: "Paytm · Amazon Pay", icon: Wallet },
 ];
-
-const METHOD_HINTS = {
-  upi: "After tapping Pay, a secure Razorpay popup opens — pick GPay / PhonePe / Paytm there, or enter your UPI ID and approve the collect request.",
-  card: "After tapping Pay, enter card number, expiry & CVV in the secure Razorpay popup — we never see or store card details.",
-  netbanking: "After tapping Pay, choose your bank and approve in the secure Razorpay popup.",
-  wallet: "After tapping Pay, choose your wallet and approve in the secure Razorpay popup.",
-};
 const HIDE_METHODS = {
   upi: ["card", "netbanking", "wallet", "emi", "paylater", "cardless_emi"],
   card: ["upi", "netbanking", "wallet", "emi", "paylater", "cardless_emi"],
@@ -495,10 +487,6 @@ const BookingPayment = () => {
           </div>
           <div className="bf-wait-copy">
             <h1 className="bf-title">Confirm your booking</h1>
-            <p className="bf-sub">
-              <ChefHat size={15} /> <b>{cookName}</b> accepted your request and is holding this slot
-              only for the next {clockText}. Complete payment to lock it in.
-            </p>
           </div>
         </div>
 
@@ -533,17 +521,9 @@ const BookingPayment = () => {
                     <span className="bf-method-desc">{m.desc}</span>
                     {m.tag ? <span className="bf-method-tag">{m.tag}</span> : null}
                   </button>
-                );
-              })}
+              );
+            })}
             </div>
-            <p
-              className="bf-method-hint"
-              aria-live="polite"
-              style={{ margin: "0.6rem 0 0", fontSize: "0.88rem", color: "var(--slate-600)" }}
-            >
-              <ShieldCheck size={13} style={{ verticalAlign: "-2px", marginRight: "0.25rem" }} />
-              {METHOD_HINTS[method]}
-            </p>
           </div>
 
           <aside className="bf-grid-side">
