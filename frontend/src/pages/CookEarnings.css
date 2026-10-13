@@ -1,4 +1,4 @@
-.ce-page { max-width: 1080px; }
+.ce-page { max-width: 1080px; width: 100%; box-sizing: border-box; overflow-x: clip; }
 .ce-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .ce-head h1 { margin: 0; font-size: 1.5rem; }
 .ce-sub { color: var(--slate-500, #64748b); margin: 0.25rem 0 0; font-size: 0.92rem; }
@@ -6,7 +6,7 @@
 .ce-grid { display: grid; gap: 0.75rem; }
 .ce-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .ce-slabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.ce-card { background: var(--card, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 12px; padding: 0.85rem 1rem; min-width: 0; overflow-wrap: anywhere; }
+.ce-card { background: var(--card, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 12px; padding: 0.85rem 1rem; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; }
 .ce-label { display: block; font-size: 0.78rem; color: var(--slate-500, #64748b); margin-bottom: 0.2rem; }
 .ce-card strong { font-size: 1.02rem; }
 .ce-list { display: grid; gap: 0.75rem; }
@@ -25,4 +25,9 @@
   .ce-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ce-slabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ce-form-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 480px) {
+  .ce-overview { grid-template-columns: minmax(0, 1fr); }
+  .ce-slabs { grid-template-columns: minmax(0, 1fr); }
+  .ce-head h1 { font-size: 1.25rem; }
 }

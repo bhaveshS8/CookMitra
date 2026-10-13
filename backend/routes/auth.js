@@ -3,6 +3,8 @@ const router = express.Router();
 const { body } = require("express-validator");
 const validate = require("../middleware/validate");
 const { auth, authorize } = require("../middleware/auth");
+const rateLimit = require("express-rate-limit");
+const { rateLimitStore } = require("../utils/rateLimitStore");
 const {
   register,
   login,
@@ -12,12 +14,28 @@ const {
   resetPassword,
   getMe,
   updateProfile,
+  getMyStats,
+  changePassword,
+  getMyAddresses,
+  addMyAddress,
+  updateMyAddress,
+  deleteMyAddress,
+  setDefaultMyAddress,
   getAllUsers,
   adminSetUserStatus,
   adminDeleteUser,
   adminAddCook,
   adminAddAdmin,
 } = require("../controllers/authController");
+
+const sensitiveLimiter = rateLimit({
+  store: rateLimitStore("auth"),
+  standardHeaders: false,
+  legacyHeaders: false,
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_AUTH_SENSITIVE || 20),
+  message: { message: "Too many attempts — please try again later." },
+});
 
 const emailRule = body("email")
   .trim()
@@ -134,7 +152,42 @@ router.post(
 );
 
 router.get("/me", auth, getMe);
+router.get("/me/stats", auth, getMyStats);
 router.post("/logout", logout);
+router.post(
+  "/change-password",
+  auth,
+  sensitiveLimiter,
+  [
+    body("currentPassword").optional().trim(),
+    body("current_password").optional().trim(),
+    body("oldPassword").optional().trim(),
+    body("newPassword").optional().isLength({ min: 8, max: 128 }).withMessage("New password must be 8–128 characters"),
+    body("new_password").optional().isLength({ min: 8, max: 128 }).withMessage("New password must be 8–128 characters"),
+    body("password").optional().isLength({ min: 8, max: 128 }).withMessage("New password must be 8–128 characters"),
+  ],
+  validate,
+  changePassword
+);
+
+router.get("/me/addresses", auth, getMyAddresses);
+router.post(
+  "/me/addresses",
+  auth,
+  [
+    body("label").optional().trim(),
+    body("flatNo").optional().trim(),
+    body("society").optional().trim(),
+    body("city").optional().trim(),
+  ],
+  validate,
+  addMyAddress
+);
+router.put("/me/addresses/:addressId", auth, validate, updateMyAddress);
+router.delete("/me/addresses/:addressId", auth, deleteMyAddress);
+router.patch("/me/addresses/:addressId/default", auth, setDefaultMyAddress);
+
+
 router.put(
   "/me",
   auth,
@@ -169,6 +222,8 @@ router.put(
         return true;
       }),
     body("address").optional().trim().isLength({ max: 500 }).withMessage("Address is too long"),
+    body("avatar").optional().trim().isLength({ max: 500 }).withMessage("Avatar URL is too long"),
+    body("preferredLanguage").optional().trim().isLength({ max: 40 }).withMessage("Language is too long"),
     body("email")
       .optional()
       .trim()

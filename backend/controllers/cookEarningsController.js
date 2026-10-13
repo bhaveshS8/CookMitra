@@ -7,7 +7,7 @@ const CookReferral = require("../models/CookReferral");
 const CookPayout = require("../models/CookPayout");
 const User = require("../models/User");
 const cfg = require("../config/cookEarnings");
-const { computeCookPayout, round2, normalizePhone } = require("../utils/cookEarnings");
+const { computeCookPayout, toPaise, fromPaise, normalizePhone, generateReferralCode } = require("../utils/cookEarnings");
 const {
   ensureReferralCode,
   ensureBookingPayoutSnapshot,
@@ -18,21 +18,31 @@ const {
   audit,
 } = require("../utils/cookEarningsService");
 
-const dayBoundsIST = (d) => {
-  const dstr = new Date(d).toISOString().slice(0, 10);
-  return { day: dstr };
-};
-const startOfWeekMonday = (now = new Date()) => {
-  const d = new Date(now);
-  const day = (d.getDay() + 6) % 7; // Monday=0
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - day);
-  return d;
+const { istDayString, istMidnight, istWeekday } = require("../utils/time");
+// IST Monday 00:00 as an instant (business week, matching istDayString).
+const startOfWeekMondayIST = (now = new Date()) => {
+  const midnight = istMidnight(now);
+  if (!midnight) return null;
+  const daysBack = (istWeekday(now) + 6) % 7; // Monday=0
+  return new Date(midnight.getTime() - daysBack * 24 * 60 * 60 * 1000);
 };
 
 exports.getEarnings = async (req, res, next) => {
   try {
     const cookId = req.user.id;
+    // Bound the response for cooks with very long histories. Totals are
+    // computed over the same bounded window; totalBookings + truncated tell
+    // the client when older history exists beyond this response.
+    const limit = Math.min(
+      Math.max(Number(req.query?.limit) || 500, 1),
+      1000
+    );
+    const totalBookings = await Booking.countDocuments({
+      cook: cookId,
+      "payment.status": "paid",
+      "payment.testMode": { $ne: true },
+      status: { $in: ["confirmed", "in_progress", "completed", "cancelled"] },
+    });
     const rows = await Booking.find({
       cook: cookId,
       "payment.status": "paid",
@@ -41,24 +51,32 @@ exports.getEarnings = async (req, res, next) => {
     })
       .populate("customer", "name")
       .sort({ createdAt: -1 })
+      .limit(limit)
       .lean();
-    for (const b of rows || []) {
+    for (let i = 0; i < (rows || []).length; i += 1) {
+      const b = rows[i];
       if (!(b?.payoutInfo?.finalCustomerPrice > 0)) {
         try {
-          await ensureBookingPayoutSnapshot(b);
+          // Use the persisted snapshot immediately so per-row payout
+          // statuses (approved/held/paid) are current on this same load
+          // instead of lagging one refresh behind the database write.
+          const updated = await ensureBookingPayoutSnapshot(b);
+          if (updated && updated._id) {
+            rows[i] = typeof updated.toObject === "function" ? updated.toObject() : updated;
+          }
         } catch {
         }
       }
     }
     const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
-    void dayBoundsIST;
-    const weekStart = startOfWeekMonday(now);
-    let today = 0;
-    let week = 0;
-    let pending = 0;
-    let paid = 0;
-    let lifetime = 0;
+    const todayStr = istDayString(now);
+    const weekStart = startOfWeekMondayIST(now);
+    // Integer-paise accumulators (see utils/cookEarnings toPaise/fromPaise).
+    let todayP = 0;
+    let weekP = 0;
+    let pendingP = 0;
+    let paidP = 0;
+    let lifetimeP = 0;
     const bookingEarnings = (rows || []).map((b) => {
       const snap =
         b.payoutInfo?.finalCustomerPrice > 0
@@ -77,15 +95,22 @@ exports.getEarnings = async (req, res, next) => {
       const settled = b.payout?.status === "settled" || snap.payoutStatus === "paid";
       const liveRefund =
         b.payment?.refundStatus && !["none", "rejected"].includes(b.payment.refundStatus);
-      const payableRow =
-        b.status === "completed" && !liveRefund && !settled && payout > 0;
-      if (b.status === "completed" && !liveRefund) {
-        lifetime += payout;
-        if (settled) paid += payout;
-        else pending += payout;
-        const createdDay = new Date(b.updatedAt || b.createdAt).toISOString().slice(0, 10);
-        if (createdDay === todayStr) today += payout;
-        if (new Date(b.updatedAt || b.createdAt) >= weekStart) week += payout;
+      // An unresolved financial dispute holds the row out of earned totals,
+      // matching payoutEligibleForCycle / cycle construction.
+      const disputed = Boolean(b.payoutInfo?.disputed || b.payoutInfo?.underVerification);
+      if (b.status === "completed" && !liveRefund && !disputed) {
+        const payoutP = toPaise(payout);
+        lifetimeP += payoutP;
+        if (settled) paidP += payoutP;
+        else pendingP += payoutP;
+        // Bucket by immutable service date (IST calendar), never by
+        // updatedAt: admin approvals, holds and read-side snapshot writes
+        // all bump updatedAt, which previously dragged old bookings into
+        // "today"/"this week" on every refresh.
+        const stamp = b.date || b.createdAt;
+        const createdDay = stamp ? istDayString(stamp) : null;
+        if (createdDay && createdDay === todayStr) todayP += payoutP;
+        if (stamp && weekStart && new Date(stamp) >= weekStart) weekP += payoutP;
       }
       return {
         _id: b._id,
@@ -95,11 +120,14 @@ exports.getEarnings = async (req, res, next) => {
         duration: b.durationHours,
         finalCustomerPrice: Number(snap.finalCustomerPrice ?? b.amount ?? 0),
         platformDeduction: Number(snap.platformDeductionAmount ?? 0),
+        platformDeductionPercent: Number(
+          snap.platformDeductionPercent ?? cfg.deductionPercentage
+        ),
         cookPayout: payout,
         payoutStatus:
           settled
             ? "paid"
-            : liveRefund
+            : liveRefund || disputed
               ? "held"
               : b.status !== "completed"
                 ? "not_eligible"
@@ -112,19 +140,21 @@ exports.getEarnings = async (req, res, next) => {
     const referrals = await CookReferral.find({ referrer: cookId, status: { $in: ["approved", "paid"] } })
       .select("reward status")
       .lean();
-    const bonuses =
-      (incentives || []).reduce((s, i) => s + Number(i.reward || 0), 0) +
-      (referrals || []).reduce((s, r) => s + Number(r.reward || 0), 0);
+    const bonusesP =
+      (incentives || []).reduce((s, i) => s + toPaise(i.reward), 0) +
+      (referrals || []).reduce((s, r) => s + toPaise(r.reward), 0);
     res.json({
       overview: {
-        today: round2(today),
-        thisWeek: round2(week),
-        pending: round2(pending),
-        paid: round2(paid),
-        lifetime: round2(lifetime),
-        bonuses: round2(bonuses),
+        today: fromPaise(todayP),
+        thisWeek: fromPaise(weekP),
+        pending: fromPaise(pendingP),
+        paid: fromPaise(paidP),
+        lifetime: fromPaise(lifetimeP),
+        bonuses: fromPaise(bonusesP),
       },
       bookings: bookingEarnings,
+      totalBookings,
+      truncated: totalBookings > bookingEarnings.length,
     });
   } catch (e) {
     next(e);
@@ -157,12 +187,14 @@ exports.getPayoutById = async (req, res, next) => {
 exports.getIncentives = async (req, res, next) => {
   try {
     const list = await refreshIncentiveEligibility(req.user.id);
-    const slabs = [
-      { leads: 10, reward: 500 },
-      { leads: 20, reward: 1000 },
-      { leads: 30, reward: 1500 },
-      { leads: 50, reward: 2500 },
-    ];
+    // Slabs mirror server configuration (never hardcoded) so a configured
+    // incentive change is reflected here and on the client consistently.
+    const slabs = (cfg.incentives || []).map((i) => ({
+      leads: i.targetLeads,
+      reward: i.reward,
+      days: i.days,
+      code: i.code,
+    }));
     res.json({ incentives: list, slabs });
   } catch (e) {
     next(e);
@@ -326,7 +358,10 @@ exports.regenerateReferral = async (req, res, next) => {
     const me = await User.findById(req.user.id).select("name").lean();
     const code = generateReferralCode(me?.name || "COOK");
     try {
-      await CookProfile.updateOne({ user: req.user.id }, { $set: { referralCode: code } });
+      const r = await CookProfile.updateOne({ user: req.user.id }, { $set: { referralCode: code } });
+      if ((r?.matchedCount ?? 0) === 0) {
+        return res.status(404).json({ message: "Cook profile not found — complete your profile first" });
+      }
     } catch (e) {
       if (e?.code === 11000) return res.status(409).json({ message: "Please try again" });
       throw e;

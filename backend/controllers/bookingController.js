@@ -102,6 +102,7 @@ const {
   dbReady,
   REQUEST_WINDOW_MS,
   PAYMENT_WINDOW_MS,
+  EXPIRED_DELETE_GRACE_MS,
 } = require("../services/bookingTransitions");
 const { fanOutBookingRequest } = require("../services/whatsappDispatch");
 const dispatchJobs = require("../services/bookingDispatchJobs");
@@ -1321,6 +1322,12 @@ exports.queueRefundForApproval = queueRefundForApproval;
 exports.releaseCouponUsage = releaseCouponUsage;
 exports.REQUEST_WINDOW_MS = REQUEST_WINDOW_MS;
 exports.PAYMENT_WINDOW_MS = PAYMENT_WINDOW_MS;
+exports.EXPIRED_DELETE_GRACE_MS = EXPIRED_DELETE_GRACE_MS;
+try {
+  exports.sweepExpiredBookings =
+    require("../services/bookingTransitions").sweepExpiredBookings;
+} catch {
+}
 exports.isNoShowPastHours = isNoShowPastHours;
 exports.markHoursCompleteIfNeeded = markHoursCompleteIfNeeded;
 exports.cancelLocked = cancelLocked;
@@ -1329,7 +1336,9 @@ exports.RESCHEDULE_REASONS = RESCHEDULE_REASONS;
 exports.normalizeRescheduleReason = normalizeRescheduleReason;
 
 exports.getMyBookings = async (req, res, next) => {  try {
-    const EXPIRY_GRACE_MS = 10 * 60 * 1000;
+    // Expired bookings stay visible for this long, then the background
+    // sweeper physically deletes them (unpaid only; paid kept for audit).
+    const EXPIRY_GRACE_MS = EXPIRED_DELETE_GRACE_MS || 5 * 60 * 1000;
     const graceCutoff = new Date(Date.now() - EXPIRY_GRACE_MS);
     const filter = excludeUnpaidCancelled({
       customer: req.user.id,

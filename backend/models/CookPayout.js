@@ -43,5 +43,16 @@ cookPayoutSchema.index(
     name: "uniq_cookpayout_idem",
   }
 );
+// A payment reference must settle at most one cycle: the application-level
+// duplicate check races under concurrent pay requests, so the database is
+// the final arbiter (payCookPayout maps 11000 → 409).
+cookPayoutSchema.index(
+  { paymentReference: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { paymentReference: { $exists: true, $gt: "" } },
+    name: "uniq_cookpayout_payref",
+  }
+);
 
 module.exports = mongoose.model("CookPayout", cookPayoutSchema);

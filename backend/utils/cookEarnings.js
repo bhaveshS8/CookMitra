@@ -3,6 +3,18 @@ const cfg = require("../config/cookEarnings");
 
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 
+// Integer-paise helpers: category totals (pending/paid/lifetime, cycle
+// gross/deductions/earnings) are accumulated in paise so the reconciliation
+// invariant lifetime_paise === pending_paise + paid_paise holds by
+// construction instead of depending on binary floating-point summation
+// order. Per-booking stored values keep their existing round2 shape.
+const toPaise = (n) => {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  return Math.round(v * 100);
+};
+const fromPaise = (p) => Math.round(Number(p) || 0) / 100;
+
 const computeCookPayout = (finalCustomerPrice) => {
   const final = round2(finalCustomerPrice);
   if (!Number.isFinite(final) || final <= 0) {
@@ -81,11 +93,35 @@ const generateReferralCode = (name) => {
   return `CM-${base}-${suffix}`;
 };
 
-const referralLinkFor = (code) => `/register?ref=${encodeURIComponent(code)}`;
+const referralLinkFor = (code) => {
+  const path = `/register?ref=${encodeURIComponent(code)}`;
+  // Absolute share URL when the deployment's public origin is configured;
+  // otherwise keep the relative in-app path (backward compatible).
+  const base = String(
+    process.env.APP_URL || String(process.env.CLIENT_URL || "").split(",")[0] || ""
+  ).trim().replace(/\/+$/, "");
+  if (base && /^https?:\/\//i.test(base)) return `${base}${path}`;
+  return path;
+};
 
 const incentiveProgress = ({ incentive, verifiedLeadCount, now = new Date() }) => {
   const count = Math.max(0, Number(verifiedLeadCount) || 0);
   const target = Number(incentive.target ?? incentive.targetLeads);
+  // A missing/zero/negative target can never be "qualified" — without this
+  // guard a malformed record would report eligible with 0 leads.
+  if (!Number.isFinite(target) || target <= 0) {
+    return {
+      target,
+      verifiedLeadCount: count,
+      remaining: 0,
+      startDate: incentive.startDate,
+      endDate: incentive.endDate,
+      expired: true,
+      eligible: false,
+      status: incentive.status,
+      reward: incentive.reward,
+    };
+  }
   const end = new Date(incentive.endDate);
   const expired = now > end;
   const eligible = count >= target && !expired;
@@ -107,6 +143,8 @@ const referralQualified = (verifiedBookingCount) =>
 
 module.exports = {
   round2,
+  toPaise,
+  fromPaise,
   computeCookPayout,
   buildPayoutSnapshot,
   payoutEligibleForCycle,

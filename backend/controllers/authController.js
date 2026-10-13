@@ -8,18 +8,63 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const findByEmailInsensitive = (email) =>
   User.findOne({ email }, null, { collation: { locale: "en", strength: 2 } });
 
-const toUserPayload = (user) => ({
-  id: user._id,
-  name: user.name,
-  email: user.email,
-  phone: user.phone,
-  mobile: user.mobile || user.phone,
-  address: user.address,
-  role: user.role,
-  status: user.status,
-  avatar: user.avatar,
-  authProvider: user.authProvider,
-});
+const toUserPayload = (user) => {
+  if (!user) return user;
+  return {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    mobile: user.mobile || user.phone,
+    address: user.address,
+    role: user.role,
+    status: user.status,
+    avatar: user.avatar,
+    authProvider: user.authProvider,
+    loginMethod: user.authProvider || "local",
+    preferredLanguage: user.preferredLanguage || "",
+    emailVerified: user.authProvider === "google" || user.authProvider === "local+google" ? true : Boolean(user.emailVerified),
+    phoneVerified: Boolean(user.phoneVerified),
+    memberSince: user.createdAt || null,
+    createdAt: user.createdAt || null,
+    savedAddresses: Array.isArray(user.savedAddresses) ? user.savedAddresses : [],
+  };
+};
+
+const sanitizeAddressInput = (body) => {
+  const out = {};
+  if (body.label !== undefined) out.label = String(body.label || "").trim();
+  if (body.customLabel !== undefined) out.customLabel = String(body.customLabel || "").trim().slice(0, 40);
+  if (body.flatNo !== undefined) out.flatNo = String(body.flatNo || "").trim().slice(0, 120);
+  if (body.society !== undefined) out.society = String(body.society || "").trim().slice(0, 160);
+  if (body.landmark !== undefined) out.landmark = String(body.landmark || "").trim().slice(0, 160);
+  if (body.city !== undefined) out.city = String(body.city || "").trim().slice(0, 80);
+  if (body.lat !== undefined && body.lat !== "" && body.lat !== null) {
+    const lat = Number(body.lat);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) throw Object.assign(new Error("Invalid latitude"), { statusCode: 400 });
+    out.lat = lat;
+  }
+  if (body.lng !== undefined && body.lng !== "" && body.lng !== null) {
+    const lng = Number(body.lng);
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) throw Object.assign(new Error("Invalid longitude"), { statusCode: 400 });
+    out.lng = lng;
+  }
+  if (body.isDefault !== undefined) out.isDefault = body.isDefault === true || body.isDefault === "true";
+  return out;
+};
+
+const validateAddressComplete = (a, isNew = true) => {
+  const labels = (require("../models/User").ADDRESS_LABELS || ["Home", "Office", "Parents' Home", "Other"]);
+  if (isNew && !a.label) return "Address label is required";
+  if (a.label !== undefined && !labels.includes(a.label)) return "Address label must be Home, Office, Parents' Home or Other";
+  if (isNew && !a.flatNo) return "Flat/house number is required";
+  if (a.flatNo !== undefined && !String(a.flatNo).trim()) return "Flat/house number is required";
+  if (isNew && !a.society) return "Society/building is required";
+  if (a.society !== undefined && !String(a.society).trim()) return "Society/building is required";
+  if (isNew && !a.city) return "City is required";
+  if (a.city !== undefined && !String(a.city).trim()) return "City is required";
+  return null;
+};
 
 const normalizeRole = (v) => {
   const up = String(v || "").trim().toUpperCase();
@@ -519,6 +564,160 @@ exports.getMe = async (req, res, next) => {
   }
 };
 
+const UPCOMING_STATUSES = ["requested", "accepted", "confirmed", "in_progress"];
+
+exports.getMyStats = async (req, res, next) => {
+  try {
+    const Booking = require("../models/Booking");
+    const Review = require("../models/Review");
+    const customerId = req.user.id;
+    const [upcoming, completed, total, reviewsGiven] = await Promise.all([
+      Booking.countDocuments({ customer: customerId, status: { $in: UPCOMING_STATUSES } }),
+      Booking.countDocuments({ customer: customerId, status: "completed" }),
+      Booking.countDocuments({ customer: customerId }),
+      Review.countDocuments({ customer: customerId }),
+    ]);
+    res.json({ upcomingBookings: upcoming, completedBookings: completed, totalBookings: total, reviewsGiven });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.changePassword = async (req, res, next) => {
+  try {
+    const currentPassword = String(req.body.currentPassword || req.body.current_password || req.body.oldPassword || "");
+    const newPassword = String(req.body.newPassword || req.body.new_password || req.body.password || "");
+    if (!currentPassword) return res.status(400).json({ message: "Current password is required" });
+    if (!newPassword || newPassword.length < 8 || newPassword.length > 128) {
+      return res.status(400).json({ message: "New password must be 8–128 characters" });
+    }
+    const user = await User.findById(req.user.id).select("+password googleId authProvider tokenVersion");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user.password && user.googleId) {
+      return res.status(400).json({ message: "This account uses Google sign-in. Please set a password via password reset." });
+    }
+    const ok = await user.comparePassword(currentPassword);
+    if (!ok) return res.status(401).json({ message: "Current password is incorrect" });
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ message: "New password must be different from the current password" });
+    }
+    user.password = newPassword;
+    user.tokenVersion = (Number(user.tokenVersion) || 0) + 1;
+    if (user.googleId) user.authProvider = "local+google";
+    else user.authProvider = "local";
+    await user.save();
+    const token = generateToken(user, true);
+    setSessionCookie(res, token, true);
+    res.json({ message: "Password changed successfully. Please use your new password next time.", token });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getMyAddresses = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id).select("savedAddresses");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json(user.savedAddresses || []);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.addMyAddress = async (req, res, next) => {
+  try {
+    let patch;
+    try {
+      patch = sanitizeAddressInput(req.body);
+    } catch (e) {
+      return res.status(e.statusCode || 400).json({ message: e.message });
+    }
+    const errMsg = validateAddressComplete(patch, true);
+    if (errMsg) return res.status(400).json({ message: errMsg });
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if ((user.savedAddresses || []).length >= 10) {
+      return res.status(400).json({ message: "You can save up to 10 addresses" });
+    }
+    if (patch.isDefault || (user.savedAddresses || []).length === 0) {
+      (user.savedAddresses || []).forEach((a) => { a.isDefault = false; });
+      patch.isDefault = true;
+    }
+    user.savedAddresses.push(patch);
+    await user.save();
+    res.status(201).json(user.savedAddresses[user.savedAddresses.length - 1]);
+  } catch (error) {
+    if (error?.name === "ValidationError") {
+      return res.status(400).json({ message: Object.values(error.errors || {})[0]?.message || "Invalid address" });
+    }
+    next(error);
+  }
+};
+
+exports.updateMyAddress = async (req, res, next) => {
+  try {
+    let patch;
+    try {
+      patch = sanitizeAddressInput(req.body);
+    } catch (e) {
+      return res.status(e.statusCode || 400).json({ message: e.message });
+    }
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const addr = (user.savedAddresses || []).id(req.params.addressId);
+    if (!addr) return res.status(404).json({ message: "Address not found" });
+    const merged = { label: addr.label, flatNo: addr.flatNo, society: addr.society, city: addr.city, ...patch };
+    const errMsg = validateAddressComplete(merged, true);
+    if (errMsg) return res.status(400).json({ message: errMsg });
+    Object.entries(patch).forEach(([k, v]) => { addr[k] = v; });
+    if (patch.isDefault === true) {
+      user.savedAddresses.forEach((a) => {
+        if (String(a._id) !== String(addr._id)) a.isDefault = false;
+      });
+      addr.isDefault = true;
+    }
+    await user.save();
+    res.json(addr);
+  } catch (error) {
+    if (error?.name === "ValidationError") {
+      return res.status(400).json({ message: Object.values(error.errors || {})[0]?.message || "Invalid address" });
+    }
+    next(error);
+  }
+};
+
+exports.deleteMyAddress = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const addr = (user.savedAddresses || []).id(req.params.addressId);
+    if (!addr) return res.status(404).json({ message: "Address not found" });
+    const wasDefault = Boolean(addr.isDefault);
+    addr.deleteOne();
+    if (wasDefault && user.savedAddresses.length > 0) {
+      user.savedAddresses[0].isDefault = true;
+    }
+    await user.save();
+    res.json({ message: "Address deleted" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.setDefaultMyAddress = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const addr = (user.savedAddresses || []).id(req.params.addressId);
+    if (!addr) return res.status(404).json({ message: "Address not found" });
+    user.savedAddresses.forEach((a) => { a.isDefault = String(a._id) === String(addr._id); });
+    await user.save();
+    res.json(addr);
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.logout = async (req, res) => {
   clearSessionCookie(res);
   res.json({ message: "Signed out" });
@@ -526,6 +725,12 @@ exports.logout = async (req, res) => {
 
 exports.updateProfile = async (req, res, next) => {
   try {
+    const FORBIDDEN = ["role", "status", "tokenVersion", "password", "googleId", "resetPasswordToken", "resetPasswordExpires", "emailVerified", "phoneVerified", "authProvider", "savedAddresses"];
+    for (const k of FORBIDDEN) {
+      if (req.body[k] !== undefined) {
+        return res.status(403).json({ message: `Field '${k}' cannot be updated here` });
+      }
+    }
     const { name, phone, mobile, address } = req.body;
     const phoneRaw = phone || mobile;
     let phoneVal;
@@ -548,15 +753,46 @@ exports.updateProfile = async (req, res, next) => {
       }
       emailVal = email;
     }
+    let nameVal;
+    if (name !== undefined) {
+      const n = String(name || "").trim().replace(/\s+/g, " ");
+      if (!n || n.length < 2 || n.length > 80) {
+        return res.status(400).json({ message: "Name must be 2–80 characters" });
+      }
+      nameVal = n;
+    }
+    let addressVal;
+    if (address !== undefined) {
+      addressVal = String(address || "").trim().slice(0, 500);
+    }
+    let avatarVal;
+    if (req.body.avatar !== undefined) {
+      const a = String(req.body.avatar || "").trim().slice(0, 500);
+      if (a && !/^https?:\/\/.+/i.test(a) && !/^\/uploads\/.+/.test(a)) {
+        return res.status(400).json({ message: "Avatar must be a valid URL" });
+      }
+      avatarVal = a;
+    }
+    let langVal;
+    if (req.body.preferredLanguage !== undefined) {
+      langVal = String(req.body.preferredLanguage || "").trim().slice(0, 40);
+    }
+    // Fetch current to detect email/phone change (never auto-verify on edit).
+    const current = await User.findById(req.user.id).select("email phone mobile");
+    if (!current) return res.status(404).json({ message: "User not found" });
+    const emailChanged = emailVal !== undefined && emailVal !== String(current.email || "").toLowerCase();
+    const phoneChanged = phoneVal !== undefined && phoneVal !== String(current.phone || current.mobile || "");
     let user;
     try {
       user = await User.findByIdAndUpdate(
         req.user.id,
         {
-          ...(name !== undefined ? { name } : {}),
-          ...(phoneVal !== undefined ? { phone: phoneVal, mobile: phoneVal } : {}),
-          ...(address !== undefined ? { address } : {}),
-          ...(emailVal !== undefined ? { email: emailVal } : {}),
+          ...(nameVal !== undefined ? { name: nameVal } : {}),
+          ...(phoneVal !== undefined ? { phone: phoneVal, mobile: phoneVal, phoneVerified: false } : {}),
+          ...(addressVal !== undefined ? { address: addressVal } : {}),
+          ...(emailVal !== undefined ? { email: emailVal, emailVerified: false } : {}),
+          ...(avatarVal !== undefined ? { avatar: avatarVal } : {}),
+          ...(langVal !== undefined ? { preferredLanguage: langVal } : {}),
         },
         { new: true, runValidators: true }
       );
@@ -569,7 +805,10 @@ exports.updateProfile = async (req, res, next) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    res.json(toUserPayload(user));
+    const payload = toUserPayload(user);
+    if (emailChanged) payload.emailChangeNotice = "Email updated — you may need to re-verify or sign in again.";
+    if (phoneChanged) payload.phoneChangeNotice = "Contact number updated.";
+    res.json(payload);
   } catch (error) {
     next(error);
   }

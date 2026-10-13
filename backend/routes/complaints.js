@@ -21,7 +21,16 @@ router.post(
       .withMessage("Please describe the issue (10–2000 characters)"),
     body("category")
       .optional()
-      .isIn(["behaviour", "payment", "address", "no_show", "safety", "quality", "hygiene", "other"])
+      .isIn([
+        // cook report-form values (ComplaintForm filedBy="cook")
+        "behaviour", "payment", "address", "no_show", "safety", "quality",
+        "hygiene", "other",
+        // customer report-form values (ComplaintForm filedBy="customer";
+        // the controller maps these to the lowercase enum via
+        // CUSTOMER_REASON_MAP, so the validator must let them through)
+        "COOK_DID_NOT_ARRIVE", "MAJOR_SERVICE_DEVIATION",
+        "SERVICE_QUALITY_ISSUE", "UNPROFESSIONAL_BEHAVIOR", "OTHER",
+      ])
       .withMessage("Invalid category"),
   ],
   validate,

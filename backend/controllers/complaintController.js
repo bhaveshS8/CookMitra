@@ -43,7 +43,7 @@ exports.createComplaint = async (req, res, next) => {
     const isCustomer = String(req.user.role).toUpperCase() === "CUSTOMER";
 
     let customer = customerId || null;
-    let cook = isCustomer ? req.user.id : null;
+    let cook = isCustomer ? null : req.user.id;
     let booking = null;
     if (bookingId) {
       booking = await Booking.findById(bookingId);
@@ -60,6 +60,7 @@ exports.createComplaint = async (req, res, next) => {
         if (booking.cook.toString() !== req.user.id) {
           return res.status(403).json({ message: "Not authorized" });
         }
+        cook = booking.cook.toString();
         customer = booking.customer.toString();
       }
     }

@@ -292,6 +292,8 @@ const CookBooking = () => {
     return () => { cancelled = true; };
   }, [user?.role, user?.address, dispatch]);
 
+  const [addressBook, setAddressBook] = useState([]);
+  const [addressBookIdx, setAddressBookIdx] = useState("");
   useEffect(() => {
     if (user?.role !== "customer") { setSavedLoaded(true); return; }
     let cancelled = false;
@@ -302,6 +304,7 @@ const CookBooking = () => {
       .catch(() => {
         if (!cancelled) { setSavedLocations([]); setSavedLoaded(true); }
       });
+    API.get("/auth/me/addresses").then((res) => { if (!cancelled && Array.isArray(res.data)) setAddressBook(res.data); }).catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -368,6 +371,17 @@ const CookBooking = () => {
       return;
     }
     if (user?.address === undefined || !savedLoaded) return;
+    const bookDefault = addressBook.find((a) => a.isDefault) || addressBook[0];
+    if (bookDefault) {
+      autoFilled.current = true;
+      fill({ flatNo: bookDefault.flatNo, society: bookDefault.society, landmark: bookDefault.landmark, city: bookDefault.city });
+      const bi = addressBook.indexOf(bookDefault);
+      setAddressBookIdx(String(bi >= 0 ? bi : 0));
+      if (Number.isFinite(bookDefault.lat) && Number.isFinite(bookDefault.lng)) {
+        setCoords({ lat: bookDefault.lat, lng: bookDefault.lng });
+      }
+      return;
+    }
     if (savedLocations.length === 0) return;
     autoFilled.current = true;
     fill(savedLocations[0].addressDetails || {});
@@ -375,7 +389,7 @@ const CookBooking = () => {
     if (savedLocations[0].location?.lat != null) {
       setCoords({ lat: savedLocations[0].location.lat, lng: savedLocations[0].location.lng });
     }
-  }, [savedLocations, savedLoaded, user?.role, user?.address]);
+  }, [savedLocations, savedLoaded, user?.role, user?.address, addressBook]);
 
   const slab = slabPriceForDuration(Number(form.durationHours));
   const couponDiscount = slab != null && coupon ? Math.min(coupon.discount, slab) : 0;
@@ -454,6 +468,27 @@ const CookBooking = () => {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  const applyAddressBookEntry = (idx) => {
+    const saved = addressBook[Number(idx)];
+    if (!saved) return;
+    const nextFields = { flatNo: saved.flatNo || "", society: saved.society || "", landmark: saved.landmark || "" };
+    const nextCity = normCity(saved.city) || form.city;
+    setForm((f) => ({ ...f, ...nextFields, city: nextCity }));
+    setAddressBookIdx(String(idx));
+    setSavedIdx("");
+    setAcceptedVenue(null);
+    if (Number.isFinite(saved.lat) && Number.isFinite(saved.lng)) {
+      const pin = { lat: saved.lat, lng: saved.lng };
+      setCoords(pin);
+      setPinFP(pinFingerprint({ ...nextFields, city: nextCity }, pin));
+      setLocMsg("");
+    } else {
+      setCoords(null);
+      setPinFP(null);
+      setLocMsg("Saved address applied — verify the address below for precise navigation");
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -1324,6 +1359,34 @@ const CookBooking = () => {
               </div>
             )}
             <div className="ondemand-locate-box">
+              {addressBook.length > 0 && (
+                <div className="form-group od-saved-group">
+                  <label htmlFor="od-addressbook-select">
+                    <History size={15} /> Use saved address
+                  </label>
+                  <div className="od-saved-wrap">
+                  <select
+                    id="od-addressbook-select"
+                    className="form-control od-saved-select"
+                    value={addressBookIdx}
+                    onChange={(e) => applyAddressBookEntry(e.target.value)}
+                    aria-label="Use a saved address from your address book"
+                  >
+                    <option value="">Select from address book…</option>
+                    {addressBook.map((s, i) => {
+                      const nm = s.label === "Other" && s.customLabel ? s.customLabel : s.label;
+                      const addr = [s.flatNo, s.society, s.city].filter(Boolean).join(", ");
+                      const label = `${nm} — ${addr}`;
+                      return (
+                        <option key={s._id || i} value={i} title={label}>
+                          {label.length > 52 ? `${label.slice(0, 52)}…` : label}{s.isDefault ? " · Default" : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  </div>
+                </div>
+              )}
               {savedLocations.length > 0 && (
                 <div className="form-group od-saved-group">
                   <label htmlFor="od-saved-select">

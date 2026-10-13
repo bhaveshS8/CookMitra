@@ -45,5 +45,14 @@ router.post(
   c.payCookPayout
 );
 router.post("/payouts/:id/hold", auth, authorize("admin"), c.holdCookPayout);
+router.post(
+  "/payouts/:id/reference",
+  auth,
+  authorize("admin"),
+  [body("reference").optional().isString(), body("paymentReference").optional().isString()],
+  validate,
+  c.recordPayoutReference
+);
+router.post("/payouts/:id/sync-bookings", auth, authorize("admin"), c.syncCycleBookings);
 
 module.exports = router;

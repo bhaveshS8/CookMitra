@@ -501,12 +501,6 @@ const CookDashboard = () => {
 
       <div className="cook-tabs">
         <button
-          className={`cook-tab ${view === "needs-action" ? "active" : ""}`}
-          onClick={() => setView("needs-action")}
-        >
-          <Inbox size={15} /> New requests <span className="cook-tab-count">{pendingRequests}</span>
-        </button>
-        <button
           className={`cook-tab ${view === "today" ? "active" : ""}`}
           onClick={() => setView("today")}
         >

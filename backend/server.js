@@ -200,6 +200,17 @@ if (process.env.NODE_ENV !== "test" && String(process.env.WHATSAPP_DISPATCH_WORK
   }
 }
 
+// Background sweep: marks request/payment windows as expired and physically
+// deletes `expired` (unpaid, no refund activity) bookings 5 minutes after
+// expiry. Disabled in tests and when EXPIRED_BOOKING_SWEEP=false.
+if (process.env.NODE_ENV !== "test" && String(process.env.EXPIRED_BOOKING_SWEEP || "").toLowerCase() !== "false") {
+  try {
+    require("./services/bookingTransitions").startExpiredBookingSweeper();
+  } catch (err) {
+    console.error("Expired-booking sweeper failed to start (bookings unaffected):", err?.message || err);
+  }
+}
+
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled promise rejection (server kept alive):", reason);
 });
@@ -402,6 +413,10 @@ const shutdown = (signal) => {
   console.log(`Received ${signal} — closing server gracefully...`);
   try {
     require("./services/bookingDispatchJobs").stopWorker();
+  } catch {
+  }
+  try {
+    require("./services/bookingTransitions").stopExpiredBookingSweeper();
   } catch {
   }
   server.close(() => {

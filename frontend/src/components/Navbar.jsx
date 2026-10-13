@@ -323,18 +323,6 @@ const Navbar = () => {
       {mobileMenuOpen && (
         <div className="mobile-menu open">
           <LocationPicker />
-          {!hideCustomerPages && (
-            <>
-              <NavLink
-                to="/cook-on-demand"
-                className="btn btn-primary btn-block"
-                onClick={closeMobile}
-              >
-                <ChefHat size={18} />
-                Book a Cook
-              </NavLink>
-            </>
-          )}
 
           {user ? (
             <>
@@ -387,24 +375,6 @@ const Navbar = () => {
                 >
                   <ShieldAlert size={18} />
                   Admin
-                </NavLink>
-              )}
-
-              {(user.role === "customer" || user.role === "cook" || user.role === "admin") && (
-                <NavLink
-                  to="/dashboard/notifications"
-                  className={({ isActive }) =>
-                    isActive ? "nav-link active" : "nav-link"
-                  }
-                  onClick={closeMobile}
-                >
-                  <Bell size={18} />
-                  Notifications
-                  {unreadCount > 0 && (
-                    <span className="nav-pill-badge">
-                      {unreadCount > 99 ? "99+" : unreadCount}
-                    </span>
-                  )}
                 </NavLink>
               )}
 

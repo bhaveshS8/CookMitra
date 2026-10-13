@@ -36,6 +36,7 @@ const notificationSchema = new mongoose.Schema(
         "incentive_qualified",
         "incentive_approved",
         "incentive_rejected",
+        "incentive_held",
         "referral_registered",
         "referral_milestone",
         "referral_approved",

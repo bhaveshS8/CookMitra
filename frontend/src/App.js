@@ -21,6 +21,12 @@ import CookProfile from "./pages/CookProfile";
 import CookBooking from "./pages/CookBooking";
 import CustomerDashboard from "./pages/CustomerDashboard";
 import CustomerProfile from "./pages/CustomerProfile";
+import {
+  ProfilePersonalPage,
+  ProfileAddressesPage,
+  ProfileActivityPage,
+  ProfileSecurityPage,
+} from "./pages/ProfileSectionPages";
 import BookingDetails from "./pages/BookingDetails";
 import Notifications from "./pages/Notifications";
 import CookDashboard from "./pages/CookDashboard";
@@ -136,6 +142,38 @@ function App() {
                 element={
                   <ProtectedRoute roles={["customer"]}>
                     <CustomerProfile />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard/profile/personal"
+                element={
+                  <ProtectedRoute roles={["customer"]}>
+                    <ProfilePersonalPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard/profile/addresses"
+                element={
+                  <ProtectedRoute roles={["customer"]}>
+                    <ProfileAddressesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard/profile/activity"
+                element={
+                  <ProtectedRoute roles={["customer"]}>
+                    <ProfileActivityPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard/profile/security"
+                element={
+                  <ProtectedRoute roles={["customer"]}>
+                    <ProfileSecurityPage />
                   </ProtectedRoute>
                 }
               />

@@ -92,6 +92,11 @@ const ensureBookingPayoutSnapshot = async (booking) => {
   if (!(final > 0)) return booking;
   const split = computeCookPayout(final);
   try {
+    // Atomic read-side snapshot: the payoutStatus / payoutEligibleAt fields
+    // use the DATABASE's current values ($ifNull) rather than this request's
+    // possibly-stale in-memory copy, so a concurrent admin approve/hold/pay
+    // can never be rolled back to "eligible" by a cook refreshing My Earnings.
+    // Financial fields are deterministic from the immutable booking amount.
     const updated = await Booking.findOneAndUpdate(
       {
         _id: booking._id,
@@ -101,22 +106,28 @@ const ensureBookingPayoutSnapshot = async (booking) => {
           { "payoutInfo.cookPayoutAmount": 0 },
         ],
       },
-      {
-        $set: {
-          "payoutInfo.regularPrice": regular,
-          "payoutInfo.discountAmount": discount,
-          "payoutInfo.finalCustomerPrice": split.finalCustomerPrice,
-          "payoutInfo.platformDeductionPercent": split.platformDeductionPercent,
-          "payoutInfo.platformDeductionAmount": split.platformDeductionAmount,
-          "payoutInfo.cookPayoutAmount": split.cookPayoutAmount,
-          "payoutInfo.payoutStatus": booking?.payoutInfo?.payoutStatus || "eligible",
-          "payoutInfo.payoutEligibleAt": booking?.payoutInfo?.payoutEligibleAt || new Date(),
+      [
+        {
+          $set: {
+            "payoutInfo.regularPrice": regular,
+            "payoutInfo.discountAmount": discount,
+            "payoutInfo.finalCustomerPrice": split.finalCustomerPrice,
+            "payoutInfo.platformDeductionPercent": split.platformDeductionPercent,
+            "payoutInfo.platformDeductionAmount": split.platformDeductionAmount,
+            "payoutInfo.cookPayoutAmount": split.cookPayoutAmount,
+            "payoutInfo.payoutStatus": { $ifNull: ["$payoutInfo.payoutStatus", "eligible"] },
+            "payoutInfo.payoutEligibleAt": { $ifNull: ["$payoutInfo.payoutEligibleAt", new Date()] },
+          },
         },
-      },
+      ],
       { new: true }
     );
     return updated || booking;
-  } catch {
+  } catch (e) {
+    try {
+      console.error(`ensureBookingPayoutSnapshot failed for booking ${booking?._id}:`, e?.message || e);
+    } catch {
+    }
     return booking;
   }
 };
@@ -127,6 +138,10 @@ const countVerifiedBookings = async (cookUserId) =>
     status: "completed",
     "payment.status": "paid",
     "payment.testMode": { $ne: true },
+    // Only genuinely qualifying bookings unlock referral rewards: refunded
+    // (or refund-in-flight) and incomplete sessions must not count.
+    "payment.refundStatus": { $in: ["none", "rejected"] },
+    hoursCompleted: true,
     cookArrived: true,
     serviceStartedAt: { $exists: true, $ne: null },
   });
@@ -182,7 +197,11 @@ const refreshIncentiveEligibility = async (cookUserId, now = new Date()) => {
   for (const inc of incentives) {
     const verifiedLeadCount = await countVerifiedLeadsInWindow(inc.cook, inc.startDate, inc.endDate);
     const expired = now > new Date(inc.endDate);
-    const eligible = verifiedLeadCount >= inc.target && !expired;
+    // A non-positive target (possible only via out-of-band writes — the
+    // schema requires min 1) can never auto-qualify, mirroring the
+    // incentiveProgress() guard.
+    const saneTarget = Number.isFinite(Number(inc.target)) && Number(inc.target) > 0;
+    const eligible = saneTarget && verifiedLeadCount >= inc.target && !expired;
     let status = inc.status;
     if (["approved", "paid", "rejected", "held"].includes(status)) {
       out.push({ ...inc, verifiedLeadCount, eligible });
@@ -193,11 +212,24 @@ const refreshIncentiveEligibility = async (cookUserId, now = new Date()) => {
     else if (!eligible && status === "qualified") status = "in_progress";
     const update = { verifiedLeadCount, eligible };
     if (status !== inc.status) update.status = status;
+    let transitionedToQualified = false;
     try {
-      await CookIncentive.updateOne({ _id: inc._id }, { $set: update });
+      if (status === "qualified" && inc.status === "in_progress") {
+        // Atomic transition: only the request whose update flips
+        // in_progress → qualified emits the qualified audit/notification.
+        // Concurrent refreshes racing on the same stale read produce exactly
+        // one event instead of one per request.
+        const res = await CookIncentive.updateOne(
+          { _id: inc._id, status: "in_progress" },
+          { $set: update }
+        );
+        transitionedToQualified = (res?.modifiedCount || 0) > 0;
+      } else {
+        await CookIncentive.updateOne({ _id: inc._id }, { $set: update });
+      }
     } catch {
     }
-    if (eligible && inc.status === "in_progress") {
+    if (transitionedToQualified) {
       await audit({
         event: "incentive_qualified",
         cook: cookUserId,

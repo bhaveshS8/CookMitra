@@ -3,6 +3,23 @@ const bcrypt = require("bcryptjs");
 
 const USER_ROLES = ["CUSTOMER", "COOK", "ADMIN"];
 
+const ADDRESS_LABELS = ["Home", "Office", "Parents' Home", "Other"];
+
+const savedAddressSchema = new mongoose.Schema(
+  {
+    label: { type: String, enum: ADDRESS_LABELS, required: [true, "Address label is required"], trim: true },
+    customLabel: { type: String, default: "", trim: true, maxlength: [40, "Label is too long"] },
+    flatNo: { type: String, required: [true, "Flat/house number is required"], trim: true, maxlength: [120, "Flat/house number is too long"] },
+    society: { type: String, required: [true, "Society/building is required"], trim: true, maxlength: [160, "Society/building is too long"] },
+    landmark: { type: String, default: "", trim: true, maxlength: [160, "Landmark is too long"] },
+    city: { type: String, required: [true, "City is required"], trim: true, maxlength: [80, "City is too long"] },
+    lat: { type: Number, min: -90, max: 90 },
+    lng: { type: Number, min: -180, max: 180 },
+    isDefault: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+);
+
 const normalizeRole = (v) => {
   if (v == null) return v;
   const up = String(v).trim().toUpperCase();
@@ -71,6 +88,15 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    preferredLanguage: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: [40, "Language is too long"],
+    },
+    emailVerified: { type: Boolean, default: false },
+    phoneVerified: { type: Boolean, default: false },
+    savedAddresses: { type: [savedAddressSchema], default: [] },
     authProvider: {
       type: String,
       enum: ["local", "google", "local+google"],
@@ -93,6 +119,18 @@ userSchema.pre("validate", function (next) {
   if (this.role != null) this.role = normalizeRole(this.role);
   if (!this.mobile && this.phone) this.mobile = this.phone;
   if (!this.phone && this.mobile) this.phone = this.mobile;
+  // Backward compat: legacy users get safe defaults.
+  if (!Array.isArray(this.savedAddresses)) this.savedAddresses = [];
+  // Maintain at most one default address.
+  if (Array.isArray(this.savedAddresses) && this.savedAddresses.length > 1) {
+    let seen = false;
+    for (let i = this.savedAddresses.length - 1; i >= 0; i -= 1) {
+      if (this.savedAddresses[i]?.isDefault) {
+        if (!seen) seen = true;
+        else this.savedAddresses[i].isDefault = false;
+      }
+    }
+  }
   next();
 });
 
@@ -117,5 +155,6 @@ const User = mongoose.model("User", userSchema);
 
 User.USER_ROLES = USER_ROLES;
 User.normalizeRole = normalizeRole;
+User.ADDRESS_LABELS = ADDRESS_LABELS;
 
 module.exports = User;
