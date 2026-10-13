@@ -1,9 +1,4 @@
-// Live end-to-end test of the CUSTOMER BOOKING FLOW against a running server.
-// Run: node backend/booking-flow.e2e.js  (server must be on localhost:5000,
-// seeded via `node seeds/seed.js`). Exits non-zero when the flow breaks.
 const BASE = process.env.BASE_URL || "http://localhost:5000/api";
-// Safety: this script CREATES real users/bookings in the target database.
-// Refuse to run unless explicitly allowed — use a scratch database.
 if (!process.env.ALLOW_LIVE_TESTS) {
   console.error(
     `Refusing to run: this e2e script writes test data to ${BASE}. ` +
@@ -53,22 +48,18 @@ const tomorrowStr = () => {
 
 (async () => {
   try {
-    // 1. Customer logs in (seeded).
     const cust = await login("neha@example.com", "password123");
     step("customer login", Boolean(cust.token), cust.user?.name);
 
-    // 2. Customer browses cooks (Find Cooks page).
     const list = await api("GET", "/cooks");
     step("cooks listing loads", list.status === 200 && Array.isArray(list.data) && list.data.length > 0, `${list.status}, ${list.data?.length} cooks`);
     const cookCard = (list.data || []).find((c) => c.approvalStatus === "approved");
     step("an approved cook is listed", Boolean(cookCard), cookCard?.user?.name);
 
-    // 3. Customer opens the cook profile page (/cooks/:profileId).
     const profile = await api("GET", `/cooks/${cookCard._id}`);
     step("cook profile loads by profile id", profile.status === 200 && profile.data?.user?._id, profile.data?.user?._id);
     const cookUserId = profile.data.user._id;
 
-    // 4. BookingForm resolves availability for tomorrow + 2-hour session.
     const date = tomorrowStr();
     const avail = await api(
       "GET",
@@ -83,7 +74,6 @@ const tomorrowStr = () => {
     const slot = (avail.data || [])[0];
     step("a start time option exists", Boolean(slot?.startTime && slot?.endTime), slot ? `${slot.startTime}-${slot.endTime}` : "(none)");
 
-    // 5. Customer sends the booking request (what BookingForm submits).
     const bookingPayload = {
       cook: cookUserId,
       serviceType: "cook_for_me",
@@ -106,15 +96,12 @@ const tomorrowStr = () => {
     const bookingId = created.data?._id;
     step("request includes WhatsApp link to cook", typeof created.data?.whatsappUrl === "string" && created.data.whatsappUrl.startsWith("https://wa.me/"), String(created.data?.whatsappUrl || "(none)").slice(0, 60));
 
-    // 5b. The slot must now be ON HOLD for other customers.
     const rivalAvail = await api("GET", `/availability/${cookUserId}?date=${date}&durationHours=2`);
     const rivalSeesSlot = (rivalAvail.data || []).some(
       (o) => o.startTime === slot.startTime && o.endTime === slot.endTime
     );
     step("held slot hidden from other customers", rivalAvail.status === 200 && !rivalSeesSlot, rivalSeesSlot ? "STILL VISIBLE" : "hidden");
 
-    // 5c. Privilege/state tamper on booking creation is rejected by whitelist —
-    //     customer override, status flip and lifecycle flags are all ignored.
     const tampered = await api("POST", "/bookings", {
       token: cust.token,
       body: {
@@ -139,13 +126,10 @@ const tomorrowStr = () => {
     );
     const tamperedId = tampered.data?._id;
 
-    // 6. Customer polls the booking on the waiting page.
     const polled = await api("GET", `/bookings/${bookingId}`, { token: cust.token });
     step("customer can poll booking status", polled.status === 200 && polled.data?.status === "requested", polled.data?.status);
 
-    // === PART 2: cook acceptance + payment ===
 
-    // 7. The cook accepts from their dashboard.
     const cook = await login("priya@example.com", "password123");
     step("cook login", Boolean(cook.token), cook.user?.name);
     const cookBookings = await api("GET", "/bookings/cook", { token: cook.token });
@@ -161,7 +145,6 @@ const tomorrowStr = () => {
       `${accepted.status} ${accepted.data?.status || JSON.stringify(accepted.data)?.slice(0, 160)}`
     );
 
-    // 7b. A rejected request is terminal — it can never be cancelled afterwards.
     const rejectBook = await api("POST", "/bookings", {
       token: cust.token,
       body: { cook: cookUserId, serviceType: "cook_with_me", date, startTime: "12:00", endTime: "14:00", durationHours: 2, address: "Reject Test, Pune", guests: 2 },
@@ -172,7 +155,6 @@ const tomorrowStr = () => {
     const cancelRejected = await api("PATCH", `/bookings/${rejectBook.data._id}/cancel`, { token: cust.token });
     step("customer cannot cancel a rejected booking -> 400", cancelRejected.status === 400, `${cancelRejected.status}`);
 
-    // 8. Customer pays within the window (BookingPayment flow).
     const paid = await api("PATCH", `/bookings/${bookingId}/pay`, { token: cust.token, body: { method: "upi" } });
     step(
       "customer payment confirms the booking",
@@ -182,7 +164,6 @@ const tomorrowStr = () => {
     step("payment returns cook job-sheet WhatsApp link", typeof paid.data?.cookWhatsappUrl === "string" && paid.data.cookWhatsappUrl.startsWith("https://wa.me/"), String(paid.data?.cookWhatsappUrl || "(none)").slice(0, 60));
     step("payment returns customer confirmation WhatsApp link", typeof paid.data?.customerWhatsappUrl === "string" && paid.data.customerWhatsappUrl.startsWith("https://wa.me/91"), String(paid.data?.customerWhatsappUrl || "(none)").slice(0, 60));
 
-    // 9. Booking details load for the customer afterwards.
     const details = await api("GET", `/bookings/${bookingId}`, { token: cust.token });
     step(
       "booking details load after payment",
@@ -190,7 +171,6 @@ const tomorrowStr = () => {
       `${details.status} ${details.data?.status}, cook: ${details.data?.cook?.name || "(none)"}`
     );
 
-    // 10. The slot shows as booked for new customers.
     const afterAvail = await api("GET", `/availability/${cookUserId}?date=${date}&durationHours=2`);
     const stillOffered = (afterAvail.data || []).some(
       (o) => o.startTime === slot.startTime && o.endTime === slot.endTime

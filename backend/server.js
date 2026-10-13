@@ -1,3 +1,4 @@
+if (!process.env.TZ) process.env.TZ = "Asia/Kolkata";
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -17,37 +18,67 @@ dotenv.config();
 
 const app = express();
 
-// Behind reverse proxies (Render/Railway/Nginx/Heroku) so req.protocol/secure
-// reflect the real client connection for HTTPS cookie/redirect logic.
 app.set("trust proxy", 1);
 
 // ---- Security + throughput headers/payload hardening (1000-user ready) ----
-// helmet: safe defaults (HSTS, noSniff, frameguard, XSS filter).
-// crossOriginResourcePolicy "cross-origin" keeps /uploads images + API
-// usable when the frontend is hosted on a different origin (CLIENT_URL).
-// contentSecurityPolicy is OFF: the app serves inline CRA scripts/styles and
-// Razorpay/GA third-party scripts that a strict CSP would break.
-app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: { policy: "cross-origin" } }));
-// compression: gzip JSON/API + static frontend (threshold 1kb).
-app.use(compression({ threshold: 1024 }));
-
-// Rate limits. Counters live in memory per bucket by default; the
+const cspDirectives = {
+  defaultSrc: ["'self'"],
+  scriptSrc: [
+    "'self'",
+    "'unsafe-inline'",
+    "https://checkout.razorpay.com",
+    "https://accounts.google.com",
+    "https://apis.google.com",
+  ],
+  styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+  fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+  imgSrc: ["'self'", "data:", "blob:", "https://*.googleusercontent.com", "https://cdn.razorpay.com"],
+  connectSrc: [
+    "'self'",
+    "https://api.razorpay.com",
+    "https://checkout.razorpay.com",
+    "https://cdn.razorpay.com",
+    "https://accounts.google.com",
+    // Location enrichment endpoints used by the frontend (reverse
+    // geocoding + IP fallback). Without these, production browsers block
+    // the fetches and detected pins arrive with no address text.
+    "https://api.bigdatacloud.net",
+    "https://nominatim.openstreetmap.org",
+    "https://ipwho.is",
+    "https://get.geojs.io",
+  ],
+  frameSrc: ["'self'", "https://checkout.razorpay.com", "https://api.razorpay.com"],
+  objectSrc: ["'none'"],
+  baseUri: ["'self'"],
+  formAction: ["'self'"],
+};
+app.use(
+  helmet({
+    contentSecurityPolicy: { directives: cspDirectives },
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+  })
+);
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)");
+  next();
+});
 // security-critical, low-traffic buckets (auth, payments) use a MongoDB-backed
-// store so the limits stay exact with 2+ replicas — no Redis, no new service.
-// See utils/rateLimitStore.js. A store outage degrades to in-memory limits
-// instead of 500-ing every request.
-// Login/reset/visit stay generous enough for real bursts but blunt brute force
-// and accidental poll storms. Standard + legacy headers off to save bytes.
 const limitOpts = { standardHeaders: false, legacyHeaders: false };
 const generalLimiter = rateLimit({
   ...limitOpts,
   store: rateLimitStore("general"),
   windowMs: 60 * 1000,
   max: Number(process.env.RATE_LIMIT_GENERAL || 300),
-  // Health checks must never be throttled: load balancers / uptime monitors
-  // poll this path from a single IP and would otherwise exhaust the bucket
-  // (and get a 429 instead of the DB status they need).
-  skip: (req) => req.path === "/api/health",
+  skip: (req) => {
+    // Meta's webhook verification is a single GET that must return 200
+    // with the raw challenge — never rate-limit it (429 = "callback rejected").
+    const url = req.originalUrl || req.url || "";
+    if (req.method === "GET" && url.split("?")[0] === "/api/whatsapp/webhook") return true;
+    return req.path === "/api/health" || req.path === "/api/ready";
+  },
   message: { message: "Too many requests — please slow down and retry." },
 });
 const authLimiter = rateLimit({
@@ -72,9 +103,8 @@ const visitLimiter = rateLimit({
   message: { message: "Too many requests — please slow down and retry." },
 });
 app.use("/api/", generalLimiter);
+app.use(compression({ threshold: 1024 }));
 
-// One line of operational truth at boot: with 2+ replicas, any bucket left
-// in-memory has its effective limit multiplied by the replica count.
 {
   const { shared, memory } = describeRateLimitStores();
   console.log(
@@ -82,7 +112,7 @@ app.use("/api/", generalLimiter);
   );
 }
 
-// ---- Production config validation (warn loudly, never crash) ----
+// ---- Production config validation (fail closed on security-critical gaps) ----
 if (process.env.NODE_ENV === "production") {
   const jwt = process.env.JWT_SECRET || "";
   if (
@@ -92,13 +122,9 @@ if (process.env.NODE_ENV === "production") {
     jwt.length < 32
   ) {
     console.error(
-      "CONFIG WARNING: JWT_SECRET is missing, a placeholder, or too short (<32 chars). Set a long random secret (e.g. `openssl rand -hex 32`) or all logins will be insecure/unstable."
+      "CONFIG ERROR: JWT_SECRET is missing, a placeholder, or too short (<32 chars). Refusing to start: every session token depends on this secret. Set a long random secret (e.g. `openssl rand -hex 32`) and restart."
     );
-  }
-  if (process.env.ALLOW_TEST_PAYMENTS === "true") {
-    console.error(
-      "CONFIG WARNING: ALLOW_TEST_PAYMENTS=true is set while NODE_ENV=production. Test-mode checkout is now force-disabled in code, but unset this var to remove confusion."
-    );
+    process.exit(1);
   }
   if (!process.env.GOOGLE_CLIENT_ID) {
     console.warn(
@@ -106,39 +132,98 @@ if (process.env.NODE_ENV === "production") {
     );
   }
   try {
-    // Reuse the same placeholder detection as the payments route.
-    const { isConfigured } = require("./config/razorpay");
+    const { isConfigured, keyId } = require("./config/razorpay");
     if (!isConfigured) {
       console.warn(
         "CONFIG NOTICE: Razorpay keys missing/placeholder — POST /api/payments/order will return 503 until real RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET are set."
       );
+    } else if (String(keyId || "").startsWith("rzp_test_")) {
+      // traffic would fail at checkout. Loud prod warning (not a boot
+      console.warn(
+        "CONFIG WARNING: RAZORPAY_KEY_ID is a TEST key while NODE_ENV=production — live checkout requires rzp_live_ keys. Set live keys or expect payment failures."
+      );
     }
   } catch {
-    // non-fatal: payments route reports its own status
   }
   if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
     console.warn(
       "CONFIG NOTICE: RAZORPAY_WEBHOOK_SECRET is not set — POST /api/payments/webhook cannot verify signatures (browser payments still work, webhook reconcile is skipped)."
     );
   }
+  if (process.env.REQUIRE_PAYMENTS === "true") {
+    let paymentsReady = false;
+    try {
+      paymentsReady =
+        require("./config/razorpay").isConfigured && Boolean(process.env.RAZORPAY_WEBHOOK_SECRET);
+    } catch {
+      paymentsReady = false;
+    }
+    if (!paymentsReady) {
+      console.error(
+        "CONFIG ERROR: REQUIRE_PAYMENTS=true but live Razorpay keys and/or RAZORPAY_WEBHOOK_SECRET are missing. Refusing to start."
+      );
+      process.exit(1);
+    }
+  }
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+    console.warn(
+      "CONFIG NOTICE: SMTP_HOST/SMTP_USER are not set — password-reset emails cannot be delivered (users get a generic message and no link arrives). Set SMTP_HOST/PORT/USER/PASS/FROM to enable."
+    );
+    if (process.env.REQUIRE_SMTP === "true") {
+      console.error(
+        "CONFIG ERROR: REQUIRE_SMTP=true but SMTP_HOST/SMTP_USER are missing. Refusing to start."
+      );
+      process.exit(1);
+    }
+  }
+  if (!process.env.WHATSAPP_TOKEN || !process.env.WHATSAPP_PHONE_NUMBER_ID) {
+    console.warn(
+      "CONFIG NOTICE: WHATSAPP_TOKEN/WHATSAPP_PHONE_NUMBER_ID are not set — automatic WhatsApp notifications are disabled (in-app notifications + wa.me share links still work). See docs/WHATSAPP_SETUP.md to enable."
+    );
+  }
 }
 
-// Background retry loop — never throws, never exits. The API stays up
-// (health reports db status) even while MongoDB is unreachable.
 connectDB();
 
-// A single stray async error must not kill the whole server. Log loudly,
-// keep serving.
+const { ensurePayoutIndexes } = require("./utils/payoutIndexes");
+ensurePayoutIndexes({ connection: mongoose.connection });
+
+// Durable WhatsApp dispatch worker (in-process; atomic job claims make it
+// safe with any number of instances/cluster workers). Recovers pending jobs
+// left by previous processes. Disabled in tests and when
+// WHATSAPP_DISPATCH_WORKER=false (API-only instances still persist jobs).
+if (process.env.NODE_ENV !== "test" && String(process.env.WHATSAPP_DISPATCH_WORKER || "").toLowerCase() !== "false") {
+  try {
+    require("./services/bookingDispatchJobs").startWorker();
+  } catch (err) {
+    console.error("Dispatch worker failed to start (bookings unaffected):", err?.message || err);
+  }
+}
+
+// Background sweep: marks request/payment windows as expired and physically
+// deletes `expired` (unpaid, no refund activity) bookings 5 minutes after
+// expiry. Disabled in tests and when EXPIRED_BOOKING_SWEEP=false.
+if (process.env.NODE_ENV !== "test" && String(process.env.EXPIRED_BOOKING_SWEEP || "").toLowerCase() !== "false") {
+  try {
+    require("./services/bookingTransitions").startExpiredBookingSweeper();
+  } catch (err) {
+    console.error("Expired-booking sweeper failed to start (bookings unaffected):", err?.message || err);
+  }
+}
+
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled promise rejection (server kept alive):", reason);
 });
 process.on("uncaughtException", (err) => {
-  console.error("Uncaught exception (server kept alive):", err);
+  console.error("Uncaught exception — exiting so the process manager restarts clean:", err);
+  try {
+    mongoose.connection.close(false);
+  } catch {
+  } finally {
+    process.exit(1);
+  }
 });
 
-// CORS: allow the deployed frontend origin (CLIENT_URL, comma-separated for
-// multiple environments). In production the app is same-origin, so CORS only
-// matters for separately hosted frontends.
 const parseOrigins = (v) =>
   (v || "")
     .split(",")
@@ -149,8 +234,6 @@ const corsOrigins = parseOrigins(process.env.CLIENT_URL);
 const isProduction = process.env.NODE_ENV === "production";
 app.use(
   cors({
-    // In production with no CLIENT_URL set, default to same-origin only
-    // (no cross-origin headers at all). In dev, allow everything.
     origin:
       !isProduction && corsOrigins.length === 0
         ? true
@@ -160,32 +243,49 @@ app.use(
     credentials: true,
   })
 );
-// Razorpay webhooks need the RAW request body for HMAC verification — mount
-// before express.json() (body-parser skips bodies that are already parsed,
-// so the JSON parser below leaves webhook requests untouched).
 app.use("/api/payments/webhook", express.raw({ type: "application/json", limit: "100kb" }));
-// Bounded JSON bodies: a 10MB default lets one client burn memory per request.
+app.use("/api/whatsapp/webhook", express.raw({ type: "application/json", limit: "100kb" }));
 app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: false, limit: "100kb" }));
+const crypto = require("crypto");
+let requestCounter = 0;
+app.use((req, res, next) => {
+  try {
+    const incoming = String(req.header("x-request-id") || "").trim().slice(0, 64);
+    const id =
+      /^[A-Za-z0-9_-]{8,64}$/.test(incoming)
+        ? incoming
+        : `${Date.now().toString(36)}-${(requestCounter = (requestCounter + 1) % 1e6).toString(36)}-${crypto.randomBytes(4).toString("hex")}`;
+    req.id = id;
+    res.setHeader("X-Request-Id", id);
+  } catch {
+  }
+  next();
+});
+morgan.token("scrubbed-url", (req) => {
+  const url = req.originalUrl || req.url || "";
+  return require("./utils/scrubUrl").scrubRequestUrl(url);
+});
+morgan.token("req-id", (req) => req.id || "-");
 app.use(
-  morgan(isProduction ? "combined" : "dev", {
-    // Keep health-check noise out of production logs.
-    skip: (req) => req.path === "/api/health" && isProduction,
+  morgan(isProduction ? ':remote-addr - :remote-user [:date[clf]] ":method :scrubbed-url HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent" req=:req-id' : "dev", {
+    skip: (req) => (req.path === "/api/health" || req.path === "/api/ready") && isProduction,
   })
 );
 
-// Uploaded cook verification documents (Aadhaar / PAN / photo).
-// Identity docs are private: public profile photos (photo_*) stay open, but
-// aadhar_*/pan_* need the owning cook or an admin. Browsers fetch these via
-// plain <img>/<a>/<iframe> (no auth headers), so a ?token= query is accepted
-// alongside the Authorization header — the frontend appends it automatically.
 const uploadAccess = async (req, res, next) => {
   try {
     const base = path.basename(req.path || "");
     if (/^photo_/i.test(base)) return next();
+    if (req.query && String(req.query.token || "").trim()) {
+      return res.status(401).json({
+        message: "Document links using session tokens are no longer supported. Please refresh to get a secure view link.",
+        code: "DOC_TOKEN_DEPRECATED",
+      });
+    }
     const header = req.header("Authorization") || req.header("authorization") || "";
     const headerToken = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-    const token = (req.query && String(req.query.token || "").trim()) || headerToken;
+    const token = headerToken;
     if (!token || !process.env.JWT_SECRET) {
       return res.status(401).json({ message: "Authentication required to view this document" });
     }
@@ -196,7 +296,7 @@ const uploadAccess = async (req, res, next) => {
       return res.status(401).json({ message: "Token is not valid" });
     }
     const User = require("./models/User");
-    const account = await User.findById(decoded.id).select("role status");
+    const account = await User.findById(decoded.id).select("role status tokenVersion").lean();
     if (!account) {
       return res.status(401).json({ message: "Account no longer exists. Please log in again." });
     }
@@ -205,9 +305,11 @@ const uploadAccess = async (req, res, next) => {
         message: "Your account has been blocked by an administrator. Please contact support.",
       });
     }
-    // Filenames embed the uploader: <field>_<userId>_<ts>_... — the owner or
-    // an admin may view; everyone else is refused.
-    const ownerId = String(base).split("_")[1] || "";
+    if (Number(account.tokenVersion) > 0 && decoded.tv !== Number(account.tokenVersion)) {
+      return res.status(401).json({ message: "Session expired. Please log in again." });
+    }
+    const { ownerIdOf } = require("./utils/storage");
+    const ownerId = ownerIdOf(base);
     const isOwner = ownerId && ownerId.toLowerCase() === String(account._id).toLowerCase();
     if (String(account.role).toUpperCase() !== "ADMIN" && !isOwner) {
       return res.status(403).json({ message: "Not authorized for this action" });
@@ -217,9 +319,11 @@ const uploadAccess = async (req, res, next) => {
     return res.status(401).json({ message: "Authentication required to view this document" });
   }
 };
-app.use("/uploads", uploadAccess, express.static(path.join(__dirname, "uploads")));
+const { uploadDir } = require("./utils/storage");
+app.use("/uploads", uploadAccess, express.static(path.dirname(uploadDir)));
 
 app.use("/api/auth", authLimiter, require("./routes/auth"));
+app.use("/api/docs", require("./routes/docs"));
 app.use("/api/cooks", require("./routes/cooks"));
 app.use("/api/bookings", require("./routes/bookings"));
 // COOKMITRA EVENTS (MVP): event catalogue, event bookings (admin-assigned
@@ -232,15 +336,18 @@ app.use("/api/availability", require("./routes/availability"));
 app.use("/api/reviews", require("./routes/reviews"));
 app.use("/api/complaints", require("./routes/complaints"));
 app.use("/api/notifications", require("./routes/notifications"));
+app.get("/api/realtime/stream", require("./utils/realtime").sseHandler);
+app.use("/api/whatsapp", require("./routes/whatsapp"));
 app.use("/api/leads", require("./routes/leads"));
 app.use("/api/coupons", require("./routes/coupons"));
 app.use("/api/analytics", require("./routes/analytics"));
-// Visit pings fire once per browser session — own lighter bucket so a traffic
-// spike can't eat the general budget (or vice versa).
+app.use("/api/payouts", strictLimiter, require("./routes/payouts"));
+app.use("/api/cook", require("./routes/cookEarnings"));
+app.use("/api/admin/cook-incentives", require("./routes/adminCookEarnings"));
+app.use("/api/admin/cook-payouts", require("./routes/adminCookEarnings"));
 app.use("/api/stats/public/visit", visitLimiter);
 app.use("/api/stats/public", require("./routes/stats"));
 
-// Export limiters for route-level use (e.g. stricter OTP verify).
 app.set("rateLimiters", { generalLimiter, authLimiter, strictLimiter, visitLimiter });
 
 app.get("/api/health", (req, res) => {
@@ -252,10 +359,13 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// ---- Static frontend (single-service deployment) ----
-// When a production build exists (frontend/build copied in, or built in a
-// monorepo image), serve it from this process and fall back to index.html for
-// client-side routes. API + /uploads routes above always win.
+app.get("/api/ready", (req, res) => {
+  if (mongoose.connection.readyState === 1) {
+    return res.json({ ready: true, timestamp: new Date().toISOString() });
+  }
+  return res.status(503).json({ ready: false, db: "disconnected" });
+});
+
 const frontendBuild = path.join(__dirname, "..", "frontend", "build");
 if (fs.existsSync(path.join(frontendBuild, "index.html"))) {
   app.use(express.static(frontendBuild, { maxAge: "1y", index: false }));
@@ -268,9 +378,6 @@ if (fs.existsSync(path.join(frontendBuild, "index.html"))) {
   console.log("Serving frontend build from", frontendBuild);
 }
 
-// Unknown API routes answer JSON (not Express's default HTML 404), matching
-// the API error shape. Placed after the frontend fallback above, which passes
-// /api + /uploads through via next().
 app.use("/api", (req, res) => {
   res.status(404).json({ message: "API route not found" });
 });
@@ -278,9 +385,6 @@ app.use("/api", (req, res) => {
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-// A previous instance (or a nodemon restart race) can still hold the port
-// for a moment. Retry instead of dying instantly — instant exit(1) here is
-// what made the backend look like it "closes automatically".
 const MAX_LISTEN_RETRIES = Number(process.env.PORT_RETRY_ATTEMPTS || 10);
 const LISTEN_RETRY_MS = Number(process.env.PORT_RETRY_MS || 1000);
 let listenRetries = 0;
@@ -310,14 +414,19 @@ server.on("error", (err) => {
   console.error("Server error:", err);
 });
 
-// Graceful shutdown — close the listener (frees the port immediately for the
-// next instance) and the DB connection instead of dying mid-request.
 const shutdown = (signal) => {
   console.log(`Received ${signal} — closing server gracefully...`);
+  try {
+    require("./services/bookingDispatchJobs").stopWorker();
+  } catch {
+  }
+  try {
+    require("./services/bookingTransitions").stopExpiredBookingSweeper();
+  } catch {
+  }
   server.close(() => {
     mongoose.connection.close(false).finally(() => process.exit(0));
   });
-  // Force-exit if keep-alive sockets hang the graceful close.
   setTimeout(() => process.exit(0), 5000).unref();
 };
 process.on("SIGINT", () => shutdown("SIGINT"));

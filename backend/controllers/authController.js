@@ -5,36 +5,151 @@ const User = require("../models/User");
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-const toUserPayload = (user) => ({
-  id: user._id,
-  name: user.name,
-  email: user.email,
-  phone: user.phone,
-  mobile: user.mobile || user.phone,
-  address: user.address,
-  role: user.role,
-  status: user.status,
-  avatar: user.avatar,
-  authProvider: user.authProvider,
-});
+const findByEmailInsensitive = (email) =>
+  User.findOne({ email }, null, { collation: { locale: "en", strength: 2 } });
 
-// Normalize any incoming role to the spec's UPPERCASE canonical form.
-// Unknown values fall back to CUSTOMER (public routes never create ADMIN).
+const toUserPayload = (user) => {
+  if (!user) return user;
+  return {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    mobile: user.mobile || user.phone,
+    address: user.address,
+    role: user.role,
+    status: user.status,
+    avatar: user.avatar,
+    authProvider: user.authProvider,
+    loginMethod: user.authProvider || "local",
+    preferredLanguage: user.preferredLanguage || "",
+    emailVerified: user.authProvider === "google" || user.authProvider === "local+google" ? true : Boolean(user.emailVerified),
+    phoneVerified: Boolean(user.phoneVerified),
+    memberSince: user.createdAt || null,
+    createdAt: user.createdAt || null,
+    savedAddresses: Array.isArray(user.savedAddresses) ? user.savedAddresses : [],
+  };
+};
+
+const sanitizeAddressInput = (body) => {
+  const out = {};
+  if (body.label !== undefined) out.label = String(body.label || "").trim();
+  if (body.customLabel !== undefined) out.customLabel = String(body.customLabel || "").trim().slice(0, 40);
+  if (body.flatNo !== undefined) out.flatNo = String(body.flatNo || "").trim().slice(0, 120);
+  if (body.society !== undefined) out.society = String(body.society || "").trim().slice(0, 160);
+  if (body.landmark !== undefined) out.landmark = String(body.landmark || "").trim().slice(0, 160);
+  if (body.city !== undefined) out.city = String(body.city || "").trim().slice(0, 80);
+  if (body.lat !== undefined && body.lat !== "" && body.lat !== null) {
+    const lat = Number(body.lat);
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) throw Object.assign(new Error("Invalid latitude"), { statusCode: 400 });
+    out.lat = lat;
+  }
+  if (body.lng !== undefined && body.lng !== "" && body.lng !== null) {
+    const lng = Number(body.lng);
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) throw Object.assign(new Error("Invalid longitude"), { statusCode: 400 });
+    out.lng = lng;
+  }
+  if (body.isDefault !== undefined) out.isDefault = body.isDefault === true || body.isDefault === "true";
+  return out;
+};
+
+const validateAddressComplete = (a, isNew = true) => {
+  const labels = (require("../models/User").ADDRESS_LABELS || ["Home", "Office", "Parents' Home", "Other"]);
+  if (isNew && !a.label) return "Address label is required";
+  if (a.label !== undefined && !labels.includes(a.label)) return "Address label must be Home, Office, Parents' Home or Other";
+  if (isNew && !a.flatNo) return "Flat/house number is required";
+  if (a.flatNo !== undefined && !String(a.flatNo).trim()) return "Flat/house number is required";
+  if (isNew && !a.society) return "Society/building is required";
+  if (a.society !== undefined && !String(a.society).trim()) return "Society/building is required";
+  if (isNew && !a.city) return "City is required";
+  if (a.city !== undefined && !String(a.city).trim()) return "City is required";
+  return null;
+};
+
 const normalizeRole = (v) => {
   const up = String(v || "").trim().toUpperCase();
   return ["CUSTOMER", "COOK", "ADMIN"].includes(up) ? up : "CUSTOMER";
 };
 
-const generateToken = (user) => {
+const generateToken = (user, persistent = true) => {
+  const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN";
   return jwt.sign(
-    { id: user._id, role: user.role },
+    { id: user._id, role: user.role, tv: Number(user.tokenVersion) || 0 },
     process.env.JWT_SECRET,
-    { expiresIn: "30d" }
+    { expiresIn: isAdmin ? "12h" : persistent === false ? "1d" : "30d" }
   );
 };
 
-// Greet a brand-new website member with an in-app notification. Best-effort:
-// a notification failure must never block signup, so errors are swallowed.
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_FAILS = 10;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
+const loginFailures = new Map(); // email -> { fails, windowStart, lockedUntil }
+const loginLocked = (email) => {
+  const rec = loginFailures.get(email);
+  if (!rec) return 0;
+  const now = Date.now();
+  if (rec.lockedUntil && now < rec.lockedUntil) {
+    return rec.lockedUntil - now;
+  }
+  if (now - rec.windowStart > LOGIN_WINDOW_MS) {
+    loginFailures.delete(email);
+    return 0;
+  }
+  return 0;
+};
+const recordLoginFail = (email) => {
+  const now = Date.now();
+  let rec = loginFailures.get(email);
+  if (!rec || now - rec.windowStart > LOGIN_WINDOW_MS) {
+    rec = { fails: 0, windowStart: now, lockedUntil: 0 };
+  }
+  rec.fails += 1;
+  if (rec.fails >= LOGIN_MAX_FAILS) {
+    rec.lockedUntil = now + LOGIN_LOCK_MS;
+  }
+  loginFailures.set(email, rec);
+  if (loginFailures.size > 5000) {
+    const oldest = loginFailures.keys().next().value;
+    loginFailures.delete(oldest);
+  }
+  return rec.lockedUntil && now < rec.lockedUntil;
+};
+const clearLoginFails = (email) => {
+  loginFailures.delete(email);
+};
+
+const SESSION_COOKIE = "__Host-cm_session";
+const setSessionCookie = (res, token, persistent = true, maxAgeSec = null) => {
+  try {
+    const isProd = process.env.NODE_ENV === "production";
+    const maxAge = maxAgeSec ?? (persistent === false ? 1 : 30) * 24 * 60 * 60;
+    const parts = [
+      `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
+      "Path=/",
+      `Max-Age=${maxAge}`,
+      "HttpOnly",
+      "SameSite=Lax",
+    ];
+    if (isProd) parts.push("Secure");
+    const existing = res.getHeader("Set-Cookie");
+    if (existing) {
+      res.setHeader("Set-Cookie", [...(Array.isArray(existing) ? existing : [existing]), parts.join("; ")]);
+    } else {
+      res.setHeader("Set-Cookie", parts.join("; "));
+    }
+  } catch {
+  }
+};
+const clearSessionCookie = (res) => {
+  try {
+    const isProd = process.env.NODE_ENV === "production";
+    const parts = [`${SESSION_COOKIE}=`, "Path=/", "Max-Age=0", "HttpOnly", "SameSite=Lax"];
+    if (isProd) parts.push("Secure");
+    res.setHeader("Set-Cookie", parts.join("; "));
+  } catch {
+  }
+};
+
 const sendWelcomeNotification = async (user) => {
   try {
     const Notification = require("../models/Notification");
@@ -48,52 +163,114 @@ const sendWelcomeNotification = async (user) => {
         : `Welcome to Cook Mitra, ${name}! Your account is ready — explore verified cooks and book your first service.`,
     });
   } catch {
-    // Intentionally ignored — signup succeeds even if notifications are down.
   }
+};
+
+const normalizeMobileCore = (v) => {
+  let digits = String(v || "").replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+  else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  return digits;
 };
 
 exports.register = async (req, res, next) => {
   try {
-    const { name, phone, mobile, password } = req.body;
+    const { password } = req.body;
+    const name = String(req.body.name || "").trim();
     const email = String(req.body.email || "").trim().toLowerCase();
-    if (!email) {
-      return res.status(400).json({ message: "Valid email is required" });
+    if (!name || name.length < 2 || name.length > 80) {
+      return res.status(400).json({ message: "Name must be 2–80 characters" });
     }
-    // Public signup can only create CUSTOMER or COOK (never ADMIN).
+    if (!email) {
+      return res.status(400).json({ message: "Enter a valid email address" });
+    }
+    if (!password || String(password).length < 8 || String(password).length > 128) {
+      return res.status(400).json({ message: "Password must be 8–128 characters" });
+    }
     let role = normalizeRole(req.body.role || "CUSTOMER");
     if (!["CUSTOMER", "COOK"].includes(role)) role = "CUSTOMER";
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await findByEmailInsensitive(email);
     if (existingUser) {
-      return res.status(400).json({ message: "Email already registered" });
+      return res.status(400).json({
+        message: "Email already exists, please enter another email",
+        code: "EMAIL_EXISTS",
+        field: "email",
+        errors: [{ path: "email", param: "email", msg: "Email already exists, please enter another email" }],
+      });
     }
 
     let user;
     try {
+      const rawPhone = req.body.phone || req.body.mobile;
+      const core = normalizeMobileCore(rawPhone);
+      const tenDigit = /^[6-9]\d{9}$/.test(core) ? core : String(rawPhone || "").trim();
       user = await User.create({
         name,
         email,
-        phone: phone || mobile,
-        mobile: mobile || phone,
+        phone: tenDigit,
+        mobile: tenDigit,
         password,
         role,
       });
     } catch (error) {
-      // Normalize email-case variants ("A@x.com" vs "a@x.com") to a 400
-      // instead of a 500 (schema has lowercase:true but the duplicate check
-      // above ran on the raw value).
       if (error?.code === 11000) {
-        return res.status(400).json({ message: "Email already registered" });
+        return res.status(400).json({
+          message: "Email already exists, please enter another email",
+          code: "EMAIL_EXISTS",
+          field: "email",
+          errors: [{ path: "email", param: "email", msg: "Email already exists, please enter another email" }],
+        });
       }
       throw error;
     }
-    const token = generateToken(user);
+    const token = generateToken(user, true);
 
     await sendWelcomeNotification(user);
 
+    if (String(role).toUpperCase() === "COOK") {
+      const refCode = String(req.body.referralCode || req.body.ref || "").trim().toUpperCase();
+      if (refCode) {
+        try {
+          const CookProfile = require("../models/CookProfile");
+          const CookReferral = require("../models/CookReferral");
+          const ownerProfile = await CookProfile.findOne({ referralCode: refCode }).populate("user", "email");
+          const ownerId = ownerProfile?.user?._id || ownerProfile?.user;
+          if (
+            ownerProfile &&
+            ownerId &&
+            String(ownerId) !== String(user._id) &&
+            String(ownerProfile?.user?.email || "").toLowerCase() !== String(email).toLowerCase()
+          ) {
+            const already = await CookReferral.findOne({ referredCook: user._id }).select("_id");
+            if (!already) {
+              await CookReferral.create({
+                referrer: ownerId,
+                referredCook: user._id,
+                referralCode: refCode,
+              });
+              try {
+                const Notification = require("../models/Notification");
+                await Notification.create({
+                  user: ownerId,
+                  type: "referral_registered",
+                  message: `${user.name} joined Cook Mitra with your referral — ₹250 unlocks after their 10th verified booking.`,
+                  link: "/cook/earnings",
+                });
+              } catch {
+              }
+            }
+          }
+        } catch {
+        }
+      }
+    }
+
+    setSessionCookie(res, token, true);
     res.status(201).json({
       token,
       user: toUserPayload(user),
+      expiresIn: "30d",
     });
   } catch (error) {
     next(error);
@@ -103,18 +280,27 @@ exports.register = async (req, res, next) => {
 exports.login = async (req, res, next) => {
   try {
     const { password } = req.body;
-    // Stored lowercase (schema lowercase:true) — normalize the lookup or
-    // "NEHA@x.com" can never sign in despite registering fine.
+    const persistent = req.body.rememberMe !== false && req.body.rememberMe !== "false";
     const email = String(req.body.email || "").trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ message: "Enter a valid email address" });
+    }
+    if (!password) {
+      return res.status(400).json({ message: "Password is required" });
+    }
+    const lockedMs = loginLocked(email);
+    if (lockedMs > 0) {
+      return res.status(429).json({
+        message: "Too many failed sign-in attempts — please try again in a few minutes.",
+      });
+    }
 
     const user = await User.findOne({ email }).select("+password");
     if (!user) {
+      recordLoginFail(email);
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // Google-only accounts have no password — guide them to the right button.
-    // (Check googleId so legacy stubs/records without a selected password
-    // field are not misclassified.)
     if (!user.password && user.googleId) {
       return res.status(401).json({
         message: "This account uses Google sign-in. Please continue with Google.",
@@ -123,31 +309,32 @@ exports.login = async (req, res, next) => {
 
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
+      if (recordLoginFail(email)) {
+        return res.status(429).json({
+          message: "Too many failed sign-in attempts — please try again in a few minutes.",
+        });
+      }
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    // Blocked accounts cannot sign in (even with valid credentials).
     if (user.status === "suspended") {
       return res.status(403).json({
         message:
           "Your account has been blocked by an administrator. Please contact support.",
       });
     }
+    clearLoginFails(email);
 
-    // Keep token payload and toUserPayload role identical (UPPERCASE) so
-    // authorize() and frontend role checks agree.
-    const token = generateToken(user);
+    const token = generateToken(user, persistent);
     const me = toUserPayload(user);
-    res.json({ token, user: me });
+    const isAdminSession = String(user.role || "").toUpperCase() === "ADMIN";
+    setSessionCookie(res, token, persistent, isAdminSession ? 12 * 60 * 60 : null);
+    res.json({ token, user: me, expiresIn: isAdminSession ? "12h" : persistent ? "30d" : "1d" });
   } catch (error) {
     next(error);
   }
 };
 
-// POST /api/auth/google — verify a Google Identity Services ID token,
-// then sign in or create the matching account and return our own JWT.
-// Works for both login and signup: new users are created with the
-// requested role (customer/cook), existing emails are linked.
 exports.googleAuth = async (req, res, next) => {
   try {
     const { idToken, role } = req.body;
@@ -180,17 +367,14 @@ exports.googleAuth = async (req, res, next) => {
     if (!googleId || !email) {
       return res.status(401).json({ message: "Google account did not return an email" });
     }
-    // Strict: a missing claim is treated as unverified, not as verified.
     if (emailVerified !== true) {
       return res.status(401).json({ message: "Google email is not verified" });
     }
 
-    // 1) Returning Google user.
     let user = await User.findOne({ googleId });
     let isNewGoogleUser = false;
     if (!user) {
-      // 2) Existing email/password account — link Google for future logins.
-      user = await User.findOne({ email });
+      user = await findByEmailInsensitive(email);
       if (user) {
         if (user.status === "suspended") {
           return res.status(403).json({
@@ -203,8 +387,6 @@ exports.googleAuth = async (req, res, next) => {
         user.authProvider = user.password ? "local+google" : "google";
         await user.save();
       } else {
-        // 3) Brand-new user — role comes from the signup role selector,
-        // defaulting to customer. Never allow privilege escalation to admin.
         const safeRole = normalizeRole(role) === "COOK" ? "COOK" : "CUSTOMER";
         user = await User.create({
           name: String(name).slice(0, 80),
@@ -222,7 +404,6 @@ exports.googleAuth = async (req, res, next) => {
           "Your account has been blocked by an administrator. Please contact support.",
       });
     } else {
-      // Keep profile fresh on repeat logins.
       let changed = false;
       if (avatar && user.avatar !== avatar) {
         user.avatar = avatar;
@@ -237,18 +418,38 @@ exports.googleAuth = async (req, res, next) => {
 
     if (isNewGoogleUser) {
       await sendWelcomeNotification(user);
+      if (String(user.role).toUpperCase() === "COOK") {
+        const refCode = String(req.body.referralCode || req.body.ref || "").trim().toUpperCase();
+        if (refCode) {
+          try {
+            const CookProfile = require("../models/CookProfile");
+            const CookReferral = require("../models/CookReferral");
+            const ownerProfile = await CookProfile.findOne({ referralCode: refCode }).populate("user", "email");
+            const ownerId = ownerProfile?.user?._id || ownerProfile?.user;
+            if (
+              ownerProfile && ownerId && String(ownerId) !== String(user._id) &&
+              String(ownerProfile?.user?.email || "").toLowerCase() !== String(user.email || "").toLowerCase()
+            ) {
+              const already = await CookReferral.findOne({ referredCook: user._id }).select("_id");
+              if (!already) {
+                await CookReferral.create({ referrer: ownerId, referredCook: user._id, referralCode: refCode });
+              }
+            }
+          } catch {
+          }
+        }
+      }
     }
 
     const token = generateToken(user);
-    res.json({ token, user: toUserPayload(user) });
+    const isAdminSession = String(user.role || "").toUpperCase() === "ADMIN";
+    setSessionCookie(res, token, true, isAdminSession ? 12 * 60 * 60 : null);
+    res.json({ token, user: toUserPayload(user), expiresIn: isAdminSession ? "12h" : "30d" });
   } catch (error) {
     next(error);
   }
 };
 
-// In-memory throttle for forgot-password (per email+IP, 10 per 15 minutes).
-// Survives nothing (restart clears it) — it only dampens automated abuse;
-// the token itself is 256-bit and single-use with a 1-hour expiry.
 const forgotAttempts = new Map();
 const forgotAllowed = (key) => {
   const now = Date.now();
@@ -258,8 +459,6 @@ const forgotAllowed = (key) => {
   if (hits.length >= MAX) return false;
   hits.push(now);
   forgotAttempts.set(key, hits);
-  // Bound memory: evict keys whose windows fully expired (prevents slow
-  // unbounded Map growth across a long-lived process).
   if (forgotAttempts.size > 5000) {
     for (const [k, v] of forgotAttempts) {
       if (!v.length || now - v[v.length - 1] >= WINDOW_MS) forgotAttempts.delete(k);
@@ -269,13 +468,6 @@ const forgotAllowed = (key) => {
   return true;
 };
 
-// POST /api/auth/forgot-password — request a password-reset token.
-// Always responds 200 with a generic message (no account enumeration).
-// Delivery: SMTP email when configured (utils/mailer); otherwise the raw
-// token is returned ONLY when the server explicitly opts in via
-// ALLOW_DEV_TOKENS=true AND is not production (dev testing) — any other
-// environment answers generic, because "not production" alone would leak
-// reset tokens from staging/test deployments too.
 exports.forgotPassword = async (req, res, next) => {
   try {
     const email = String(req.body.email || "").trim().toLowerCase();
@@ -293,7 +485,6 @@ exports.forgotPassword = async (req, res, next) => {
         "If an account exists for this email, a password-reset link is on its way (valid 1 hour).",
     };
     const user = await User.findOne({ email });
-    // Unknown, suspended or deleted accounts get the same generic answer.
     if (!user || user.status === "suspended") {
       return res.json(generic);
     }
@@ -310,7 +501,6 @@ exports.forgotPassword = async (req, res, next) => {
       const result = await sendResetEmail({ to: user.email, name: user.name, token });
       if (result?.delivered) return res.json(generic);
     } catch {
-      // fall through to the dev/prod handling below
     }
     if (process.env.NODE_ENV === "production" || process.env.ALLOW_DEV_TOKENS !== "true") {
       if (process.env.NODE_ENV === "production") {
@@ -320,15 +510,12 @@ exports.forgotPassword = async (req, res, next) => {
       }
       return res.json(generic);
     }
-    // Explicit dev opt-in only: hand the token back so the flow is testable
-    // without SMTP. Never enabled on staging/test deployments.
     return res.json({ ...generic, resetToken: token, devOnly: true });
   } catch (error) {
     next(error);
   }
 };
 
-// POST /api/auth/reset-password — consume a reset token with a new password.
 exports.resetPassword = async (req, res, next) => {
   try {
     const token = String(req.body.token || "").trim();
@@ -336,8 +523,8 @@ exports.resetPassword = async (req, res, next) => {
     if (!token) {
       return res.status(400).json({ message: "Reset token is required" });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ message: "Password must be at least 6 characters" });
+    if (password.length < 8) {
+      return res.status(400).json({ message: "Password must be at least 8 characters" });
     }
     const hash = crypto.createHash("sha256").update(token).digest("hex");
     const user = await User.findOne({
@@ -355,7 +542,7 @@ exports.resetPassword = async (req, res, next) => {
     user.password = password; // pre-save hook hashes it
     user.resetPasswordToken = "";
     user.resetPasswordExpires = null;
-    // Google-only accounts gaining a password become dual-auth accounts.
+    user.tokenVersion = (Number(user.tokenVersion) || 0) + 1;
     if (user.googleId) user.authProvider = "local+google";
     else user.authProvider = "local";
     await user.save();
@@ -377,23 +564,251 @@ exports.getMe = async (req, res, next) => {
   }
 };
 
+const UPCOMING_STATUSES = ["requested", "accepted", "confirmed", "in_progress"];
+
+exports.getMyStats = async (req, res, next) => {
+  try {
+    const Booking = require("../models/Booking");
+    const Review = require("../models/Review");
+    const customerId = req.user.id;
+    const [upcoming, completed, total, reviewsGiven] = await Promise.all([
+      Booking.countDocuments({ customer: customerId, status: { $in: UPCOMING_STATUSES } }),
+      Booking.countDocuments({ customer: customerId, status: "completed" }),
+      Booking.countDocuments({ customer: customerId }),
+      Review.countDocuments({ customer: customerId }),
+    ]);
+    res.json({ upcomingBookings: upcoming, completedBookings: completed, totalBookings: total, reviewsGiven });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.changePassword = async (req, res, next) => {
+  try {
+    const currentPassword = String(req.body.currentPassword || req.body.current_password || req.body.oldPassword || "");
+    const newPassword = String(req.body.newPassword || req.body.new_password || req.body.password || "");
+    if (!currentPassword) return res.status(400).json({ message: "Current password is required" });
+    if (!newPassword || newPassword.length < 8 || newPassword.length > 128) {
+      return res.status(400).json({ message: "New password must be 8–128 characters" });
+    }
+    const user = await User.findById(req.user.id).select("+password googleId authProvider tokenVersion");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user.password && user.googleId) {
+      return res.status(400).json({ message: "This account uses Google sign-in. Please set a password via password reset." });
+    }
+    const ok = await user.comparePassword(currentPassword);
+    if (!ok) return res.status(401).json({ message: "Current password is incorrect" });
+    if (currentPassword === newPassword) {
+      return res.status(400).json({ message: "New password must be different from the current password" });
+    }
+    user.password = newPassword;
+    user.tokenVersion = (Number(user.tokenVersion) || 0) + 1;
+    if (user.googleId) user.authProvider = "local+google";
+    else user.authProvider = "local";
+    await user.save();
+    const token = generateToken(user, true);
+    setSessionCookie(res, token, true);
+    res.json({ message: "Password changed successfully. Please use your new password next time.", token });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getMyAddresses = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id).select("savedAddresses");
+    if (!user) return res.status(404).json({ message: "User not found" });
+    res.json(user.savedAddresses || []);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.addMyAddress = async (req, res, next) => {
+  try {
+    let patch;
+    try {
+      patch = sanitizeAddressInput(req.body);
+    } catch (e) {
+      return res.status(e.statusCode || 400).json({ message: e.message });
+    }
+    const errMsg = validateAddressComplete(patch, true);
+    if (errMsg) return res.status(400).json({ message: errMsg });
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if ((user.savedAddresses || []).length >= 10) {
+      return res.status(400).json({ message: "You can save up to 10 addresses" });
+    }
+    if (patch.isDefault || (user.savedAddresses || []).length === 0) {
+      (user.savedAddresses || []).forEach((a) => { a.isDefault = false; });
+      patch.isDefault = true;
+    }
+    user.savedAddresses.push(patch);
+    await user.save();
+    res.status(201).json(user.savedAddresses[user.savedAddresses.length - 1]);
+  } catch (error) {
+    if (error?.name === "ValidationError") {
+      return res.status(400).json({ message: Object.values(error.errors || {})[0]?.message || "Invalid address" });
+    }
+    next(error);
+  }
+};
+
+exports.updateMyAddress = async (req, res, next) => {
+  try {
+    let patch;
+    try {
+      patch = sanitizeAddressInput(req.body);
+    } catch (e) {
+      return res.status(e.statusCode || 400).json({ message: e.message });
+    }
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const addr = (user.savedAddresses || []).id(req.params.addressId);
+    if (!addr) return res.status(404).json({ message: "Address not found" });
+    const merged = { label: addr.label, flatNo: addr.flatNo, society: addr.society, city: addr.city, ...patch };
+    const errMsg = validateAddressComplete(merged, true);
+    if (errMsg) return res.status(400).json({ message: errMsg });
+    Object.entries(patch).forEach(([k, v]) => { addr[k] = v; });
+    if (patch.isDefault === true) {
+      user.savedAddresses.forEach((a) => {
+        if (String(a._id) !== String(addr._id)) a.isDefault = false;
+      });
+      addr.isDefault = true;
+    }
+    await user.save();
+    res.json(addr);
+  } catch (error) {
+    if (error?.name === "ValidationError") {
+      return res.status(400).json({ message: Object.values(error.errors || {})[0]?.message || "Invalid address" });
+    }
+    next(error);
+  }
+};
+
+exports.deleteMyAddress = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const addr = (user.savedAddresses || []).id(req.params.addressId);
+    if (!addr) return res.status(404).json({ message: "Address not found" });
+    const wasDefault = Boolean(addr.isDefault);
+    addr.deleteOne();
+    if (wasDefault && user.savedAddresses.length > 0) {
+      user.savedAddresses[0].isDefault = true;
+    }
+    await user.save();
+    res.json({ message: "Address deleted" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.setDefaultMyAddress = async (req, res, next) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const addr = (user.savedAddresses || []).id(req.params.addressId);
+    if (!addr) return res.status(404).json({ message: "Address not found" });
+    user.savedAddresses.forEach((a) => { a.isDefault = String(a._id) === String(addr._id); });
+    await user.save();
+    res.json(addr);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.logout = async (req, res) => {
+  clearSessionCookie(res);
+  res.json({ message: "Signed out" });
+};
+
 exports.updateProfile = async (req, res, next) => {
   try {
+    const FORBIDDEN = ["role", "status", "tokenVersion", "password", "googleId", "resetPasswordToken", "resetPasswordExpires", "emailVerified", "phoneVerified", "authProvider", "savedAddresses"];
+    for (const k of FORBIDDEN) {
+      if (req.body[k] !== undefined) {
+        return res.status(403).json({ message: `Field '${k}' cannot be updated here` });
+      }
+    }
     const { name, phone, mobile, address } = req.body;
-    const phoneVal = phone || mobile;
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      {
-        ...(name !== undefined ? { name } : {}),
-        ...(phoneVal !== undefined ? { phone: phoneVal, mobile: phoneVal } : {}),
-        ...(address !== undefined ? { address } : {}),
-      },
-      { new: true, runValidators: true }
-    );
+    const phoneRaw = phone || mobile;
+    let phoneVal;
+    if (phoneRaw !== undefined) {
+      const core = normalizeMobileCore(phoneRaw);
+      if (!/^[6-9]\d{9}$/.test(core)) {
+        return res.status(400).json({ message: "Enter a valid 10-digit mobile number" });
+      }
+      phoneVal = core;
+    }
+    let emailVal;
+    if (req.body.email !== undefined) {
+      const email = String(req.body.email || "").trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ message: "Enter a valid email address" });
+      }
+      const clash = await findByEmailInsensitive(email);
+      if (clash && String(clash._id) !== String(req.user.id)) {
+        return res.status(400).json({ message: "A user with this email already exists" });
+      }
+      emailVal = email;
+    }
+    let nameVal;
+    if (name !== undefined) {
+      const n = String(name || "").trim().replace(/\s+/g, " ");
+      if (!n || n.length < 2 || n.length > 80) {
+        return res.status(400).json({ message: "Name must be 2–80 characters" });
+      }
+      nameVal = n;
+    }
+    let addressVal;
+    if (address !== undefined) {
+      addressVal = String(address || "").trim().slice(0, 500);
+    }
+    let avatarVal;
+    if (req.body.avatar !== undefined) {
+      const a = String(req.body.avatar || "").trim().slice(0, 500);
+      if (a && !/^https?:\/\/.+/i.test(a) && !/^\/uploads\/.+/.test(a)) {
+        return res.status(400).json({ message: "Avatar must be a valid URL" });
+      }
+      avatarVal = a;
+    }
+    let langVal;
+    if (req.body.preferredLanguage !== undefined) {
+      langVal = String(req.body.preferredLanguage || "").trim().slice(0, 40);
+    }
+    // Fetch current to detect email/phone change (never auto-verify on edit).
+    const current = await User.findById(req.user.id).select("email phone mobile");
+    if (!current) return res.status(404).json({ message: "User not found" });
+    const emailChanged = emailVal !== undefined && emailVal !== String(current.email || "").toLowerCase();
+    const phoneChanged = phoneVal !== undefined && phoneVal !== String(current.phone || current.mobile || "");
+    let user;
+    try {
+      user = await User.findByIdAndUpdate(
+        req.user.id,
+        {
+          ...(nameVal !== undefined ? { name: nameVal } : {}),
+          ...(phoneVal !== undefined ? { phone: phoneVal, mobile: phoneVal, phoneVerified: false } : {}),
+          ...(addressVal !== undefined ? { address: addressVal } : {}),
+          ...(emailVal !== undefined ? { email: emailVal, emailVerified: false } : {}),
+          ...(avatarVal !== undefined ? { avatar: avatarVal } : {}),
+          ...(langVal !== undefined ? { preferredLanguage: langVal } : {}),
+        },
+        { new: true, runValidators: true }
+      );
+    } catch (error) {
+      if (error?.code === 11000) {
+        return res.status(400).json({ message: "A user with this email already exists" });
+      }
+      throw error;
+    }
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    res.json(toUserPayload(user));
+    const payload = toUserPayload(user);
+    if (emailChanged) payload.emailChangeNotice = "Email updated — you may need to re-verify or sign in again.";
+    if (phoneChanged) payload.phoneChangeNotice = "Contact number updated.";
+    res.json(payload);
   } catch (error) {
     next(error);
   }
@@ -404,7 +819,9 @@ exports.getAllUsers = async (req, res, next) => {
     const { paginationParams, applyPagination, sendList } = require("../utils/pagination");
     const pg = paginationParams(req);
     const users = await applyPagination(
-      User.find().select("-password").sort({ createdAt: -1 }),
+      User.find()
+        .select("-password -resetPasswordToken -resetPasswordExpires -googleId")
+        .sort({ createdAt: -1 }),
       pg
     );
     return sendList(res, users, pg, () => User.countDocuments());
@@ -413,9 +830,6 @@ exports.getAllUsers = async (req, res, next) => {
   }
 };
 
-// Admin: create a cook account (User + approved CookProfile) in one step.
-// The created cook can sign in with the given credentials and is immediately
-// bookable (no admin approval step needed).
 exports.adminAddCook = async (req, res, next) => {
   try {
     const {
@@ -430,7 +844,7 @@ exports.adminAddCook = async (req, res, next) => {
     const phone = req.body.phone;
     const mobile = req.body.mobile;
 
-    const existing = await User.findOne({ email });
+    const existing = await findByEmailInsensitive(email);
     if (existing) {
       return res.status(400).json({ message: "A user with this email already exists" });
     }
@@ -446,8 +860,6 @@ exports.adminAddCook = async (req, res, next) => {
       throw error;
     }
 
-    // Build the cook profile. Everything is admin-provided, so start the cook
-    // as approved and immediately bookable.
     const profileData = {
       user: user._id,
       approvalStatus: "approved",
@@ -468,18 +880,13 @@ exports.adminAddCook = async (req, res, next) => {
     try {
       profile = await CookProfile.create(profileData);
     } catch (error) {
-      // Don't orphan a login-able cook account when the profile write fails.
       try {
         await User.deleteOne({ _id: user._id });
       } catch {
-        // non-fatal: surface the original error
       }
       throw error;
     }
 
-    // Welcome notification so the new cook knows their account is ready.
-    // Non-fatal: the account already exists — a notification outage must not
-    // 500 the request (the client would retry into "email exists" confusion).
     try {
       const Notification = require("../models/Notification");
       await Notification.create({
@@ -488,7 +895,6 @@ exports.adminAddCook = async (req, res, next) => {
         message: "Welcome to Cook Mitra! Your chef account is approved and ready for bookings.",
       });
     } catch {
-      // ignore
     }
 
     res.status(201).json({
@@ -506,17 +912,12 @@ exports.adminAddCook = async (req, res, next) => {
   }
 };
 
-// Admin: register a new admin account. Only an existing logged-in admin can
-// use this (route is auth + authorize("admin")) — the public /register and
-// Google flows can never create admins, so there is no privilege-escalation
-// path. Returns the created admin (no token: the creating admin stays signed
-// in as themselves; the new admin signs in via /login afterwards).
 exports.adminAddAdmin = async (req, res, next) => {
   try {
     const { name, phone, mobile, password } = req.body;
     const email = String(req.body.email || "").trim().toLowerCase();
 
-    const existing = await User.findOne({ email });
+    const existing = await findByEmailInsensitive(email);
     if (existing) {
       return res.status(400).json({ message: "A user with this email already exists" });
     }
@@ -540,7 +941,6 @@ exports.adminAddAdmin = async (req, res, next) => {
         message: "Welcome to Cook Mitra! Your admin account is ready — sign in to open the Admin Control Panel.",
       });
     } catch {
-      // non-fatal: the account already exists
     }
 
     res.status(201).json({
@@ -557,8 +957,6 @@ exports.adminAddAdmin = async (req, res, next) => {
   }
 };
 
-// Shared guardrails for admin account management: admins can manage
-// customer and cook accounts, but never themselves or fellow admins.
 const assertManageableAccount = (req, res, target) => {
   if (String(target._id) === String(req.user.id)) {
     res.status(400).json({ message: "You cannot manage your own account" });
@@ -571,8 +969,6 @@ const assertManageableAccount = (req, res, target) => {
   return true;
 };
 
-// Admin: block (suspend) or unblock a customer/cook account. Blocked users
-// are rejected at login and their existing tokens stop working immediately.
 exports.adminSetUserStatus = async (req, res, next) => {
   try {
     const { status } = req.body;
@@ -613,15 +1009,15 @@ exports.adminSetUserStatus = async (req, res, next) => {
   }
 };
 
-// Admin: permanently delete a customer/cook account along with the data it
-// owns (cook profile, availability slots, notifications, reviews, bookings).
 exports.adminDeleteUser = async (req, res, next) => {
   try {
     const target = await User.findById(req.params.id);
     if (!target) {
       return res.status(404).json({ message: "User not found" });
     }
-    if (!assertManageableAccount(req, res, target)) return;
+    if (String(target.role).toUpperCase() === "ADMIN") {
+      return res.status(403).json({ message: "Admin accounts cannot be deleted" });
+    }
 
     const CookProfile = require("../models/CookProfile");
     const Availability = require("../models/Availability");
@@ -629,8 +1025,6 @@ exports.adminDeleteUser = async (req, res, next) => {
     const Review = require("../models/Review");
     const Notification = require("../models/Notification");
 
-    // Cascade-delete everything owned by or linked to this account so no
-    // orphaned records are left behind.
     await CookProfile.deleteMany({ user: target._id });
     await Availability.deleteMany({ cook: target._id });
     await Notification.deleteMany({ user: target._id });

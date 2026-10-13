@@ -4,43 +4,143 @@ import { useFetch } from "../hooks/useFetch";
 import API from "../api/axios";
 import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
-import { formatCurrency, formatDate, playAlarmSound, hasServiceHoursStarted, localTodayStr } from "../utils/constants";
+import { formatDate, playAlarmSound, localTomorrowStr, mapsNavigateUrl, formatTimeRange12, dayTagLabel, getLocalDateStr, isCancelLocked, isUnpaidCancelled } from "../utils/constants";
+import { useLocalDay } from "../hooks/useLocalDay";
 import CookProfileForm from "../components/CookProfileForm";
 import CookAvailabilityToggle from "../components/CookAvailabilityToggle";
 import CookEventBookings from "../components/CookEventBookings";
 import { resolveFileUrl } from "../components/CookDocUploads";
-import { Check, X, XCircle, BellRing, ArrowRight, Star, MapPin, CalendarDays, Inbox, History, UserRound, Wallet, ChefHat, AlertCircle, ShieldCheck, Clock } from "lucide-react";
+import BookingRequestModal from "../components/BookingRequestModal";
+import ConfirmDialog from "../components/ConfirmDialog";
+import CookScheduleEditor from "../components/CookScheduleEditor";
+import CookPayoutPanel from "../components/CookPayoutPanel";
+import { Check, XCircle, BellRing, ArrowRight, Star, MapPin, Navigation, CalendarDays, CalendarCheck, CalendarClock, Inbox, History, UserRound, Users, Soup, Wallet, ChefHat, AlertCircle, ShieldCheck } from "lucide-react";
+
+const customerLocationLabel = (booking) => {
+  const d = booking?.addressDetails || {};
+  const primary =
+    [d.flatNo, d.society].filter(Boolean).join(", ") || booking?.address || "";
+  return [primary, d.landmark ? `Near ${d.landmark}` : "", d.city]
+    .map((s) => String(s || "").trim())
+    .filter(Boolean)
+    .join(" · ");
+};
 
 const CookDashboard = () => {
-  const { data: bookings, loading: loadingBookings, error: bookingError, refetch: refetchBookings } = useFetch("/bookings/cook");
+  const { data: bookings, loading: loadingBookings, refreshing: refreshingBookings, error: bookingError, refetch: refetchBookings } = useFetch("/bookings/cook");
+  const { data: broadcastRequests, refetch: refetchBroadcast } = useFetch("/bookings/cook/requests");
+  const { data: scheduledToday, refetch: refetchToday } = useFetch("/bookings/cook/schedule?day=today");
+  const { data: scheduledTomorrow, refetch: refetchTomorrow } = useFetch("/bookings/cook/schedule?day=tomorrow");
   const { data: cookProfile, loading: loadingProfile, refetch: refetchCookProfile } = useFetch("/cooks/me");
   const { data: myReviews, loading: loadingReviews } = useFetch("/reviews/cook-me");
   const { data: myComplaints } = useFetch("/complaints/my");
   const showToast = useShowToast();
   const user = useSelector((s) => s.auth.user);
   const navigate = useNavigate();
-  const [view, setView] = useState("needs-action");
+  const today = useLocalDay();
+  const [view, setView] = useState("today");
   const [cancellingId, setCancellingId] = useState(null);
+  const [pendingCancelId, setPendingCancelId] = useState(null);
+  const [actingOn, setActingOn] = useState(null);
+  const [requestModalBooking, setRequestModalBooking] = useState(null);
+  const [photoOk, setPhotoOk] = useState(true);
+  useEffect(() => setPhotoOk(true), [cookProfile?.photoUrl]);
   const seenHoursDone = useRef(new Set());
   const firstLoadDone = useRef(false);
+  const seenRequestIds = useRef(new Set());
+  const requestsInit = useRef(false);
+  const handledRequestIds = useRef(new Set());
 
-  // Poll bookings so the hours-complete alarm fires without refresh.
-  // Calmed for scale: 30s -> 60s + hidden-tab pause, so a dashboard left open
-  // in a background tab stops hitting the API entirely.
+  useEffect(() => {
+    try {
+      if ("Notification" in window && Notification.permission === "default") {
+        const p = Notification.requestPermission();
+        if (p && typeof p.catch === "function") p.catch(() => {});
+      }
+    } catch {
+    }
+  }, []);
+
   useEffect(() => {
     const tick = () => {
-      if (!document.hidden) refetchBookings();
+      if (!document.hidden) {
+        refetchBookings();
+        refetchBroadcast();
+        refetchToday();
+        refetchTomorrow();
+      }
     };
-    const id = setInterval(tick, 60000);
+    const id = setInterval(tick, 15000);
     document.addEventListener("visibilitychange", tick);
     return () => {
       clearInterval(id);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [refetchBookings]);
+  }, [refetchBookings, refetchBroadcast, refetchToday, refetchTomorrow]);
+  const refetchAllRequests = () => {
+    refetchBookings();
+    refetchBroadcast();
+    refetchToday();
+    refetchTomorrow();
+  };
 
-  // Alarm once per booking when hours complete (skip state that already
-  // existed on first load to avoid noise).
+  const modalIdRef = useRef(null);
+  modalIdRef.current = requestModalBooking?._id || null;
+  useEffect(() => {
+    const myId = String(user?._id || user?.id || "");
+    const onRequest = () => {
+      refetchBookings();
+      refetchBroadcast();
+    };
+    const closeIfOpen = (id, message) => {
+      if (!id) {
+        refetchBookings();
+        refetchBroadcast();
+        return;
+      }
+      if (modalIdRef.current && String(modalIdRef.current) === String(id)) {
+        handledRequestIds.current.add(String(id));
+        setRequestModalBooking(null);
+        if (message) showToast(message, "info");
+      }
+      refetchBookings();
+      refetchBroadcast();
+      refetchToday();
+      refetchTomorrow();
+    };
+    const onAssigned = (e) => {
+      const d = e?.detail || {};
+      const id = d.bookingId ? String(d.bookingId) : null;
+      const wonByMe = myId && d.assignedCookId && String(d.assignedCookId) === myId;
+      closeIfOpen(
+        id,
+        id && !wonByMe ? "This request was just accepted — it is no longer available." : null
+      );
+    };
+    const onExpired = (e) => {
+      const d = e?.detail || {};
+      const id = d.bookingId ? String(d.bookingId) : null;
+      closeIfOpen(id, id ? "This request expired — the slot was released." : null);
+    };
+    const onIgnored = (e) => {
+      const d = e?.detail || {};
+      if (myId && d.cookId && String(d.cookId) === myId) {
+        refetchBroadcast();
+      }
+    };
+    window.addEventListener("realtime-booking-request", onRequest);
+    window.addEventListener("realtime-booking-assigned", onAssigned);
+    window.addEventListener("realtime-booking-expired", onExpired);
+    window.addEventListener("realtime-booking-ignored", onIgnored);
+    return () => {
+      window.removeEventListener("realtime-booking-request", onRequest);
+      window.removeEventListener("realtime-booking-assigned", onAssigned);
+      window.removeEventListener("realtime-booking-expired", onExpired);
+      window.removeEventListener("realtime-booking-ignored", onIgnored);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?._id, user?.id]);
+
   useEffect(() => {
     if (!bookings?.length) return;
     if (!firstLoadDone.current) {
@@ -66,14 +166,11 @@ const CookDashboard = () => {
             });
           }
         } catch {
-          // optional
         }
       }
     });
   }, [bookings, showToast]);
 
-  // Clicking anywhere on a booking card (except its own buttons/links)
-  // opens that booking's details page.
   const openBooking = (e, bookingId) => {
     if (e.target.closest("button, a, input, select, textarea")) return;
     navigate(`/bookings/${bookingId}`);
@@ -85,25 +182,14 @@ const CookDashboard = () => {
     }
   };
 
-  const handleAction = async (bookingId, action) => {
-    try {
-      await API.patch(`/bookings/${bookingId}/${action}`);
-      showToast(
-        action === "accept" ? "Booking accepted" : action === "reject" ? "Booking declined" : `Booking ${action}d`,
-        action === "reject" ? "info" : "success"
-      );
-      refetchBookings();
-    } catch (err) {
-      showToast(err.response?.data?.message || `Failed to ${action} booking`, "error");
-    }
-  };
-
-  const handleCancel = async (bookingId) => {    if (cancellingId) return;
-    if (!window.confirm("Are you sure you want to cancel this booking session?")) return;
+  const handleCancel = async () => {
+    const bookingId = pendingCancelId;
+    if (cancellingId || !bookingId) return;
+    setPendingCancelId(null);
     setCancellingId(bookingId);
     try {
-      await API.patch(`/bookings/${bookingId}/cancel`);
-      showToast("Booking cancelled successfully", "info");
+      const res = await API.patch(`/bookings/${bookingId}/cancel`);
+      showToast(res.data?.deleted ? "Booking cancelled and removed (no payment was made)." : "Booking cancelled successfully", "info");
       refetchBookings();
     } catch (err) {
       showToast(err.response?.data?.message || "Failed to cancel booking", "error");
@@ -112,19 +198,68 @@ const CookDashboard = () => {
     }
   };
 
-  const getStatusLabel = (status) => {
+  const handleRequestAction = async (booking, action) => {
+    if (actingOn || !booking?._id) return;
+    setActingOn(booking._id);
+    try {
+      const res = await API.patch(`/bookings/${booking._id}/${action}`);
+      if (action === "accept") {
+        showToast("Booking accepted — the customer has 5 minutes to pay.", "success");
+      } else if (res.data?.ignored) {
+        showToast("Request ignored — the customer is still waiting for another cook.", "info");
+      } else {
+        showToast("Booking request ignored.", "info");
+      }
+      handledRequestIds.current.add(String(booking._id));
+      if (String(requestModalBooking?._id) === String(booking._id)) {
+        setRequestModalBooking(null);
+      }
+      refetchAllRequests();
+      popNextPendingRequest(booking._id);
+    } catch (err) {
+      const gone = err.response?.status === 410 || err.response?.status === 409;
+      showToast(
+        err.response?.data?.code === "BOOKING_ALREADY_ASSIGNED"
+          ? "This request has already been accepted by another cook."
+          : err.response?.data?.message || `Failed to ${action} booking`,
+        "error"
+      );
+      if (gone) {
+        handledRequestIds.current.add(String(booking._id));
+        if (String(requestModalBooking?._id) === String(booking._id)) {
+          setRequestModalBooking(null);
+        }
+        refetchAllRequests();
+        popNextPendingRequest(booking._id);
+      }
+    } finally {
+      setActingOn(null);
+    }
+  };
+
+  const isPaidBooking = (b) => b?.payment?.status === "paid";
+  const getStatusLabel = (booking) => {
+    const status = typeof booking === "string" ? booking : booking?.status;
     switch (status) {
       case "requested":
         return <span className="badge badge-amber">Action Needed</span>;
       case "accepted":
+        if (typeof booking !== "string" && !isPaidBooking(booking)) {
+          return <span className="badge badge-amber">Awaiting Payment</span>;
+        }
+        return <span className="badge badge-blue">Scheduled</span>;
       case "confirmed":
         return <span className="badge badge-blue">Scheduled</span>;
       case "in_progress":
         return <span className="badge badge-purple">In Progress</span>;
       case "completed":
         return <span className="badge badge-emerald">Completed</span>;
+      case "unattended":
+        return <span className="badge badge-rose">Unattended</span>;
       case "rejected":
         return <span className="badge badge-rose">Declined</span>;
+      case "expired":
+        return <span className="badge badge-slate">Expired — No Response</span>;
       case "cancelled":
         return <span className="badge badge-slate">Cancelled</span>;
       default:
@@ -132,36 +267,60 @@ const CookDashboard = () => {
     }
   };
 
-  // Counts for the greeting + tabs. Per-booking payment badges show earnings
-  // where they matter (on each card).
-  const pendingRequests = bookings?.filter((b) => b.status === "requested")?.length || 0;
+  const directPending = bookings?.filter((b) => b.status === "requested")?.length || 0;
+  const broadcastPending = (broadcastRequests || []).filter((b) => b.status === "requested")?.length || 0;
+  const pendingRequests = directPending + broadcastPending;
 
-  // Views: needs-action (new requests) vs upcoming (all live) vs previous.
-  const isPrevious = (b) => ["completed", "cancelled", "rejected"].includes(b.status);  // Actionable first: new requests on top, then scheduled, then by date.
-  const statusRank = (s) =>
-    ({ requested: 0, accepted: 1, confirmed: 1, in_progress: 2 }[s] ?? 3);
-  const visibleBookings = [...(bookings || [])]
+  const isPrevious = (b) => ["completed", "cancelled", "rejected"].includes(b.status);
+  const tomorrowStr = (() => {
+    const m = String(today || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return localTomorrowStr();
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    d.setDate(d.getDate() + 1);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  })();
+  const isTodayBooking = (b) => getLocalDateStr(b?.date) === today;
+  const isTomorrowBooking = (b) => getLocalDateStr(b?.date) === tomorrowStr;
+  const isNotCancelled = (b) => b?.status !== 'cancelled';
+  const createdMs = (b) => {
+    const t = new Date(b?.createdAt).getTime();
+    return Number.isFinite(t) ? t : 0;
+  };
+  const byNewest = (a, b) =>
+    createdMs(b) - createdMs(a) ||
+    String(b._id || "").localeCompare(String(a._id || ""));
+  const SCHEDULED_STATUSES = ["accepted", "confirmed", "in_progress", "completed"];
+  const isScheduledBooking = (b) =>
+    isPaidBooking(b) && SCHEDULED_STATUSES.includes(b?.status);
+  const scheduledTodayList = [...(scheduledToday || [])].filter(isScheduledBooking);
+  const scheduledTomorrowList = [...(scheduledTomorrow || [])].filter(isScheduledBooking);
+  const visibleBookings = (view === 'needs-action'
+    ? [...(bookings || []), ...(broadcastRequests || [])]
+    : view === 'today'
+      ? scheduledTodayList
+      : view === 'tomorrow'
+        ? scheduledTomorrowList
+        : [...(bookings || [])]
+  )
+    .filter((b) => !isUnpaidCancelled(b))
     .filter((b) => {
-      if (view === "needs-action") return b.status === "requested";
-      if (view === "upcoming") return !isPrevious(b);
-      if (view === "previous") return isPrevious(b);
+      if (view === 'today') return isTodayBooking(b) && isNotCancelled(b) && isScheduledBooking(b);
+      if (view === 'tomorrow') return isTomorrowBooking(b) && isNotCancelled(b) && isScheduledBooking(b);
+      if (view === 'needs-action') return b.status === 'requested';
+      if (view === 'upcoming') return !isPrevious(b);
+      if (view === 'previous') return isPrevious(b);
       return true;
     })
-    .sort((a, b) => {
-      if (view === "previous") return new Date(b.date) - new Date(a.date);
-      return statusRank(a.status) - statusRank(b.status) || new Date(a.date) - new Date(b.date);
-    });
-  const previousCount = (bookings || []).filter(isPrevious).length;
-  const upcomingCount = (bookings || []).length - previousCount;
-  const completedCount = bookings?.filter((b) => b.status === "completed")?.length || 0;
-  // Paid-out earnings (real gateway payments only — mirrors the server rule).
-  const totalEarned = (bookings || []).reduce(
-    (s, b) =>
-      b.payment?.status === "paid" && b.payment?.razorpayPaymentId
-        ? s + Number(b.payment?.paidAmount || 0)
-        : s,
-    0
-  );
+    .sort((a, b) =>
+      view === 'today' || view === 'tomorrow'
+        ? String(a.startTime || "").localeCompare(String(b.startTime || "")) || byNewest(a, b)
+        : byNewest(a, b)
+    );
+  const previousCount = (bookings || []).filter((b) => isPrevious(b) && !isUnpaidCancelled(b)).length;
+  const todayCount = scheduledTodayList.length;
+  const tomorrowCount = scheduledTomorrowList.length;
+  const upcomingCount = (bookings || []).filter((b) => !isPrevious(b) && !isUnpaidCancelled(b)).length;
   const ratingCount = cookProfile?.rating?.count ?? myReviews?.length ?? 0;
   const avgRating =
     cookProfile?.rating?.average ||
@@ -171,14 +330,75 @@ const CookDashboard = () => {
   const firstName = user?.name?.split(" ")[0] || "Chef";
   const approval = cookProfile?.approvalStatus;
 
+  const alertNewRequest = () => {
+    playAlarmSound();
+  };
+
+  useEffect(() => {
+    if (!bookings && !broadcastRequests) return;
+    const requested = [...(bookings || []), ...(broadcastRequests || [])]
+      .filter((b) => b?.status === "requested" && !handledRequestIds.current.has(String(b?._id)))
+      .sort(byNewest);
+    if (!requestsInit.current) {
+      requestsInit.current = true;
+      if (!requested.length) return;
+      requested.slice(1).forEach((b) => seenRequestIds.current.add(String(b._id)));
+      const newest = requested[0];
+      seenRequestIds.current.add(String(newest._id));
+      if (!requestModalBooking) {
+        setRequestModalBooking(newest);
+        alertNewRequest();
+      }
+      return;
+    }
+    const fresh = requested.filter((b) => !seenRequestIds.current.has(String(b._id)));
+    if (!fresh.length) return;
+    fresh.forEach((b) => seenRequestIds.current.add(String(b._id)));
+    if (!requestModalBooking) {
+      const newest = [...fresh].sort(byNewest)[0];
+      setRequestModalBooking(newest);
+      alertNewRequest();
+    } else {
+      playAlarmSound();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookings, broadcastRequests]);
+
+  const popNextPendingRequest = (excludeId) => {
+    const next = [...(bookings || []), ...(broadcastRequests || [])]
+      .filter(
+        (b) =>
+          b?.status === "requested" &&
+          String(b._id) !== String(excludeId || "") &&
+          !handledRequestIds.current.has(String(b._id))
+      )
+      .sort(byNewest)[0];
+    if (next) {
+      seenRequestIds.current.add(String(next._id));
+      setTimeout(() => {
+        setRequestModalBooking(next);
+        alertNewRequest();
+      }, 350);
+    }
+  };
+
   return (
     <div className="dashboard-container cook-dash">
-      {/* Hero — greeting, verification, rating, availability */}
       <div className="cook-modern-hero cook-hero">
         <div className="cook-modern-hero-inner">
-          <div className="cook-modern-avatar-wrap">
-            {cookProfile?.photoUrl ? (
-              <img src={resolveFileUrl(cookProfile.photoUrl)} alt={user?.name || "Cook"} className="cook-modern-avatar" />
+          <Link
+            to="/dashboard/cook-profile"
+            className="cook-modern-avatar-wrap cook-modern-avatar-link cook-hero-avatar-hide-mobile"
+            title="Go to your profile"
+            aria-label="Go to your profile"
+          >
+            {cookProfile?.photoUrl && photoOk ? (
+              <img
+                src={resolveFileUrl(cookProfile.photoUrl)}
+                alt={user?.name || "Cook"}
+                className="cook-modern-avatar"
+                onError={() => setPhotoOk(false)}
+              />
             ) : (
               <span className="cook-modern-avatar-fallback">
                 {firstName?.[0]?.toUpperCase() || <ChefHat size={32} />}
@@ -187,7 +407,7 @@ const CookDashboard = () => {
             {approval === "approved" && (
               <span className="verified-dot" title="Verified cook">✓</span>
             )}
-          </div>
+          </Link>
           <div className="cook-modern-hero-copy">
             <h1 className="cook-hero-title">Hello, {firstName}</h1>
             <p className="cook-hero-sub">
@@ -195,7 +415,7 @@ const CookDashboard = () => {
                 ? `${pendingRequests} new request${pendingRequests === 1 ? "" : "s"} waiting for you`
                 : "You're all caught up — relax!"}
             </p>
-            <div className="cook-hero-badges">
+            <div className="cook-hero-badges cook-hero-badges-hide-mobile">
               {approval === "approved" ? (
                 <span className="hero-pill ok">Verified cook</span>
               ) : approval === "rejected" ? (
@@ -218,19 +438,23 @@ const CookDashboard = () => {
               availabilityStatus={cookProfile?.availabilityStatus}
               onChanged={() => refetchCookProfile()}
             />
-            <button type="button" className="cook-glass-btn" onClick={() => setView("profile")}>
-              <UserRound size={15} /> Profile
-            </button>
-            <Link className="cook-glass-btn" to="/dashboard/cook-reviews">
-              <Star size={15} /> Reviews
-            </Link>
+            <div className="cook-hero-btn-row">
+              <button type="button" className="cook-glass-btn" onClick={() => setView("profile")}>
+                <UserRound size={15} /> Profile
+              </button>
+              <Link className="cook-glass-btn" to="/dashboard/cook-reviews">
+                <Star size={15} /> Reviews
+              </Link>
+              <Link className="cook-glass-btn" to="/cook/earnings">
+                <Wallet size={15} /> Earnings
+              </Link>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Stat shortcuts */}
       <div className="cook-stats-grid">
-        <button type="button" className="cook-stat-card" onClick={() => setView("needs-action")}>
+        <button type="button" className="cook-stat-card cook-stat-mob-hide" onClick={() => setView("needs-action")}>
           <div className="cook-stat-icon amber">
             <Inbox size={24} />
           </div>
@@ -239,7 +463,7 @@ const CookDashboard = () => {
             <div className="cook-stat-label">New requests</div>
           </div>
         </button>
-        <button type="button" className="cook-stat-card" onClick={() => setView("upcoming")}>
+        <button type="button" className="cook-stat-card cook-stat-mob-hide" onClick={() => setView("upcoming")}>
           <div className="cook-stat-icon blue">
             <CalendarDays size={24} />
           </div>
@@ -248,16 +472,7 @@ const CookDashboard = () => {
             <div className="cook-stat-label">Upcoming</div>
           </div>
         </button>
-        <button type="button" className="cook-stat-card" onClick={() => setView("previous")}>
-          <div className="cook-stat-icon emerald">
-            <Wallet size={24} />
-          </div>
-          <div>
-            <div className="cook-stat-num small-amount">{formatCurrency(totalEarned)}</div>
-            <div className="cook-stat-label">Earned · {completedCount} done</div>
-          </div>
-        </button>
-        <Link className="cook-stat-card" to="/dashboard/cook-reviews">
+        <Link className="cook-stat-card cook-stat-mob-hide" to="/dashboard/cook-reviews">
           <div className="cook-stat-icon brand">
             <Star size={24} />
           </div>
@@ -267,6 +482,7 @@ const CookDashboard = () => {
           </div>
         </Link>
       </div>
+
 
       {!loadingProfile && (!cookProfile || approval !== "approved") && (
         <div className="cook-notice cook-notice-amber">
@@ -284,13 +500,18 @@ const CookDashboard = () => {
         </div>
       )}
 
-      {/* Tabs */}
       <div className="cook-tabs">
         <button
-          className={`cook-tab ${view === "needs-action" ? "active" : ""}`}
-          onClick={() => setView("needs-action")}
+          className={`cook-tab ${view === "today" ? "active" : ""}`}
+          onClick={() => setView("today")}
         >
-          <Inbox size={15} /> New <span className="cook-tab-count">{pendingRequests}</span>
+          <CalendarCheck size={15} /> Today <span className="cook-tab-count">{todayCount}</span>
+        </button>
+        <button
+          className={`cook-tab ${view === "tomorrow" ? "active" : ""}`}
+          onClick={() => setView("tomorrow")}
+        >
+          <CalendarClock size={15} /> Tomorrow <span className="cook-tab-count">{tomorrowCount}</span>
         </button>
         <button
           className={`cook-tab ${view === "upcoming" ? "active" : ""}`}
@@ -318,17 +539,14 @@ const CookDashboard = () => {
           <span className="cook-tab-count">{(myComplaints || []).length}</span>
         </button>
         <button
-          className={`cook-tab ${view === "slots" ? "active" : ""}`}
-          onClick={() => setView("slots")}
-        >
-          <Clock size={15} /> Slots
-        </button>
-        <button
           className={`cook-tab ${view === "profile" ? "active" : ""}`}
           onClick={() => setView("profile")}
         >
           <UserRound size={15} /> Profile
         </button>
+        <Link className="cook-tab" to="/cook/earnings">
+          <Wallet size={15} /> Earnings
+        </Link>
       </div>
 
       {/* BOOKINGS VIEWS */}
@@ -337,99 +555,187 @@ const CookDashboard = () => {
 
           {loadingBookings && <p className="cook-loading-text">Loading bookings...</p>}
 
+          {!loadingBookings && refreshingBookings && (
+            <div className="cook-syncing-pill" aria-live="polite" aria-label="Syncing bookings">
+              <span className="cook-syncing-dot" />
+              Syncing…
+            </div>
+          )}
+
           {bookingError && <p className="error">{bookingError}</p>}
 
-          {!loadingBookings && bookings && bookings.length > 0 ? (
+          {bookings && bookings.length > 0 ? (
             visibleBookings.length > 0 ? (
-            <div className="bookings-list-modern">
+            <div className="bookings-list-modern cook-bookings-grid">
               {visibleBookings.map((booking) => (
                 <div
                   key={booking._id}
-                  className={`booking-item-card cook-booking-card st-${booking.status} clickable`}
+                  className={`booking-item-card cook-booking-card cb-card st-${booking.status} clickable`}
+                  data-status={booking.status}
                   onClick={(e) => openBooking(e, booking._id)}
                   onKeyDown={(e) => openBookingKey(e, booking._id)}
                   role="button"
                   tabIndex={0}
                   aria-label={`Open booking details for ${booking.customer?.name || "booking"}`}
                 >
-                  <div className="cook-card-top">
-                    <div className="cook-customer-row">
-                      <span className="cook-avatar">
+                  <div className="cb-top">
+                    <div className="cb-id">
+                      <span className="cook-avatar cb-avatar" aria-hidden="true">
                         {booking.customer?.name?.[0]?.toUpperCase() || "C"}
                       </span>
-                      <div className="cook-customer-meta">
-                        <h3>{booking.customer?.name || "Client"}</h3>
-                        <p className="cook-when">
-                          <CalendarDays size={13} />
-                          {formatDate(booking.date)} · {booking.startTime} - {booking.endTime}
+                      <div className="cb-id-text">
+                        <div className="cb-name-row">
+                          <h3>{booking.customer?.name || "Client"}</h3>
+                          {(() => {
+                            const tag = dayTagLabel(booking, today);
+                            return tag ? (
+                              <span
+                                className={`cook-day-tag ${tag === "Today" ? "is-today" : "is-tomorrow"}`}
+                              >
+                                {tag}
+                              </span>
+                            ) : null;
+                          })()}
+                        </div>
+                        <p className="cb-sub">
+                          {booking.serviceType ? (
+                            <span className="cb-sub-item">
+                              <Soup size={12} />
+                              {String(booking.serviceType).replace(/_/g, " ")}
+                            </span>
+                          ) : null}
+                          {booking.guests ? (
+                            <span className="cb-sub-item">
+                              <Users size={12} />
+                              {booking.guests} guest{Number(booking.guests) === 1 ? "" : "s"}
+                            </span>
+                          ) : null}
+                          {!booking.serviceType && !booking.guests ? (
+                            <span className="cb-sub-item">Booking #{String(booking._id || "").slice(-6).toUpperCase()}</span>
+                          ) : null}
                         </p>
-                        {booking.address && (
-                          <p className="cook-addr">
-                            <MapPin size={13} />
-                            <span>{booking.address}</span>
-                          </p>
-                        )}
                       </div>
                     </div>
-                    <div>{getStatusLabel(booking.status)}</div>
+                    <div className="cb-badges">{getStatusLabel(booking)}</div>
                   </div>
 
-                  <div className="cook-money">
-                    <span className="cook-money-amount">
-                      {formatCurrency(booking.payment?.status === "paid"
-                        ? booking.payment.paidAmount || booking.amount || 0
-                        : booking.amount || 0)}
-                    </span>
-                    {booking.payment?.status === "paid" ? (
-                      <span className="cook-pay-pill paid"><Check size={12} /> Paid</span>
-                    ) : (
-                      <span className="cook-pay-pill unpaid">Unpaid</span>
+                  <div className="cb-meta">
+                    <div className="cb-meta-item">
+                      <span className="cb-meta-ico" aria-hidden="true">
+                        <CalendarDays size={15} />
+                      </span>
+                      <div>
+                        <span className="cb-meta-label">When</span>
+                        {(() => {
+                          const tag = dayTagLabel(booking, today);
+                          return tag ? (
+                            <span className="cb-meta-value">{formatTimeRange12(booking.startTime, booking.endTime, "-")}</span>
+                          ) : (
+                            <span className="cb-meta-value">{formatDate(booking.date)} · {formatTimeRange12(booking.startTime, booking.endTime, "-")}</span>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                    {(booking.address || booking.addressDetails?.society || booking.location?.lat != null) && (
+                      <div className="cb-meta-item cb-meta-where">
+                        <div>
+                          <span className="cb-meta-label">Customer location</span>
+                          <span className="cb-meta-value cb-where-text">
+                            <MapPin size={14} className="cb-where-icon" aria-hidden="true" />
+                            {customerLocationLabel(booking) || "Customer location"}
+                          </span>
+                          {mapsNavigateUrl(booking) && (
+                            <a
+                              className="cook-addr-directions cb-directions"
+                              href={mapsNavigateUrl(booking)}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              aria-label="Open customer's location in Google Maps"
+                            >
+                              <Navigation size={15} />
+                              {booking.location?.lat != null ? "Open GPS pin in Maps" : "Get Directions"}
+                            </a>
+                          )}
+                        </div>
+                      </div>
                     )}
                   </div>
 
                   {booking.notes && (
-                    <p className="cook-card-note">
-                      Note: {booking.notes}
+                    <p className="cb-note">
+                      <span className="cb-note-label">Note</span> {booking.notes}
                     </p>
                   )}
 
                   {booking.hoursCompleted && (
-                    <div className="cook-hours-done">
+                    <div className="cb-hours-done">
                       <BellRing size={16} />
                       <span>Cooking hours complete — please wrap up the session.</span>
                     </div>
                   )}
 
                   {booking.status === "requested" && (
-                    <div className="booking-actions-row">
-                      <button className="btn btn-success" onClick={() => handleAction(booking._id, "accept")}>
-                        <Check size={16} /> Accept
+                    <div className="booking-actions-row cb-actions cook-request-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        disabled={actingOn === booking._id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRequestAction(booking, "accept");
+                        }}
+                        aria-label={`Accept booking from ${booking.customer?.name || "customer"}`}
+                      >
+                        <Check size={16} /> {actingOn === booking._id ? "Accepting…" : "Accept"}
                       </button>
-                      <button className="btn btn-danger-outline" onClick={() => handleAction(booking._id, "reject")}>
-                        <X size={16} /> Decline
+                      <button
+                        type="button"
+                        className="btn btn-danger-outline"
+                        disabled={actingOn === booking._id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRequestAction(booking, "reject");
+                        }}
+                        aria-label={`Ignore booking from ${booking.customer?.name || "customer"}`}
+                      >
+                        <XCircle size={16} /> {actingOn === booking._id ? "Ignoring…" : "Ignore"}
                       </button>
-                      <Link to={`/bookings/${booking._id}`} className="btn btn-outline btn-sm">
-                        Open <ArrowRight size={15} />
-                      </Link>
                     </div>
                   )}
 
-                  {["accepted", "confirmed", "in_progress"].includes(booking.status) && (
-                    <div className="booking-actions-row">
+                  {booking.status === "accepted" && !isPaidBooking(booking) && (
+                    <div className="cb-hours-done" style={{ borderStyle: "dashed" }}>
+                      <BellRing size={16} />
+                      <span>Booking accepted — waiting for customer payment. It will appear in Today/Tomorrow once paid.</span>
+                    </div>
+                  )}
+
+                  {["accepted", "confirmed", "in_progress"].includes(booking.status) && isPaidBooking(booking) && (
+                    <div className="booking-actions-row cb-actions">
                       <Link to={`/bookings/${booking._id}`} className="btn btn-outline btn-sm">
                         {booking.serviceStartedAt ? "View more" : "Start with OTP"} <ArrowRight size={15} />
                       </Link>
-                      {/* No manual complete here by design — bookings complete
-                          automatically once the service hours end. */}
-                      {!hasServiceHoursStarted(booking) && (
+                      {!booking.serviceStartedAt && !isCancelLocked(booking) && (
                         <button
                           className="btn btn-danger-outline btn-sm"
-                          onClick={() => handleCancel(booking._id)}
+                          onClick={() => setPendingCancelId(booking._id)}
                           disabled={cancellingId === booking._id}
                         >
                           <XCircle size={16} /> {cancellingId === booking._id ? "Cancelling…" : "Cancel Booking"}
                         </button>
                       )}
+                    </div>
+                  )}
+                  {booking.status === "accepted" && !isPaidBooking(booking) && !booking.serviceStartedAt && !isCancelLocked(booking) && (
+                    <div className="booking-actions-row cb-actions">
+                      <button
+                        className="btn btn-danger-outline btn-sm"
+                        onClick={() => setPendingCancelId(booking._id)}
+                        disabled={cancellingId === booking._id}
+                      >
+                        <XCircle size={16} /> {cancellingId === booking._id ? "Cancelling…" : "Cancel Booking"}
+                      </button>
                     </div>
                   )}
                 </div>
@@ -438,17 +744,39 @@ const CookDashboard = () => {
             ) : (
               <div className="cook-empty">
                 <div className="cook-empty-icon">
-                  {view === "needs-action" ? <Inbox size={28} /> : view === "upcoming" ? <CalendarDays size={28} /> : <History size={28} />}
+                  {view === "needs-action" ? (
+                    <Inbox size={28} />
+                  ) : view === "today" ? (
+                    <CalendarCheck size={28} />
+                  ) : view === "tomorrow" ? (
+                    <CalendarClock size={28} />
+                  ) : view === "upcoming" ? (
+                    <CalendarDays size={28} />
+                  ) : (
+                    <History size={28} />
+                  )}
                 </div>
                 <h3>
-                  {view === "needs-action" ? "No new requests" : view === "upcoming" ? "Nothing scheduled" : "No past bookings"}
+                  {view === "needs-action"
+                    ? "No new requests"
+                    : view === "today"
+                    ? "No bookings today"
+                    : view === "tomorrow"
+                    ? "No bookings tomorrow"
+                    : view === "upcoming"
+                    ? "Nothing scheduled"
+                    : "No past bookings"}
                 </h3>
                 <p>
                   {view === "needs-action"
                     ? "You're all caught up — new booking requests will pop up here."
+                    : view === "today"
+                    ? "Paid, confirmed bookings for today will show up here. Accepted requests appear once the customer pays."
+                    : view === "tomorrow"
+                    ? "Paid, confirmed bookings for tomorrow will show up here. Accepted requests appear once the customer pays."
                     : view === "upcoming"
                     ? "Accepted bookings will appear here with everything you need for the day."
-                    : "Completed, cancelled and declined bookings will show up here."}
+                    : "Settled bookings (done or declined) will show up here."}
                 </p>
               </div>
             )
@@ -494,38 +822,57 @@ const CookDashboard = () => {
               <p>If a customer causes trouble, report it from the booking and track it here.</p>
             </div>
           ) : (
-            <div className="bookings-list-modern">
+            <div className="bookings-list-modern cook-bookings-grid">
               {(myComplaints || []).map((c) => (
-                <div key={c._id} className="booking-item-card">
-                  <div className="cook-card-top">
-                    <div>
-                      <h3 style={{ margin: 0, textTransform: "capitalize" }}>
-                        {(c.category || "other").replace(/_/g, " ")}
-                      </h3>
-                      <p className="cook-when">
-                        {c.booking?.date ? formatDate(c.booking.date) : ""}{" "}
-                        {c.customer?.name ? `· ${c.customer.name}` : ""}
-                      </p>
+                <div key={c._id} className="booking-item-card cook-booking-card cb-card">
+                  <div className="cb-top">
+                    <div className="cb-id">
+                      <span className="cook-avatar cb-avatar" aria-hidden="true">
+                        <ShieldCheck size={18} />
+                      </span>
+                      <div className="cb-id-text">
+                        <div className="cb-name-row">
+                          <h3 style={{ textTransform: "capitalize" }}>
+                            {(c.category || "other").replace(/_/g, " ")}
+                          </h3>
+                        </div>
+                        <p className="cb-sub">
+                          {c.booking?.date ? (
+                            <span className="cb-sub-item">
+                              <CalendarDays size={12} />
+                              {formatDate(c.booking.date)}
+                            </span>
+                          ) : null}
+                          {c.customer?.name ? (
+                            <span className="cb-sub-item">
+                              <UserRound size={12} />
+                              {c.customer.name}
+                            </span>
+                          ) : null}
+                        </p>
+                      </div>
                     </div>
-                    <span
-                      className={`badge ${
-                        c.status === "resolved"
-                          ? "badge-emerald"
-                          : c.status === "rejected"
-                            ? "badge-rose"
-                            : c.status === "in_review"
-                              ? "badge-blue"
-                              : "badge-amber"
-                      }`}
-                      style={{ textTransform: "capitalize" }}
-                    >
-                      {(c.status || "open").replace(/_/g, " ")}
-                    </span>
+                    <div className="cb-badges">
+                      <span
+                        className={`badge ${
+                          c.status === "resolved"
+                            ? "badge-emerald"
+                            : c.status === "rejected"
+                              ? "badge-rose"
+                              : c.status === "in_review"
+                                ? "badge-blue"
+                                : "badge-amber"
+                        }`}
+                        style={{ textTransform: "capitalize" }}
+                      >
+                        {(c.status || "open").replace(/_/g, " ")}
+                      </span>
+                    </div>
                   </div>
-                  <p className="cook-card-note">{c.message}</p>
+                  <p className="cb-note">{c.message}</p>
                   {c.adminNote && (
-                    <p className="cook-card-note">
-                      <strong>Support reply:</strong> {c.adminNote}
+                    <p className="cb-note">
+                      <span className="cb-note-label">Support reply</span> {c.adminNote}
                     </p>
                   )}
                 </div>
@@ -535,16 +882,43 @@ const CookDashboard = () => {
         </div>
       )}
 
-      {/* SLOTS TAB: publish/block availability windows per day. */}
-      {view === "slots" && <SlotManager />}
-
-      {/* PROFILE TAB: cook profile + recent reviews */}
       {view === "profile" && (
         <div>
           <CookProfileManager onSaved={() => refetchCookProfile()} />
+          {cookProfile && (
+            <CookScheduleEditor profile={cookProfile} onSaved={() => refetchCookProfile()} />
+          )}
+          {cookProfile && <CookPayoutPanel />}
           <RecentReviewsPreview reviews={myReviews} loading={loadingReviews} />
         </div>
       )}
+
+      <BookingRequestModal
+        open={!!requestModalBooking}
+        onClose={() => {
+          const closedId = requestModalBooking?._id;
+          if (closedId) handledRequestIds.current.add(String(closedId));
+          setRequestModalBooking(null);
+          popNextPendingRequest(closedId);
+        }}
+        booking={requestModalBooking}
+        onAction={() => {
+          const actedId = requestModalBooking?._id;
+          if (actedId) handledRequestIds.current.add(String(actedId));
+          refetchAllRequests();
+          popNextPendingRequest(actedId);
+        }}
+      />
+      <ConfirmDialog
+        open={!!pendingCancelId}
+        title="Cancel this booking session?"
+        message="The customer will be notified and the slot will be released. This cannot be undone."
+        confirmLabel="Yes, cancel it"
+        tone="danger"
+        busy={!!cancellingId}
+        onCancel={() => setPendingCancelId(null)}
+        onConfirm={handleCancel}
+      />
     </div>
   );
 };
@@ -597,139 +971,6 @@ const RecentReviewsPreview = ({ reviews, loading }) => {
   );
 };
 
-// Slots tab: publish availability windows per day (POST /availability) and
-// remove them (DELETE /availability/:id). Days with no windows stay fully
-// open (08:00–20:00); adding a window restricts that day to listed windows.
-// Existing bookings are unaffected by window changes.
-const SlotManager = () => {
-  const showToast = useShowToast();
-  const { data: mySlots, loading, refetch } = useFetch("/availability/my");
-  const [date, setDate] = useState(localTodayStr());
-  const [startTime, setStartTime] = useState("09:00");
-  const [endTime, setEndTime] = useState("13:00");
-  const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
-
-  const dayKey = (d) => {
-    try {
-      return new Date(d).toLocaleDateString("en-CA");
-    } catch {
-      return "";
-    }
-  };
-  const daySlots = (mySlots || [])
-    .filter((s) => dayKey(s.date) === date)
-    .sort((a, b) => String(a.startTime).localeCompare(String(b.startTime)));
-
-  const handleAdd = async (e) => {
-    e.preventDefault();
-    if (!date || !startTime || !endTime) {
-      showToast("Pick a date, start and end time", "error");
-      return;
-    }
-    if (startTime >= endTime) {
-      showToast("End time must be after start time", "error");
-      return;
-    }
-    setSaving(true);
-    try {
-      await API.post("/availability", { date, startTime, endTime });
-      showToast("Availability window added — customers can now book it.", "success");
-      refetch();
-    } catch (err) {
-      showToast(err.response?.data?.message || "Could not add window", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (slot) => {
-    if (!window.confirm(`Remove ${slot.startTime}–${slot.endTime} on ${date}? Existing bookings stay valid.`)) return;
-    setDeletingId(slot._id);
-    try {
-      await API.delete(`/availability/${slot._id}`);
-      showToast("Window removed.", "success");
-      refetch();
-    } catch (err) {
-      showToast(err.response?.data?.message || "Could not remove window", "error");
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  return (
-    <div>
-      <h3 style={{ fontSize: "1.1rem", marginBottom: "0.25rem" }}>Availability windows</h3>
-      <p style={{ color: "var(--slate-500)", fontSize: "0.9rem", marginBottom: "1rem" }}>
-        Days with no windows stay fully open (8 AM – 8 PM). Add windows to restrict a day,
-        or remove them all to reopen it. Use the Available/Unavailable toggle above for full days off.
-      </p>
-      <form onSubmit={handleAdd} className="bk-card" style={{ marginBottom: "1rem" }}>
-        <div className="bk-addr-grid">
-          <input
-            type="date"
-            className="bk-addr-input"
-            value={date}
-            min={localTodayStr()}
-            onChange={(e) => setDate(e.target.value)}
-            required
-          />
-          <input
-            type="time"
-            className="bk-addr-input"
-            value={startTime}
-            onChange={(e) => setStartTime(e.target.value)}
-            required
-          />
-          <input
-            type="time"
-            className="bk-addr-input"
-            value={endTime}
-            onChange={(e) => setEndTime(e.target.value)}
-            required
-          />
-        </div>
-        <button type="submit" className="btn btn-primary btn-sm" disabled={saving} style={{ marginTop: "0.6rem" }}>
-          {saving ? "Adding…" : "Add window"}
-        </button>
-      </form>
-      {loading ? (
-        <p className="cook-loading-text">Loading windows…</p>
-      ) : daySlots.length === 0 ? (
-        <div className="cook-empty">
-          <div className="cook-empty-icon">
-            <Clock size={28} />
-          </div>
-          <h3>Whole day open</h3>
-          <p>No windows on {date || "this date"} — customers can book any time 8 AM – 8 PM.</p>
-        </div>
-      ) : (
-        <div className="bookings-list-modern">
-          {daySlots.map((s) => (
-            <div key={s._id} className="booking-item-card">
-              <div className="cook-card-top">
-                <div>
-                  <h3 style={{ margin: 0 }}>{s.startTime} – {s.endTime}</h3>
-                  <p className="cook-when">{date}</p>
-                </div>
-                <button
-                  className="btn btn-danger-outline btn-sm"
-                  onClick={() => handleDelete(s)}
-                  disabled={deletingId === s._id}
-                >
-                  <X size={15} /> {deletingId === s._id ? "Removing…" : "Remove"}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Profile tab reuses the shared cook profile form (same as the Cook Setup
-// page) so the two can never diverge again.
 const CookProfileManager = ({ onSaved }) => {
   return (
     <div className="cook-profile-wrap">

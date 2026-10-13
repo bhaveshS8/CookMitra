@@ -29,5 +29,6 @@ const availabilitySchema = new mongoose.Schema(
 );
 
 availabilitySchema.index({ cook: 1, date: 1, startTime: 1 }, { unique: true });
+availabilitySchema.index({ cook: 1, status: 1, date: 1 });
 
 module.exports = mongoose.model("Availability", availabilitySchema);

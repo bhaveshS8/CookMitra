@@ -2,8 +2,8 @@ import React from "react";
 import { Link, useParams } from "react-router-dom";
 import { useFetch } from "../hooks/useFetch";
 import AdminDocViewer from "../components/AdminDocViewer";
-import AdminDocUpload from "../components/AdminDocUpload";
-import { formatCurrency, formatDate, SERVICE_DETAILS } from "../utils/constants";
+import { formatCurrency, formatDate, SERVICE_DETAILS, formatTimeRange12, isUnpaidCancelled } from "../utils/constants";
+import "./AdminCookProfile.css";
 import {
   ArrowLeft,
   ChefHat,
@@ -16,6 +16,9 @@ import {
   CalendarCheck,
   CheckCircle2,
   User,
+  Receipt,
+  Undo2,
+  XCircle,
 } from "lucide-react";
 
 const CURRENT_STATUSES = ["requested", "accepted", "confirmed", "in_progress"];
@@ -32,84 +35,86 @@ const fullAddress = (b) => {
   return parts.filter(Boolean).join(", ");
 };
 
+const Stars = ({ value }) => (
+  <span className="dossier-stars" aria-label={`${value} out of 5 stars`}>
+    {[1, 2, 3, 4, 5].map((s) => (
+      <span key={s} className={s <= value ? "" : "off"}>★</span>
+    ))}
+  </span>
+);
+
 const BookingCard = ({ booking }) => (
-  <div className="booking-item-card">
-    <div className="booking-item-top">
+  <div className="dossier-card dossier-booking">
+    <div className="dossier-booking-top">
       <div>
-        <h3 style={{ margin: 0 }}>
+        <h3>
           {booking.customer?.name || "Customer"}
         </h3>
-        <span style={{ fontSize: "0.85rem", color: "var(--slate-500)" }}>
+        <span className="dossier-booking-sub">
           {serviceLabel(booking.serviceType)} • {formatDate(booking.date)} •{" "}
-          {booking.startTime} – {booking.endTime} ({booking.durationHours || "—"} hrs)
+          {formatTimeRange12(booking.startTime, booking.endTime)} ({booking.durationHours || "—"} hrs)
         </span>
       </div>
       <span className="badge badge-festive">{booking.status?.toUpperCase()}</span>
     </div>
 
-    <div className="booking-metadata-grid">
-      <div className="meta-field">
+    <div className="dossier-grid">
+      <div className="dossier-field">
         <label>
-          <User size={13} style={{ verticalAlign: "-2px" }} /> Customer
+          <User size={13} /> Customer
         </label>
-        <span>{booking.customer?.name || "—"}</span>
+        <span className="value">{booking.customer?.name || "—"}</span>
         {booking.customer?.phone && (
-          <span>
+          <span className="value">
             <a
               href={`https://wa.me/91${String(booking.customer.phone).replace(/\D/g, "").slice(-10)}`}
               target="_blank"
               rel="noreferrer"
-              style={{ color: "#16a34a", fontWeight: 600 }}
             >
-              <Phone size={13} style={{ verticalAlign: "-2px" }} /> +91{" "}
+              <Phone size={13} /> +91{" "}
               {String(booking.customer.phone).replace(/\D/g, "").slice(-10)}
             </a>
           </span>
         )}
       </div>
-      <div className="meta-field">
+      <div className="dossier-field">
         <label>
-          <MapPin size={13} style={{ verticalAlign: "-2px" }} /> Service Address
+          <MapPin size={13} /> Service Address
         </label>
-        <span>{fullAddress(booking) || "—"}</span>
+        <span className="value">{fullAddress(booking) || "—"}</span>
       </div>
-      <div className="meta-field">
+      <div className="dossier-field">
         <label>
-          <Wallet size={13} style={{ verticalAlign: "-2px" }} /> Amount
+          <Wallet size={13} /> Amount
         </label>
-        <span style={{ color: "var(--primary)", fontWeight: 700 }}>
+        <span className="value accent">
           {formatCurrency(booking.payment?.paidAmount || booking.amount)}
         </span>
       </div>
-      <div className="meta-field">
+      <div className="dossier-field">
         <label>
-          <Clock size={13} style={{ verticalAlign: "-2px" }} /> Duration
+          <Clock size={13} /> Duration
         </label>
-        <span>{booking.durationHours || "—"} hrs</span>
+        <span className="value">{booking.durationHours || "—"} hrs</span>
       </div>
     </div>
 
-    {/* Customer rating for this service */}
     {booking.status === "completed" && (
       booking.review ? (
-        <div style={{ marginTop: "0.75rem", padding: "0.6rem 0.9rem", background: "var(--accent-amber-light, #fef3c7)", border: "1px solid var(--accent-amber, #f59e0b)", borderRadius: "var(--radius-sm)", fontSize: "0.88rem" }}>
-          <strong>
+        <div className="dossier-review-box">
+          <strong className="dossier-rating-hero">
             ★ {booking.review.rating}/5
-            <span style={{ marginLeft: "0.3rem" }}>
-              {[1, 2, 3, 4, 5].map((s) => (
-                <span key={s} style={{ color: s <= booking.review.rating ? "#f59e0b" : "#cbd5e1" }}>★</span>
-              ))}
-            </span>
+            <Stars value={booking.review.rating} />
           </strong>
           {booking.review.customer?.name && (
-            <span style={{ color: "var(--slate-600)" }}> — {booking.review.customer.name}</span>
+            <span className="who"> — {booking.review.customer.name}</span>
           )}
           {booking.review.comment && (
-            <div style={{ marginTop: "0.25rem", color: "var(--slate-700)" }}>{booking.review.comment}</div>
+            <div className="dossier-review-comment">{booking.review.comment}</div>
           )}
         </div>
       ) : (
-        <div style={{ marginTop: "0.75rem", fontSize: "0.82rem", color: "var(--slate-500)" }}>
+        <div className="dossier-no-rating">
           No customer rating yet for this service.
         </div>
       )
@@ -117,9 +122,199 @@ const BookingCard = ({ booking }) => (
   </div>
 );
 
+const statusBadge = (status) => {
+  switch (status) {
+    case "completed":
+      return "badge-emerald";
+    case "cancelled":
+      return "badge-rose";
+    case "rejected":
+    case "expired":
+    case "failed":
+      return "badge-slate";
+    default:
+      return "badge-amber";
+  }
+};
+
+const payoutChip = (payoutStatus) => {
+  switch (payoutStatus) {
+    case "paid":
+      return { cls: "positive", label: "Payout paid" };
+    case "approved":
+      return { cls: "info", label: "Payout approved" };
+    case "held":
+      return { cls: "danger", label: "Payout held" };
+    case "rejected":
+      return { cls: "neutral", label: "Payout rejected" };
+    default:
+      return { cls: "warning", label: "Payout pending" };
+  }
+};
+
+const PastBookingCard = ({ booking }) => {
+  const pay = booking.payment || {};
+  const info = booking.payoutInfo || {};
+  const cancel = booking.cancellationInfo || {};
+  const settled = booking.payout?.status === "settled";
+  const payout = payoutChip(info.payoutStatus);
+  const cookPayout = Number(info.cookPayoutAmount || booking.cookPayout || 0);
+  const showRefund = pay.refundStatus && !["none", "rejected"].includes(pay.refundStatus);
+  const cancelReason = cancel.cancellationReasonNote || cancel.cancellationReason || "";
+  const who = cancel.cancelledBy || booking.cancelledBy || "";
+  const customerInitial = String(booking.customer?.name || "C").trim().charAt(0).toUpperCase();
+
+  return (
+    <div className={`dossier-card dossier-booking dossier-past st-${booking.status || "unknown"}`}>
+      <div className="dossier-booking-top">
+        <div className="dossier-past-head">
+          <span className="dossier-past-ava" aria-hidden="true">{customerInitial}</span>
+          <div>
+            <h3>
+              {booking.customer?.name || "Customer"}
+            </h3>
+            <span className="dossier-booking-sub">
+              {serviceLabel(booking.serviceType)} • {formatDate(booking.date)} •{" "}
+              {formatTimeRange12(booking.startTime, booking.endTime)} ({booking.durationHours || "—"} hrs)
+            </span>
+          </div>
+        </div>
+        <span className={`badge ${statusBadge(booking.status)} dossier-status`}>
+          <span className="dot" aria-hidden="true" />{booking.status?.toUpperCase()}
+        </span>
+      </div>
+
+      <div className="dossier-past-grid">
+        <div className="dossier-tile">
+          <label>
+            <User size={12} /> Customer
+          </label>
+          <span className="t-value">{booking.customer?.name || "—"}</span>
+          {booking.customer?.phone && (
+            <span className="t-sub">
+              <a
+                href={`https://wa.me/91${String(booking.customer.phone).replace(/\D/g, "").slice(-10)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <Phone size={12} /> +91{" "}
+                {String(booking.customer.phone).replace(/\D/g, "").slice(-10)}
+              </a>
+            </span>
+          )}
+        </div>
+        <div className="dossier-tile">
+          <label>
+            <MapPin size={12} /> Service Address
+          </label>
+          <span className="t-value">{fullAddress(booking) || "—"}</span>
+        </div>
+        <div className="dossier-tile highlight">
+          <label>
+            <Wallet size={12} /> Customer Paid
+          </label>
+          <span className="t-value">
+            {formatCurrency(pay.paidAmount || booking.amount)}
+          </span>
+          <span className="t-sub">payment: {pay.status || "—"}</span>
+        </div>
+        <div className="dossier-tile">
+          <label>
+            <Receipt size={12} /> Cook Payout
+          </label>
+          <span className="t-value">{cookPayout ? formatCurrency(cookPayout) : "—"}</span>
+          {info.payoutCycleRef && (
+            <span className="t-sub">cycle {info.payoutCycleRef}</span>
+          )}
+        </div>
+        <div className="dossier-tile">
+          <label>
+            <Clock size={12} /> Duration
+          </label>
+          <span className="t-value">{booking.durationHours || "—"} hrs</span>
+        </div>
+        {info.payoutHoldReason && (
+          <div className="dossier-tile">
+            <label>
+              <XCircle size={12} /> Hold Reason
+            </label>
+            <span className="t-value">{info.payoutHoldReason}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="dossier-outcome">
+        {booking.status === "completed" && (
+          <span className="dossier-chip positive">
+            <CheckCircle2 size={13} /> Service completed
+          </span>
+        )}
+        <span className={`dossier-chip ${settled ? "positive" : payout.cls}`}>
+          <Receipt size={13} /> {settled ? "Payout settled" : payout.label}
+        </span>
+        {pay.status === "paid" && (
+          <span className="dossier-chip positive">
+            <Wallet size={13} /> Paid {formatCurrency(pay.paidAmount || booking.amount)}
+          </span>
+        )}
+        {showRefund && (
+          <span className="dossier-chip warning">
+            <Undo2 size={13} /> Refund {pay.refundStatus}
+            {Number(pay.refundAmount) > 0 ? ` ${formatCurrency(pay.refundAmount)}` : ""}
+          </span>
+        )}
+      </div>
+
+      {booking.status === "cancelled" && (
+        <div className="dossier-cancel-box">
+          <strong>
+            <XCircle size={13} /> Cancelled{who ? ` by ${who}` : ""}
+            {cancel.cancelledAt ? ` • ${formatDate(cancel.cancelledAt)}` : ""}
+          </strong>
+          {cancelReason && <div>{cancelReason}</div>}
+          {cancel.cancellationCategory && (
+            <div>Category: {String(cancel.cancellationCategory).replace(/_/g, " ")}</div>
+          )}
+          {Number(cancel.finalRefundAmount) > 0 && (
+            <div>
+              Refund {formatCurrency(cancel.finalRefundAmount)} • status: {cancel.refundStatus || "—"}
+            </div>
+          )}
+        </div>
+      )}
+
+      {booking.status === "completed" && (
+        booking.review ? (
+          <div className="dossier-review-box">
+            <strong className="dossier-rating-hero">
+              ★ {booking.review.rating}/5
+              <Stars value={booking.review.rating} />
+            </strong>
+            {booking.review.customer?.name && (
+              <span className="who"> — {booking.review.customer.name}</span>
+            )}
+            {booking.review.comment && (
+              <div className="dossier-review-comment">{booking.review.comment}</div>
+            )}
+          </div>
+        ) : (
+          <div className="dossier-no-rating">
+            No customer rating yet for this service.
+          </div>
+        )
+      )}
+
+      <div className="dossier-card-foot">
+        <span>#{String(booking._id || "?").slice(-6).toUpperCase()}</span>
+        <span>Booked {booking.createdAt ? formatDate(booking.createdAt) : "—"}</span>
+      </div>
+    </div>
+  );
+};
+
 const AdminCookProfile = () => {
   const { id } = useParams();
-  const { data, loading, error, refetch } = useFetch(`/cooks/admin-overview/${id}`);
+  const { data, loading, error } = useFetch(`/cooks/admin-overview/${id}`);
 
   if (loading) {
     return (
@@ -143,8 +338,12 @@ const AdminCookProfile = () => {
 
   const { profile, bookings = [], reviews = [], summary } = data;
   const cook = profile.user || {};
-  const current = bookings.filter((b) => CURRENT_STATUSES.includes(b.status));
-  const past = bookings.filter((b) => !CURRENT_STATUSES.includes(b.status));
+  const byNewest = (a, b) =>
+    new Date(b?.createdAt).getTime() - new Date(a?.createdAt).getTime() ||
+    String(b?._id || "").localeCompare(String(a?._id || ""));
+  const trackable = (bookings || []).filter((b) => !isUnpaidCancelled(b));
+  const current = trackable.filter((b) => CURRENT_STATUSES.includes(b.status)).sort(byNewest);
+  const past = trackable.filter((b) => !CURRENT_STATUSES.includes(b.status)).sort(byNewest);
   const serviceRows = Object.entries(summary?.earningsByService || {});
   const avgRating = profile.rating?.average
     ? Number(profile.rating.average).toFixed(1)
@@ -152,20 +351,23 @@ const AdminCookProfile = () => {
       ? (reviews.reduce((s, r) => s + Number(r.rating || 0), 0) / reviews.length).toFixed(1)
       : null;
 
+  const initials = String(cook.name || "C").trim().charAt(0).toUpperCase();
+
   return (
-    <div className="dashboard-container">
-      <div style={{ marginBottom: "1.5rem" }}>
+    <div className="dashboard-container dossier-page">
+      <div className="dossier-back">
         <Link to="/admin" className="back-link-bar">
           <ArrowLeft size={16} /> Back to Admin
         </Link>
       </div>
 
-      <div className="dashboard-header-row">
-        <div>
-          <span className="badge badge-festive" style={{ marginBottom: "0.5rem" }}>
+      <div className="dossier-hero">
+        <span className="dossier-avatar" aria-hidden="true">{initials}</span>
+        <div className="dossier-hero-main">
+          <span className="badge badge-festive dossier-eyebrow">
             <ChefHat size={14} /> Cook Dossier
           </span>
-          <h1 style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+          <h1 className="dossier-title">
             {cook.name || "Cook"}
             <span
               className={`badge ${
@@ -179,245 +381,219 @@ const AdminCookProfile = () => {
               {profile.approvalStatus?.toUpperCase()}
             </span>
           </h1>
-          <p style={{ color: "var(--slate-600)", margin: 0 }}>
-            {profile.experienceYears || 0} yrs experience • {formatCurrency(profile.rate)}/hr (legacy rack rate — bookings use slab pricing) •{" "}
-            {profile.serviceArea || "No service area set"} • ★ {avgRating || 0} (
+          <p className="dossier-sub">
+            <strong>{profile.experienceYears || 0} yrs</strong> experience • <strong>{formatCurrency(profile.rate)}/hr</strong> (legacy rack rate — bookings use slab pricing) •{" "}
+            {profile.serviceArea || "No service area set"} • <span className="dossier-rating-hero">★ {avgRating || 0}</span> (
             {profile.rating?.count ?? reviews.length} reviews)
           </p>
         </div>
       </div>
 
-      {/* Earnings summary */}
-      <div className="bookings-list-modern" style={{ marginBottom: "2rem" }}>
-        <div className="booking-item-card">
-          <div className="booking-metadata-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))" }}>
-            <div className="meta-field">
-              <label>
-                <Wallet size={13} style={{ verticalAlign: "-2px" }} /> Total Earned (paid only)
-              </label>
-              <span style={{ color: "var(--primary)", fontWeight: 800, fontSize: "1.25rem" }}>
-                {formatCurrency(summary?.totalEarnings)}
-              </span>
-            </div>
-            <div className="meta-field">
-              <label>
-                <Clock size={13} style={{ verticalAlign: "-2px" }} /> Total Service Hours
-              </label>
-              <span style={{ fontWeight: 800, fontSize: "1.25rem" }}>
-                {summary?.totalHours || 0} hrs
-              </span>
-            </div>
-            <div className="meta-field">
-              <label>
-                <CalendarCheck size={13} style={{ verticalAlign: "-2px" }} /> Current Bookings
-              </label>
-              <span style={{ fontWeight: 800, fontSize: "1.25rem" }}>
-                {summary?.currentCount || 0}
-              </span>
-            </div>
-            <div className="meta-field">
-              <label>
-                <CheckCircle2 size={13} style={{ verticalAlign: "-2px" }} /> Completed
-              </label>
-              <span style={{ fontWeight: 800, fontSize: "1.25rem" }}>
-                {summary?.completedCount || 0} / {summary?.totalBookings || 0}
-              </span>
-            </div>
+      <div className="dossier-stats">
+        <div className="dossier-stat">
+          <span className="dossier-stat-icon"><Wallet size={20} /></span>
+          <div>
+            <span className="dossier-stat-label">Total Earned (paid only)</span>
+            <span className="dossier-stat-value accent">
+              {formatCurrency(summary?.totalEarnings)}
+            </span>
+          </div>
+        </div>
+        <div className="dossier-stat">
+          <span className="dossier-stat-icon"><Clock size={20} /></span>
+          <div>
+            <span className="dossier-stat-label">Total Service Hours</span>
+            <span className="dossier-stat-value">
+              {summary?.totalHours || 0} <span className="dossier-stat-unit">hrs</span>
+            </span>
+          </div>
+        </div>
+        <div className="dossier-stat">
+          <span className="dossier-stat-icon"><CalendarCheck size={20} /></span>
+          <div>
+            <span className="dossier-stat-label">Current Bookings</span>
+            <span className="dossier-stat-value">
+              {summary?.currentCount || 0}
+            </span>
+          </div>
+        </div>
+        <div className="dossier-stat">
+          <span className="dossier-stat-icon"><CheckCircle2 size={20} /></span>
+          <div>
+            <span className="dossier-stat-label">Completed</span>
+            <span className="dossier-stat-value">
+              {summary?.completedCount || 0} / {summary?.totalBookings || 0}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Profile, contact, address, documents */}
-      <div className="bookings-list-modern" style={{ marginBottom: "2rem" }}>
-        <div className="booking-item-card">
-          <div className="booking-item-top">
-            <h3 style={{ margin: 0 }}>Profile & Contact</h3>
-          </div>
-          <div className="booking-metadata-grid">
-            <div className="meta-field">
-              <label>
-                <Phone size={13} style={{ verticalAlign: "-2px" }} /> Contact Number
-              </label>
-              <span>
-                {cook.phone ? (
-                  <a href={`tel:+91${cook.phone}`} style={{ fontWeight: 700 }}>
-                    +91 {cook.phone}
-                  </a>
-                ) : (
-                  "—"
-                )}
-              </span>
-            </div>
-            <div className="meta-field">
-              <label>
-                <Mail size={13} style={{ verticalAlign: "-2px" }} /> Email
-              </label>
-              <span>
-                {cook.email ? <a href={`mailto:${cook.email}`}>{cook.email}</a> : "—"}
-              </span>
-            </div>
-            <div className="meta-field">
-              <label>
-                <MapPin size={13} style={{ verticalAlign: "-2px" }} /> Home Address
-              </label>
-              <span>{profile.address || "Not provided"}</span>
-            </div>
-            <div className="meta-field">
-              <label>Service Area</label>
-              <span>{profile.serviceArea || "—"}</span>
-            </div>
-            <div className="meta-field">
-              <label>Services Offered</label>
-              <span>
-                {(profile.serviceTypes || []).map(serviceLabel).join(", ") || "—"}
-              </span>
-            </div>
-            <div className="meta-field">
-              <label>Specialties</label>
-              <span>{(profile.specialties || []).join(", ") || "—"}</span>
-            </div>
-          </div>
-          {(profile.skills || profile.bio) && (
-            <p style={{ fontSize: "0.9rem", color: "var(--slate-600)", margin: "0.75rem 0 0" }}>
-              {profile.skills || profile.bio}
-            </p>
-          )}
+      <div className="dossier-card">
+        <div className="dossier-card-head">
+          <h3>Profile & Contact</h3>
         </div>
-
-        <div className="booking-item-card">
-          <div className="booking-item-top">
-            <h3 style={{ margin: 0 }}>
-              <FileText size={16} style={{ verticalAlign: "-3px" }} /> Verification Documents
-            </h3>
+        <div className="dossier-grid">
+          <div className="dossier-field">
+            <label>
+              <Phone size={13} /> Contact Number
+            </label>
+            <span className="value">
+              {cook.phone ? (
+                <a href={`tel:+91${cook.phone}`}>
+                  +91 {cook.phone}
+                </a>
+              ) : (
+                <span className="value muted">—</span>
+              )}
+            </span>
           </div>
-          {/* Click a thumbnail to preview — images open in a lightbox, PDFs preview inline */}
-          <AdminDocViewer
-            docs={[
-              { label: "Aadhaar Card", url: profile.aadharCardUrl },
-              { label: "PAN Card", url: profile.panCardUrl },
-              { label: "Profile Photo", url: profile.photoUrl },
-              ...(profile.documents || []).map((doc) => ({
-                label: doc.label || "Document",
-                url: doc.url,
-              })),
-            ]}
-          />
-
-          {/* Admin can attach files the cook sent over email/WhatsApp */}
-          <div
-            style={{
-              marginTop: "1rem",
-              borderTop: "1px dashed var(--slate-200)",
-              paddingTop: "1rem",
-            }}
-          >
-            <AdminDocUpload
-              cookId={profile._id}
-              current={profile}
-              onUploaded={refetch}
-            />
+          <div className="dossier-field">
+            <label>
+              <Mail size={13} /> Email
+            </label>
+            <span className="value">
+              {cook.email ? <a href={`mailto:${cook.email}`}>{cook.email}</a> : <span className="value muted">—</span>}
+            </span>
+          </div>
+          <div className="dossier-field">
+            <label>
+              <MapPin size={13} /> Home Address
+            </label>
+            <span className={profile.address ? "value" : "value muted"}>{profile.address || "Not provided"}</span>
+          </div>
+          <div className="dossier-field">
+            <label>Service Area</label>
+            <span className={profile.serviceArea ? "value" : "value muted"}>{profile.serviceArea || "—"}</span>
+          </div>
+          <div className="dossier-field">
+            <label>Services Offered</label>
+            <span className={(profile.serviceTypes || []).length ? "value" : "value muted"}>
+              {(profile.serviceTypes || []).map(serviceLabel).join(", ") || "—"}
+            </span>
+          </div>
+          <div className="dossier-field">
+            <label>Specialties</label>
+            <span className={(profile.specialties || []).length ? "value" : "value muted"}>{(profile.specialties || []).join(", ") || "—"}</span>
           </div>
         </div>
+        {(profile.skills || profile.bio) && (
+          <p className="dossier-bio">
+            {profile.skills || profile.bio}
+          </p>
+        )}
       </div>
 
-      {/* Earnings per service */}
-      <h2 style={{ fontSize: "1.4rem", marginBottom: "1rem" }}>Earnings by Service</h2>
+      <div className="dossier-card">
+        <div className="dossier-card-head">
+          <h3>
+            <FileText size={16} /> Verification Documents
+          </h3>
+        </div>
+        <AdminDocViewer
+          docs={[
+            { label: "Aadhaar Card", url: profile.aadharCardUrl },
+            { label: "PAN Card", url: profile.panCardUrl },
+            { label: "Profile Photo", url: profile.photoUrl },
+            ...(profile.documents || []).map((doc) => ({
+              label: doc.label || "Document",
+              url: doc.url,
+            })),
+          ]}
+        />
+      </div>
+
+      <h2 className="dossier-section-title">Earnings by Service</h2>
       {serviceRows.length > 0 ? (
-        <div className="dossier-table-card">
-          <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.95rem" }}>
-            <thead style={{ background: "var(--slate-50)", borderBottom: "1px solid var(--slate-200)" }}>
+        <div className="dossier-card dossier-card-flush">
+          <div className="dossier-table-wrap dossier-table-wrap-flush">
+          <table className="dossier-table">
+            <thead>
               <tr>
-                <th style={{ padding: "1rem" }}>Service</th>
-                <th style={{ padding: "1rem" }}>Completed</th>
-                <th style={{ padding: "1rem" }}>Hours</th>
-                <th style={{ padding: "1rem" }}>Earned</th>
+                <th>Service</th>
+                <th>Completed</th>
+                <th>Hours</th>
+                <th>Earned</th>
               </tr>
             </thead>
             <tbody>
               {serviceRows.map(([key, row]) => (
-                <tr key={key} style={{ borderBottom: "1px solid var(--slate-100)" }}>
-                  <td style={{ padding: "1rem", fontWeight: 700 }}>{serviceLabel(key)}</td>
-                  <td style={{ padding: "1rem" }}>{row.count}</td>
-                  <td style={{ padding: "1rem" }}>{row.hours} hrs</td>
-                  <td style={{ padding: "1rem", fontWeight: 700, color: "var(--primary)" }}>
+                <tr key={key}>
+                  <td className="cell-strong">{serviceLabel(key)}</td>
+                  <td>{row.count}</td>
+                  <td>{row.hours} hrs</td>
+                  <td className="cell-money">
                     {formatCurrency(row.earnings)}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ) : (
-        <p style={{ color: "var(--slate-500)", marginBottom: "2rem" }}>
+        <p className="dossier-empty">
           No completed services yet — earnings will appear here.
         </p>
       )}
 
-      {/* Customer ratings across services */}
-      <h2 style={{ fontSize: "1.4rem", marginBottom: "1rem" }}>
-        Customer Ratings ({reviews.length}){avgRating ? ` — ★ ${avgRating} average` : ""}
+      <h2 className="dossier-section-title">
+        Customer Ratings <span className="count">{reviews.length}</span>{avgRating ? ` — ★ ${avgRating} average` : ""}
       </h2>
       {reviews.length > 0 ? (
-        <div className="bookings-list-modern" style={{ marginBottom: "2rem" }}>
+        <div className="dossier-stack">
           {reviews.map((r) => (
-            <div key={r._id} className="booking-item-card">
-              <div className="booking-item-top">
+            <div key={r._id} className="dossier-card dossier-review">
+              <div className="dossier-review-top">
                 <div>
-                  <h3 style={{ margin: 0 }}>
+                  <h3 className="dossier-rating-hero dossier-rating-title">
                     ★ {r.rating}/5
-                    <span style={{ marginLeft: "0.4rem" }}>
-                      {[1, 2, 3, 4, 5].map((s) => (
-                        <span key={s} style={{ color: s <= r.rating ? "#f59e0b" : "#cbd5e1" }}>★</span>
-                      ))}
-                    </span>
+                    <Stars value={r.rating} />
                   </h3>
-                  <span style={{ fontSize: "0.85rem", color: "var(--slate-500)" }}>
+                  <span className="dossier-review-meta">
                     {r.customer?.name || "Customer"}
                     {r.booking?.date ? ` • ${serviceLabel(r.booking.serviceType)} • ${formatDate(r.booking.date)}` : ""}
                   </span>
                 </div>
-                <span style={{ fontSize: "0.8rem", color: "var(--slate-500)" }}>
+                <span className="dossier-review-date">
                   {r.createdAt ? formatDate(r.createdAt) : ""}
                 </span>
               </div>
               {r.comment && (
-                <p style={{ fontSize: "0.9rem", color: "var(--slate-700)", margin: 0 }}>{r.comment}</p>
+                <p className="dossier-review-comment">{r.comment}</p>
               )}
             </div>
           ))}
         </div>
       ) : (
-        <p style={{ color: "var(--slate-500)", marginBottom: "2rem" }}>
+        <p className="dossier-empty">
           No customer ratings yet for this cook.
         </p>
       )}
 
-      {/* Current bookings */}
-      <h2 style={{ fontSize: "1.4rem", marginBottom: "1rem" }}>
-        Current Bookings ({current.length})
+      <h2 className="dossier-section-title">
+        Current Bookings <span className="count">{current.length}</span>
       </h2>
       {current.length > 0 ? (
-        <div className="bookings-list-modern" style={{ marginBottom: "2rem" }}>
+        <div className="dossier-stack">
           {current.map((b) => (
             <BookingCard key={b._id} booking={b} />
           ))}
         </div>
       ) : (
-        <p style={{ color: "var(--slate-500)", marginBottom: "2rem" }}>No current bookings.</p>
+        <p className="dossier-empty">No current bookings.</p>
       )}
 
-      {/* Past bookings */}
-      <h2 style={{ fontSize: "1.4rem", marginBottom: "1rem" }}>
-        Past Bookings ({past.length})
+      <h2 className="dossier-section-title">
+        Past Bookings <span className="count">{past.length}</span>
       </h2>
       {past.length > 0 ? (
-        <div className="bookings-list-modern">
+        <div>
           {past.map((b) => (
-            <BookingCard key={b._id} booking={b} />
+            <PastBookingCard key={b._id} booking={b} />
           ))}
         </div>
       ) : (
-        <p style={{ color: "var(--slate-500)" }}>No past bookings.</p>
+        <p className="dossier-empty">No past bookings.</p>
       )}
     </div>
   );

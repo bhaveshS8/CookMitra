@@ -1,6 +1,3 @@
-/* ==========================================================================
-   Admin — Coupon management (Coupons tab) + coupon modal helpers
-   ========================================================================== */
 .coupon-code-chip {
   display: inline-block;
   font-family: var(--font-mono, monospace);
@@ -30,4 +27,23 @@
   cursor: pointer;
   color: var(--slate-700);
   margin-bottom: 0.25rem;
+}
+
+.coupon-table .coupon-code-chip { white-space: nowrap; }
+
+@media (max-width: 768px) {
+  .coupon-table .coupon-pct { font-size: 1.05rem; }
+  .coupon-table .coupon-sub { font-size: 0.84rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coupon-active-toggle { transition: none; }
+}
+@media (max-width: 375px) {
+  .coupon-desc { max-width: 100%; font-size: 0.78rem; }
+  .coupon-code-chip { font-size: 0.86rem; }
+}
+@media (max-width: 320px) {
+  .coupon-pct { font-size: 0.92rem; }
+  .coupon-sub { font-size: 0.76rem; }
 }

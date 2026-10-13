@@ -1,9 +1,12 @@
 const mongoose = require("mongoose");
 
-// A cook's complaint about a customer (filed from a booking, or standalone).
-// Admins triage these: open → in_review → resolved (or rejected when invalid).
 const complaintSchema = new mongoose.Schema(
   {
+    filedBy: {
+      type: String,
+      enum: ["cook", "customer"],
+      default: "cook",
+    },
     cook: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -14,8 +17,6 @@ const complaintSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    // The booking this complaint arose from (optional — a cook may also
-    // report an issue without a specific booking).
     booking: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Booking",
@@ -29,10 +30,17 @@ const complaintSchema = new mongoose.Schema(
         "address",
         "no_show",
         "safety",
+        "quality",
+        "hygiene",
         "other",
+        "cook_did_not_arrive",
+        "major_service_deviation",
+        "service_quality_issue",
+        "unprofessional_behavior",
       ],
       default: "other",
     },
+    reportedLate: { type: Boolean, default: false },
     message: {
       type: String,
       required: [true, "Please describe the issue"],
@@ -45,7 +53,6 @@ const complaintSchema = new mongoose.Schema(
       enum: ["open", "in_review", "resolved", "rejected"],
       default: "open",
     },
-    // Internal resolution note left by the handling admin.
     adminNote: {
       type: String,
       default: "",
@@ -57,6 +64,7 @@ const complaintSchema = new mongoose.Schema(
 );
 
 complaintSchema.index({ cook: 1, status: 1 });
+complaintSchema.index({ customer: 1, filedBy: 1, status: 1 });
 complaintSchema.index({ status: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Complaint", complaintSchema);

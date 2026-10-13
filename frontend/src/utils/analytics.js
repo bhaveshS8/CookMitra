@@ -1,17 +1,4 @@
-// Minimal analytics layer (P0 instrumentation).
-//
-// Why this exists: the marketing plan needs CAC, repeat rate, and funnel
-// drop-off — none of which are measurable without client events.
-// Design:
-// - GA4 (gtag.js) and Meta Pixel are loaded ONLY when their IDs are set via
-//   env vars, so local dev / pre-launch builds fire no third-party requests.
-// - Every helper is a no-op (and never throws) when unconfigured, so call
-//   sites stay unconditional.
-// - A single `track(event, params)` fan-out keeps event names consistent.
-//
-// Env (frontend/.env):
-//   REACT_APP_GA_MEASUREMENT_ID=G-XXXXXXXXXX   (Google Analytics 4)
-//   REACT_APP_META_PIXEL_ID=1234567890        (Meta Pixel, optional)
+// Env: REACT_APP_GA_MEASUREMENT_ID (GA4), REACT_APP_META_PIXEL_ID.
 const GA_ID = process.env.REACT_APP_GA_MEASUREMENT_ID;
 const PIXEL_ID = process.env.REACT_APP_META_PIXEL_ID;
 
@@ -21,8 +8,6 @@ const hasPixel = typeof PIXEL_ID === "string" && /^\d{5,}$/.test(PIXEL_ID.trim()
 let gaLoaded = false;
 let pixelLoaded = false;
 
-// Load gtag.js once. Queues early events on window.dataLayer (gtag's own
-// pattern) so events fired before the script arrives are not lost.
 const ensureGa = () => {
   if (!hasGa || gaLoaded || typeof document === "undefined") return;
   gaLoaded = true;
@@ -37,11 +22,9 @@ const ensureGa = () => {
     s.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(GA_ID.trim())}`;
     document.head.appendChild(s);
   } catch {
-    // Analytics must never break the app.
   }
 };
 
-// Load Meta Pixel once (standard snippet, guarded).
 const ensurePixel = () => {
   if (!hasPixel || pixelLoaded || typeof document === "undefined") return;
   pixelLoaded = true;
@@ -66,29 +49,21 @@ const ensurePixel = () => {
     /* eslint-enable */
     window.fbq("init", PIXEL_ID.trim());
   } catch {
-    // Analytics must never break the app.
   }
 };
 
-/**
- * Canonical event names — import these instead of string literals so a
- * rename stays consistent across every call site.
- */
 export const AnalyticsEvents = {
   PAGE_VIEW: "page_view",
   BOOKING_START: "booking_start",
   SLOT_SELECTED: "slot_selected",
   BOOKING_REQUESTED: "booking_requested",
   PAYMENT_SUCCESS: "payment_success",
+  BOOKING_RESCHEDULED: "booking_rescheduled",
   COOK_SIGNUP_START: "cook_signup_start",
   COOK_SIGNUP_COMPLETE: "cook_signup_complete",
   COUPON_APPLIED: "coupon_applied",
 };
 
-/**
- * Fire an analytics event to every configured provider. Safe to call when
- * nothing is configured (no-op). `params` must be a flat JSON-safe object.
- */
 export const track = (event, params = {}) => {
   if (!event || typeof window === "undefined") return;
   try {
@@ -105,23 +80,14 @@ export const track = (event, params = {}) => {
       console.debug(`[analytics] ${event}`, params);
     }
   } catch {
-    // Analytics must never break the app.
   }
 };
 
-/** True when at least one provider is configured (for conditional UI). */
 export const isAnalyticsConfigured = () => hasGa || hasPixel;
 
-// In-house visit counter (POST /api/stats/public/visit) — answers "how many
-// users visit the website" without any third party. One ping per browser
-// session (sessionStorage guard); the visitor id lives in localStorage so
-// repeat visits count as one unique per day. The ping also carries the
-// approximate city (IP-based, city-level only — raw IPs are never sent or
-// stored). Fire-and-forget: failures are swallowed so tracking can never
-// break the app.
 const VISIT_SESSION_KEY = "cm-visit-sent";
+const VISIT_SID_KEY = "cm-visit-sid";
 const VISITOR_KEY = "cm-vid";
-// Never hold the ping longer than this waiting for the city lookup.
 const VISIT_CITY_TIMEOUT_MS = 2500;
 
 const getVisitorId = () => {
@@ -137,6 +103,19 @@ const getVisitorId = () => {
   }
 };
 
+const getVisitSid = () => {
+  try {
+    let sid = sessionStorage.getItem(VISIT_SID_KEY);
+    if (!sid) {
+      sid = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+      sessionStorage.setItem(VISIT_SID_KEY, sid);
+    }
+    return sid;
+  } catch {
+    return null;
+  }
+};
+
 export const trackSiteVisit = (path = "/") => {
   try {
     if (typeof window === "undefined") return;
@@ -144,24 +123,24 @@ export const trackSiteVisit = (path = "/") => {
     sessionStorage.setItem(VISIT_SESSION_KEY, "1");
     const vid = getVisitorId();
     if (!vid) return;
+    const sid = getVisitSid();
+    if (!sid) return;
     const send = (loc) => {
-      // Lazy import keeps analytics.js free of module cycles.
       import("../api/axios")
         .then(({ default: API }) =>
           API.post("/stats/public/visit", {
             vid,
+            sid,
             path,
             city: loc?.city || "",
+            area: loc?.area || "",
             state: loc?.state || "",
             country: loc?.country || "",
           })
         )
         .catch(() => {
-          // ignore — counting must never break browsing
         });
     };
-    // Resolve the approximate city first, but never delay the ping past
-    // the timeout — a slow lookup still counts the visit, just without a city.
     let settled = false;
     const done = (loc) => {
       if (settled) return;
@@ -180,6 +159,5 @@ export const trackSiteVisit = (path = "/") => {
         done(null);
       });
   } catch {
-    // ignore — counting must never break browsing
   }
 };

@@ -1,49 +1,24 @@
-// Time-slot engine: derive bookable start times for a cook's service day
-// minus already-booked intervals, sized to the customer's input service hours.
-//
-// Availability model: EVERY cook is bookable across the whole service day
-// (08:00–20:00) by default. The only things that block a slot are existing
-// bookings (accepted/confirmed/in_progress + live 5-minute "requested" holds)
-// and the cook's whole-day "unavailable" toggle (enforced by callers via
-// resolveCookAvailability). Published Availability windows, if any, are
-// informational only and no longer restrict bookability.
 
 const Availability = require("../models/Availability");
 const Booking = require("../models/Booking");
 const CookProfile = require("../models/CookProfile");
+const {
+  istMidnight,
+  istDayRange,
+  istDayString,
+  istWeekday,
+} = require("./time");
 
-// Booking statuses that PERMANENTLY block overlapping re-booking.
-// Verdicts that free the slot (cancelled/rejected/completed/expired) never
-// appear here — including them would block re-booking freed windows forever.
-// NOTE: "requested" is intentionally NOT in this list: pending requests only
-// hold a slot for 5 minutes (second clause of activeSlotMatch). Including it
-// here would let expired requests block the calendar forever.
 const BLOCKING_STATUSES = ["accepted", "confirmed", "in_progress"];
 
-// Mongo $or fragment matching every booking that currently occupies the
-// calendar: permanent blocks (accepted/confirmed/in_progress) plus pending
-// "requested" ones inside their 5-minute hold. When a customer sends a
-// request they land on a waiting page while the cook decides, and during
-// that window the slot must be invisible/unbookable for everyone else. The
-// hold is expiry-aware — a request whose requestExpiresAt has passed no
-// longer blocks anything, so stale requests can never lock the calendar.
-// (Legacy "requested" docs without requestExpiresAt don't match either —
-// they can't hold forever.) NOTE: callers MUST use getDayBookings (or
-// activeSlotMatch) rather than BLOCKING_STATUSES alone: a bare
-// `status: { $in: BLOCKING_STATUSES }` check misses live "requested" holds,
-// so two "requested" bookings could double-book the same window.
 const activeSlotMatch = () => [
   { status: { $in: BLOCKING_STATUSES } },
   { status: "requested", requestExpiresAt: { $gt: new Date() } },
 ];
 
 const STEP_MINUTES = 30;
-// Full-day default windows can yield up to 48 starts (00:00–23:30 for 30-min
-// sessions) — the cap must cover the whole day, not just the morning.
 const MAX_OPTIONS = 48;
 
-// Service day for every cook: bookable slots run 08:00–20:00 only. Windows
-// are intersected with this range wherever slots are derived or validated.
 const SERVICE_DAY_START_MIN = 8 * 60;
 const SERVICE_DAY_END_MIN = 20 * 60;
 
@@ -52,8 +27,6 @@ const timeToMinutes = (t) => {
   if (!m) return null;
   const h = Number(m[1]);
   const min = Number(m[2]);
-  // Reject out-of-range clocks ("24:99", "99:99") — previously any digits
-  // parsed, so malformed times could slip past prefix-only matching.
   if (h > 23 || min > 59) return null;
   return h * 60 + min;
 };
@@ -65,47 +38,23 @@ const minutesToTime = (mins) => {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 };
 
-const dayBounds = (dateStr) => {
-  // Use parseDay so "YYYY-MM-DD" resolves to LOCAL midnight (plain
-  // new Date("YYYY-MM-DD") is UTC midnight and lands on the wrong local day
-  // on non-UTC servers).
-  const start = parseDay(dateStr);
-  const end = new Date(start);
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
+const dayBounds = (dateInput) => {
+  return (
+    istDayRange(dateInput) || { start: new Date(0), end: new Date(0) }
+  );
 };
 
-// Normalize a "YYYY-MM-DD" date-only string to LOCAL midnight so stored
-// Availability/Booking dates always fall inside dayBounds() ranges regardless
-// of server timezone (plain new Date("YYYY-MM-DD") is UTC midnight).
-const parseDay = (dateStr) => {
-  const m = String(dateStr || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  const d = new Date(dateStr);
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
+const parseDay = (dateInput) => istMidnight(dateInput);
 
 const intervalsOverlap = (aStart, aEnd, bStart, bEnd) => aStart < bEnd && bStart < aEnd;
 
-// Local "YYYY-MM-DD" day string for the given Date (avoids the UTC leak that
-// new Date("YYYY-MM-DD").toISOString() has on non-UTC servers).
-const localDayString = (d = new Date()) => {
-  const p = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-};
+const localDayString = (d = new Date()) => istDayString(d);
 
-// A cook who toggled "unavailable" becomes available again automatically on the
-// next day. If the stored unavailableDate is before today, reset the flag in
-// the DB and return true so the cook is treated as available right now.
-// Canonical copy — controllers must import this instead of duplicating it.
 const resolveCookAvailability = async (profile) => {
   if (!profile) return true;
   const status = profile.availabilityStatus;
   if (status === "unavailable") {
     const today = localDayString();
-    // Treat as timeless if no date was recorded — availabilityStatus was raised
-    // before tracking dates, so keep them unavailable until manually changed.
     if (profile.unavailableDate && profile.unavailableDate < today) {
       try {
         await CookProfile.findByIdAndUpdate(profile._id, {
@@ -116,20 +65,59 @@ const resolveCookAvailability = async (profile) => {
       return true;
     }
   }
-  // Field COULD be absent on legacy profiles (and controllers that only select
-  // a subset). The schema default is "available" — treat an unset status the
-  // same way so cooks are never silently rendered unbookable.
   return status == null || status === "available";
 };
 
+const serviceDayWindow = () => ({
+  startTime: minutesToTime(SERVICE_DAY_START_MIN),
+  endTime: minutesToTime(SERVICE_DAY_END_MIN),
+  status: "available",
+  derived: true,
+});
+
+const resolveCookWindows = (profile, dateStr) => {
+  const schedule = profile?.schedule || null;
+  const weekly = Array.isArray(schedule?.weekly) ? schedule.weekly : [];
+  const enabled = weekly.filter((w) => w && w.enabled);
+  if (enabled.length === 0) return [serviceDayWindow()];
+
+  const day = parseDay(dateStr);
+  if (!day || Number.isNaN(day.getTime())) return [serviceDayWindow()];
+  const blocked = Array.isArray(schedule?.blockedDates) ? schedule.blockedDates : [];
+  if (blocked.includes(localDayString(day))) return [];
+
+  const weekday = istWeekday(day);
+  if (weekday == null) return [serviceDayWindow()];
+  const windows = [];
+  for (const w of enabled) {
+    if (Number(w.day) !== weekday) continue;
+    const s = timeToMinutes(w.startTime);
+    const e = timeToMinutes(w.endTime);
+    if (s == null || e == null || e <= s) continue;
+    const start = Math.max(s, SERVICE_DAY_START_MIN);
+    const end = Math.min(e, SERVICE_DAY_END_MIN);
+    if (end <= start) continue;
+    windows.push({
+      startTime: minutesToTime(start),
+      endTime: minutesToTime(end),
+      status: "available",
+      derived: true,
+    });
+  }
+  return windows;
+};
+
 const getDayWindows = async (cookId, dateStr) => {
-  // Universal full-day availability: every cook's service day is 08:00–20:00
-  // regardless of published Availability windows — existing bookings (and the
-  // whole-day unavailable toggle, enforced by callers) are the only blockers.
-  // The cookId/date params are kept for signature compatibility with callers.
-  void cookId;
-  void dateStr;
-  return [{ startTime: "08:00", endTime: "20:00", status: "available", derived: true }];
+  if (!cookId) return [serviceDayWindow()];
+  let profile = null;
+  try {
+    const CookProfile = require("../models/CookProfile");
+    profile = await CookProfile.findOne({ user: cookId }).select("schedule").lean();
+  } catch {
+    profile = null;
+  }
+  if (!profile) return [serviceDayWindow()];
+  return resolveCookWindows(profile, dateStr);
 };
 
 const getDayBookings = (cookId, dateStr) => {
@@ -138,15 +126,11 @@ const getDayBookings = (cookId, dateStr) => {
     cook: cookId,
     date: { $gte: start, $lte: end },
     $or: activeSlotMatch(),
-  }).select("startTime endTime status");
+  }).select("startTime endTime status").lean();
 };
 
-// Every viable {startTime, endTime} of length durationHours inside the open
-// windows, skipping anything overlapping an existing booking.
 const computeStartOptions = (windows, bookings, durationHours) => {
   const durMin = Math.round(Number(durationHours) * 60);
-  // Minimum 30 min — matches the 0.5h floor used by the booking route,
-  // availability endpoint and payment flow (short sessions are bookable).
   if (!Number.isFinite(durMin) || durMin < 30 || durMin > 12 * 60) return [];
 
   const busy = (bookings || [])
@@ -159,8 +143,6 @@ const computeStartOptions = (windows, bookings, durationHours) => {
     let wStart = timeToMinutes(w.startTime);
     let wEnd = timeToMinutes(w.endTime);
     if (wStart == null || wEnd == null) continue;
-    // Clamp to the 08:00–20:00 service day (covers raw Availability docs
-    // passed in directly, not only getDayWindows output).
     wStart = Math.max(wStart, SERVICE_DAY_START_MIN);
     wEnd = Math.min(wEnd, SERVICE_DAY_END_MIN);
     if (wEnd - wStart < durMin) continue;
@@ -177,10 +159,6 @@ const computeStartOptions = (windows, bookings, durationHours) => {
   return options.sort((a, b) => timeToMinutes(a.startTime) - timeToMinutes(b.startTime));
 };
 
-// Session lengths (whole launch hours) strictly below `requested` that still
-// fit at least one start option inside the open windows — largest first,
-// capped at `max`. Pure in-memory recovery hint so "no 3-hour slots" can
-// become a one-tap "try 2 hours" instead of a dead end.
 const suggestDurations = (windows, bookings, requested, max = 3) => {
   const out = [];
   const top = Math.floor(Number(requested));
@@ -191,7 +169,6 @@ const suggestDurations = (windows, bookings, requested, max = 3) => {
   return out;
 };
 
-// Is the requested [startTime, endTime] fully inside one open window?
 const findContainingWindow = (windows, startTime, endTime) => {
   const s = timeToMinutes(startTime);
   const e = timeToMinutes(endTime);
@@ -203,7 +180,6 @@ const findContainingWindow = (windows, startTime, endTime) => {
   });
 };
 
-// First existing booking overlapping [startTime, endTime], if any.
 const findOverlapBooking = (bookings, startTime, endTime) => {
   const s = timeToMinutes(startTime);
   const e = timeToMinutes(endTime);
@@ -226,6 +202,8 @@ module.exports = {
   resolveCookAvailability,
   intervalsOverlap,
   getDayWindows,
+  resolveCookWindows,
+  serviceDayWindow,
   getDayBookings,
   computeStartOptions,
   suggestDurations,

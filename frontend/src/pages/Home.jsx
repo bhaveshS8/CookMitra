@@ -1,38 +1,28 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { useDispatch, useSelector } from "react-redux";
-import { registerUser } from "../store/authSlice";
-import { useShowToast } from "../store/hooks";
-import { formatDate, isReviewable } from "../utils/constants";
+import { Link } from "react-router-dom";
+import { useSelector } from "react-redux";
+import { formatDate, isReviewable, formatTimeRange12 } from "../utils/constants";
 import API from "../api/axios";
 import heroImg from "../assets/hero.png";
 import DishCarousel from "../components/DishCarousel";
 import HomeCoupons from "../components/HomeCoupons";
 import ReviewForm from "../components/ReviewForm";
+import CookAvatar from "../components/CookAvatar";
+import Register from "./Register";
 import {
   ArrowRight,
   CalendarClock,
   ChefHat,
-  Users,
-  GraduationCap,
-  HandHelping,
   Star,
   CheckCircle2,
   CalendarCheck,
   Compass,
   UserCheck,
   Award,
-  Mail,
-  Lock,
-  User,
-  Phone,
   ShieldCheck,
-  Eye,
-  EyeOff,
   X,
 } from "lucide-react";
 
-// Animated number that counts up when scrolled into view.
 const CountUp = ({ to, decimals = 0, suffix = "", duration = 1400 }) => {
   const [val, setVal] = useState(0);
   const ref = useRef(null);
@@ -90,8 +80,6 @@ const TICKER_DISHES = [
 
 const DISMISSED_RATINGS_KEY = "home-rate-dismissed";
 
-// One rateable booking card: cook info + star rating (comment optional) +
-// per-card cross button to dismiss. Disappears once the rating is submitted.
 const PendingRatingCard = ({ booking, onRated, onDismiss }) => {
   return (
     <article className="hrc-card">
@@ -106,7 +94,12 @@ const PendingRatingCard = ({ booking, onRated, onDismiss }) => {
       </button>
       <div className="hrc-card-head">
         <span className="hrc-avatar" aria-hidden="true">
-          {booking.cook?.name?.[0]?.toUpperCase() || <ChefHat size={18} />}
+          <CookAvatar
+            photoUrl={booking.cook?.photoUrl}
+            name={booking.cook?.name}
+            alt=""
+            fallback={booking.cook?.name?.[0]?.toUpperCase() || <ChefHat size={18} />}
+          />
         </span>
         <div className="hrc-who">
           <div className="hrc-name">How was {booking.cook?.name || "your cook"}?</div>
@@ -116,7 +109,7 @@ const PendingRatingCard = ({ booking, onRated, onDismiss }) => {
             )}
             {booking.date && <span className="rf-chipmeta">{formatDate(booking.date)}</span>}
             {booking.startTime && booking.endTime && (
-              <span className="rf-chipmeta">{booking.startTime}–{booking.endTime}</span>
+              <span className="rf-chipmeta">{formatTimeRange12(booking.startTime, booking.endTime)}</span>
             )}
           </div>
         </div>
@@ -126,9 +119,6 @@ const PendingRatingCard = ({ booking, onRated, onDismiss }) => {
   );
 };
 
-// Home section: after service hours end, prompt the customer to rate each
-// unrated cook. Hidden for guests/cooks/admins, after rating (review exists),
-// or after the user taps the cross button (dismiss persisted in localStorage).
 const PendingCookRatings = () => {
   const user = useSelector((s) => s.auth.user);
   const [bookings, setBookings] = useState([]);
@@ -149,7 +139,6 @@ const PendingCookRatings = () => {
         if (!cancelled) setBookings(Array.isArray(res.data) ? res.data : []);
       })
       .catch(() => {
-        // silent: rating prompt is optional, must never break Home
       });
     return () => {
       cancelled = true;
@@ -159,13 +148,11 @@ const PendingCookRatings = () => {
   if (!user || user.role !== "customer") return null;
 
   const persistDismissed = (ids) => {
-    // Cap the list so it can't grow unbounded in localStorage.
     const capped = [...new Set(ids)].slice(-100);
     setDismissed(capped);
     try {
       localStorage.setItem(DISMISSED_RATINGS_KEY, JSON.stringify(capped));
     } catch {
-      // storage optional
     }
   };
 
@@ -183,7 +170,6 @@ const PendingCookRatings = () => {
   };
 
   const handleRated = (id) => {
-    // Drop the card immediately; the saved review also excludes it on refetch.
     setBookings((prev) => prev.filter((b) => b._id !== id));
   };
 
@@ -224,11 +210,7 @@ const PendingCookRatings = () => {
   );
 };
 
-// Homepage trust stats — live from GET /api/stats/public (see backend
-// routes/stats.js). Hardcoded marketing numbers are a CCPA 2022
-// misleading-ad exposure for a payment merchant, so the hero only renders a
-// stat once it is meaningful, and falls back to honest "growing" copy.
-const STAT_MINIMUMS = { cooks: 5, bookings: 20, ratings: 5 };
+const STAT_MINIMUMS = { bookings: 20, ratings: 5 };
 
 const HeroStats = () => {
   const [stats, setStats] = useState(null);
@@ -240,35 +222,22 @@ const HeroStats = () => {
         if (!cancelled) setStats(res.data || null);
       })
       .catch(() => {
-        // Stats are decorative — the hero must render without them.
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const showCooks = (stats?.cooks ?? 0) >= STAT_MINIMUMS.cooks;
   const showBookings = (stats?.bookings ?? 0) >= STAT_MINIMUMS.bookings;
   const showRating =
     (stats?.ratingCount ?? 0) >= STAT_MINIMUMS.ratings && stats?.ratingAverage != null;
 
-  // Pre-launch: nothing is meaningful yet — render nothing instead of
-  // placeholder stats.
-  if (!showCooks && !showBookings && !showRating) {
+  if (!showBookings && !showRating) {
     return null;
   }
 
   return (
     <div className="hero-v2-stats">
-      {showCooks && (
-        <>
-          <div className="hero-v2-stat">
-            <div className="hero-v2-stat-num"><CountUp to={stats.cooks} suffix="+" /></div>
-            <div className="hero-v2-stat-label">Verified Cooks</div>
-          </div>
-          <div className="hero-v2-stat-sep" />
-        </>
-      )}
       {showBookings && (
         <>
           <div className="hero-v2-stat">
@@ -290,60 +259,7 @@ const HeroStats = () => {
 
 const Home = () => {
   const user = useSelector((s) => s.auth.user);
-  const dispatch = useDispatch();
-  const showToast = useShowToast();
-  const navigate = useNavigate();
 
-  // Registration form state
-  const [regForm, setRegForm] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    password: "",
-    confirmPassword: "",
-    role: "customer",
-  });
-  const [showPassword, setShowPassword] = useState(false);
-  const [regError, setRegError] = useState("");
-  const [regLoading, setRegLoading] = useState(false);
-
-  const handleRegChange = (e) => {
-    setRegForm({ ...regForm, [e.target.name]: e.target.value });
-  };
-
-  const setRole = (role) => {
-    setRegForm((prev) => ({ ...prev, role }));
-  };
-
-  const handleRegSubmit = async (e) => {
-    e.preventDefault();
-    if (regForm.password !== regForm.confirmPassword) {
-      setRegError("Passwords do not match");
-      return;
-    }
-    if (regForm.password.length < 6) {
-      setRegError("Password must be at least 6 characters long");
-      return;
-    }
-
-    setRegLoading(true);
-    setRegError("");
-
-    try {
-      const { confirmPassword, ...data } = regForm;
-      await dispatch(registerUser(data)).unwrap();
-      showToast("Registration successful! Please login to continue.", "success");
-      navigate("/login");
-    } catch (err) {
-      const msg = err.response?.data?.message || "Registration failed. Please try again.";
-      setRegError(msg);
-      showToast(msg, "error");
-    } finally {
-      setRegLoading(false);
-    }
-  };
-
-  // Scroll-reveal for page sections (adds .visible as they enter view).
   useEffect(() => {
     if (!("IntersectionObserver" in window)) return;
     const io = new IntersectionObserver(
@@ -364,53 +280,6 @@ const Home = () => {
     });
     return () => io.disconnect();
   }, []);
-
-  const services = [
-    {
-      id: "cook_for_me",
-      title: "Cook for Me",
-      tagline: "Most Popular",
-      description: "Host effortlessly while a skilled chef prepares authentic festival meals right in your home kitchen.",
-      icon: <ChefHat size={24} />,
-      bg: "linear-gradient(135deg, #fff7ed, #ffedd5)",
-      color: "#c2410c",
-      accent: "linear-gradient(135deg, #f59e0b, #ea580c)",
-      perks: ["Full meal prep & plating", "Traditional authentic spices", "Kitchen left clean & tidy"],
-    },
-    {
-      id: "cook_with_me",
-      title: "Cook With Me",
-      tagline: "Family Favourite",
-      description: "Team up with an experienced home chef to knead, fry, shape, and cook festive snacks together.",
-      icon: <Users size={24} />,
-      bg: "linear-gradient(135deg, #ecfdf5, #d1fae5)",
-      color: "#047857",
-      accent: "linear-gradient(135deg, #10b981, #047857)",
-      perks: ["Hands-on partnership", "Great for family bonding", "Share traditional recipes"],
-    },
-    {
-      id: "teach_me",
-      title: "Teach Me",
-      tagline: "Learn Heritage",
-      description: "Master intricate culinary techniques like one-string sugar syrup, chakli spiral shaping, and modak pleating.",
-      icon: <GraduationCap size={24} />,
-      bg: "linear-gradient(135deg, #eff6ff, #dbeafe)",
-      color: "#1d4ed8",
-      accent: "linear-gradient(135deg, #3b82f6, #1d4ed8)",
-      perks: ["Step-by-step guidance", "Troubleshooting tips", "Heritage secret ratios"],
-    },
-    {
-      id: "preparation_help",
-      title: "Preparation Help",
-      tagline: "Save Hours",
-      description: "Get reliable helping hands for labor-intensive tasks like grating coconut, chopping, kneading, and deep-frying.",
-      icon: <HandHelping size={24} />,
-      bg: "linear-gradient(135deg, #f5f3ff, #ede9fe)",
-      color: "#6d28d9",
-      accent: "linear-gradient(135deg, #8b5cf6, #6d28d9)",
-      perks: ["Saves hours of prep time", "Ideal for large gatherings", "Focused prep assistance"],
-    },
-  ];
 
   const testimonials = [
     {
@@ -438,17 +307,13 @@ const Home = () => {
 
   return (
     <div className="home-container">
-      {/* Sweets & festive dishes carousel, right below the navbar */}
       <DishCarousel />
-      {/* Pending cook ratings: after service hours end, unrated customers rate here */}
       <PendingCookRatings />
-      {/* Hero Section */}
       <section className="hero-v2">
         <div className="hero-v2-glow hero-v2-glow-1" aria-hidden="true" />
         <div className="hero-v2-glow hero-v2-glow-2" aria-hidden="true" />
         <div className="hero-v2-glow hero-v2-glow-3" aria-hidden="true" />
 
-        {/* Festive toran garland */}
         <div className="hero-toran" aria-hidden="true">
           {["🌼", "🏵️", "🌿", "🌼", "🏵️", "🌿", "🌼", "🏵️", "🌿", "🌼", "🏵️", "🌿", "🌼", "🏵️", "🌿", "🌼"].map((f, i) => (
             <span key={i} className="hero-toran-flower" style={{ animationDelay: `${(i % 8) * 0.25}s` }}>
@@ -459,16 +324,14 @@ const Home = () => {
 
         <div className="hero-v2-inner">
           <div className="hero-v2-left">
-            <p className="hero-devotional hero-enter" style={{ "--d": "0.1s" }}>
-              ॥ गणपती बाप्पा मोरया ॥
-            </p>
             <h1 className="hero-v2-title hero-enter" style={{ "--d": "0.15s" }}>
               Festive Feasts, <span className="hero-v2-accent">Cooked Fresh</span> in Your Kitchen
             </h1>
             <p className="hero-v2-sub hero-enter" style={{ "--d": "0.25s" }}>
-              Welcome Bappa home with ukadiche modak, puran poli, chakli & more —
-              cooked fresh in your kitchen by verified home cooks. OTP-verified
-              starts, secure UPI payments, and real-time alerts.
+              Celebrate Navratri with vrat-friendly feasts — sabudana khichdi,
+              kuttu parathas, samak rice & more — cooked fresh in your kitchen
+              by verified home cooks. OTP-verified starts, secure UPI payments,
+              and real-time alerts.
             </p>
 
             <div className="hero-v2-actions hero-enter" style={{ "--d": "0.35s" }}>
@@ -485,14 +348,10 @@ const Home = () => {
                   <Link to="/cook-on-demand" className="btn btn-lg hero-v2-btn-primary">
                     <ChefHat size={18} /> Book a Cook <ArrowRight size={18} />
                   </Link>
-                  <a href="#services" className="btn btn-lg hero-v2-btn-ghost">
-                    Explore Services ↓
-                  </a>
                 </>
               )}
             </div>
 
-            {/* Single social-proof row: avatars + rating + happy families */}
             <div className="hero-v2-proof hero-enter" style={{ "--d": "0.45s" }}>
               <div className="hero-v2-avatars">
                 <span>AD</span><span>VK</span><span>RS</span>
@@ -558,7 +417,6 @@ const Home = () => {
         <HeroStats />
       </section>
 
-      {/* Scrolling dishes ticker */}
       <div className="dish-marquee" aria-hidden="true">
         <div className="dish-marquee-track">
           {[0, 1].map((half) => (
@@ -573,11 +431,8 @@ const Home = () => {
         </div>
       </div>
 
-      {/* Live festive offers — admin-managed coupons from /api/coupons/active */}
       <HomeCoupons />
 
-      {/* User Registration — guests only; logged-in customers,
-          cooks and admins already have accounts */}
       {!user && (
         <section className="lead-section">
           <div className="lead-grid">
@@ -597,147 +452,12 @@ const Home = () => {
               </ul>
             </div>
             <div className="lead-form-card home-registration-form">
-              <div className="auth-header" style={{ marginBottom: "1rem" }}>
-                <h3 style={{ fontSize: "1.2rem", marginBottom: "0.25rem" }}>Create an Account</h3>
-                <p style={{ fontSize: "0.85rem", color: "var(--slate-500)", margin: 0 }}>Join India's festive culinary community</p>
-              </div>
-
-              {/* Role Selector */}
-              <div className="role-segmented-control" style={{ marginBottom: "1rem" }}>
-                <button
-                  type="button"
-                  className={`role-segment-btn ${regForm.role === "customer" ? "active" : ""}`}
-                  onClick={() => setRole("customer")}
-                >
-                  <CalendarCheck size={16} />
-                  <span>Book a Cook</span>
-                  <span className="role-hint">For households</span>
-                </button>
-                <button
-                  type="button"
-                  className={`role-segment-btn ${regForm.role === "cook" ? "active" : ""}`}
-                  onClick={() => setRole("cook")}
-                >
-                  <ChefHat size={16} />
-                  <span>Join as Cook</span>
-                  <span className="role-hint">Offer services</span>
-                </button>
-              </div>
-
-              {regError && (
-                <div className="error-alert-banner" style={{ padding: "0.5rem 0.75rem", fontSize: "0.82rem", marginBottom: "0.75rem" }}>
-                  {regError}
-                </div>
-              )}
-
-              <form onSubmit={handleRegSubmit}>
-                <div className="booking-form-group">
-                  <label>Full Name</label>
-                  <div className="input-with-icon">
-                    <User size={16} className="input-icon-prefix" />
-                    <input
-                      type="text"
-                      name="name"
-                      className="form-control"
-                      placeholder="e.g. Priya Sharma"
-                      value={regForm.name}
-                      onChange={handleRegChange}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="booking-form-group">
-                  <label>Email Address</label>
-                  <div className="input-with-icon">
-                    <Mail size={16} className="input-icon-prefix" />
-                    <input
-                      type="email"
-                      name="email"
-                      className="form-control"
-                      placeholder="name@example.com"
-                      value={regForm.email}
-                      onChange={handleRegChange}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="booking-form-group">
-                  <label>Phone Number</label>
-                  <div className="input-with-icon">
-                    <Phone size={16} className="input-icon-prefix" />
-                    <input
-                      type="tel"
-                      name="phone"
-                      className="form-control"
-                      placeholder="e.g. 9876543210"
-                      value={regForm.phone}
-                      onChange={handleRegChange}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="booking-form-group">
-                  <label>Password</label>
-                  <div className="input-with-icon password-input-wrapper">
-                    <Lock size={16} className="input-icon-prefix" />
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      name="password"
-                      className="form-control"
-                      placeholder="At least 6 characters"
-                      value={regForm.password}
-                      onChange={handleRegChange}
-                      required
-                      minLength={6}
-                    />
-                    <button
-                      type="button"
-                      className="password-toggle-btn"
-                      onClick={() => setShowPassword(!showPassword)}
-                      aria-label="Toggle password view"
-                    >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="booking-form-group">
-                  <label>Confirm Password</label>
-                  <div className="input-with-icon">
-                    <Lock size={16} className="input-icon-prefix" />
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      name="confirmPassword"
-                      className="form-control"
-                      placeholder="Confirm your password"
-                      value={regForm.confirmPassword}
-                      onChange={handleRegChange}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="btn btn-primary btn-block btn-lg"
-                  disabled={regLoading}
-                >
-                  {regLoading ? "Creating Account..." : "Create Account"}
-                </button>
-              </form>
-
-              <div className="auth-footer-prompt" style={{ marginTop: "0.75rem", fontSize: "0.85rem" }}>
-                Already have an account? <Link to="/login">Sign in</Link>
-              </div>
+              <Register />
             </div>
           </div>
         </section>
       )}
 
-      {/* How It Works Section */}
       <section className="home-band band-slate">
         <div className="section-header">
           <span className="section-eyebrow">Simple & Transparent</span>
@@ -794,55 +514,7 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Services Showcase */}
-      <section className="services-section" id="services">
-        <div className="section-header">
-          <span className="section-eyebrow">Tailored For Your Occasion</span>
-          <h2 className="section-title">Flexible Cooking Services</h2>
-          <p className="section-description">
-            Whether you need hands-off catering or a private masterclass, our verified cooks adapt to your preferences.
-          </p>
-        </div>
-
-        <div className="services-grid-modern">
-          {services.map((svc) => (
-            <article key={svc.id} className="service-card-modern">
-              <span className="service-accent-bar" style={{ background: svc.accent }} aria-hidden="true" />
-              <div className="service-card-top">
-                <div
-                  className="service-icon-wrapper"
-                  style={{ background: svc.bg, color: svc.color }}
-                >
-                  {svc.icon}
-                </div>
-                <span className="service-tagline" style={{ color: svc.color, background: svc.bg }}>
-                  {svc.tagline}
-                </span>
-              </div>
-              <h3>{svc.title}</h3>
-              <p className="service-desc">{svc.description}</p>
-              <ul className="service-card-perks">
-                {svc.perks.map((perk, i) => (
-                  <li key={i}>
-                    <CheckCircle2 size={16} style={{ color: svc.color }} /> {perk}
-                  </li>
-                ))}
-              </ul>
-              <Link
-                to={`/cook-on-demand?serviceType=${svc.id}`}
-                className="service-learn-more"
-                style={{ color: svc.color }}
-                aria-label={`Book now - ${svc.title}`}
-              >
-                <span>Book now</span>
-                <ArrowRight size={15} />
-              </Link>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      {/* COOKMITRA EVENTS — birthdays, anniversaries & family functions.
+            {/* COOKMITRA EVENTS — birthdays, anniversaries & family functions.
           You Celebrate. We Cook. No cook selection: CookMitra assigns a
           suitable verified cook after the request. */}
       <section className="home-band band-slate" id="events">
@@ -904,7 +576,6 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Customer Testimonials */}
       <section className="testimonials-section home-band band-abyss">
         <div className="section-header">
           <span className="section-eyebrow">Customer Stories</span>
@@ -937,10 +608,6 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Call to Action Banner — invite home chefs to earn. Shown to guests
-          and customers; hidden for cooks/admins who already have those roles.
-          Deep-links to /register?role=cook so the Register page preselects
-          the "Join as Cook" tab instead of defaulting to customer. */}
       {user?.role !== "cook" && user?.role !== "admin" && (
         <div className="cta-cook-wrap">
         <section className="cta-banner cta-cook">
@@ -993,6 +660,5 @@ const Home = () => {
 };
 
 export default Home;
-
 
 

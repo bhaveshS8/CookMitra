@@ -1,12 +1,14 @@
-// Shared coupon pricing — pure functions over a coupon record so both the
-// validate endpoint and the payment flow compute identical discounts.
-// Nothing here touches the DB, which keeps it unit-testable.
 
-const normalizeCode = (code) => String(code || "").trim().toUpperCase();
+// Forgiving normalization: uppercase + drop spaces, hyphens, underscores
+// and invisible copy-paste junk (zero-width spaces, BOM). Every lookup and
+// every stored code goes through this, so "welcome-50", "WELCOME 50" and
+// "WELCOME50" are one coupon.
+const normalizeCode = (code) =>
+  String(code || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "");
 
-// Returns null when usable, otherwise a human-readable rejection reason.
-// Options: amount (pre-discount fee), userId, serviceType, isFirstBooking
-// (whether the customer has no prior bookings), now.
 const rejectionReason = (
   coupon,
   { amount, userId, serviceType, isFirstBooking, now = new Date() } = {}
@@ -46,17 +48,12 @@ const rejectionReason = (
   return null;
 };
 
-// Rupee discount for a usable coupon (caller must check rejectionReason).
-// Flat coupons take flatAmount; percent coupons take percent capped by
-// maxDiscount. Never exceeds the order value.
 const computeDiscount = (coupon, amount) => {
   const fullFee = Math.round(Number(amount));
   let raw = 0;
   if (coupon.discountType === "flat") {
     raw = Math.round(Number(coupon.flatAmount) || 0);
   } else {
-    // Guard corrupt data (missing percent → NaN → falsy checks pass and the
-    // booking settles ₹0): treat unparseable percent as no discount.
     raw = Math.round((fullFee * Number(coupon.percent)) / 100) || 0;
   }
   const capped =
@@ -66,4 +63,31 @@ const computeDiscount = (coupon, amount) => {
   return Math.max(0, Math.min(capped, fullFee));
 };
 
-module.exports = { normalizeCode, rejectionReason, computeDiscount };
+// Resolve a coupon by user-entered code: exact normalized match first,
+// then a legacy fallback comparing normalized forms (codes stored before
+// separator-stripping, e.g. "FIRST FREE", still resolve). The collection
+// is admin-managed and tiny, so the scan is cheap and runs only on miss.
+const findCouponByCode = async (code) => {
+  const wanted = normalizeCode(code);
+  if (!wanted) return null;
+  let Coupon;
+  try {
+    Coupon = require("../models/Coupon");
+  } catch {
+    return null;
+  }
+  try {
+    const exact = await Coupon.findOne({ code: wanted });
+    if (exact) return exact;
+  } catch {
+    return null;
+  }
+  try {
+    const all = await Coupon.find({});
+    return (all || []).find((c) => normalizeCode(c?.code) === wanted) || null;
+  } catch {
+    return null;
+  }
+};
+
+module.exports = { normalizeCode, rejectionReason, computeDiscount, findCouponByCode };

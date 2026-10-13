@@ -19,7 +19,7 @@ const CookSetup = () => {
         <h1>Your public chef page</h1>
         <p className="cook-setup-intro-sub">
           Families see this before they book you — a complete profile gets approved faster.
-          You keep 75% of every booking; discounts are on us.
+          You keep 85% of every booking; discounts are on us.
         </p>
         <ul className="cook-setup-steps">
           <li><BadgeCheck size={13} /> Skills + experience</li>

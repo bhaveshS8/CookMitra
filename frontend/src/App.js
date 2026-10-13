@@ -4,8 +4,10 @@ import { Provider, useSelector, useDispatch } from "react-redux";
 import { store } from "./store/store";
 import { initLocation } from "./store/locationSlice";
 import Toasts from "./components/Toasts";
+import NotificationPopup from "./components/NotificationPopup";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
+import { useRealtime } from "./hooks/useRealtime";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ScrollToTop from "./components/ScrollToTop";
 import BackToTop from "./components/BackToTop";
@@ -22,35 +24,60 @@ import EventBookingDetails from "./pages/EventBookingDetails";
 import CustomerEventBookings from "./pages/CustomerEventBookings";
 import CustomerDashboard from "./pages/CustomerDashboard";
 import CustomerProfile from "./pages/CustomerProfile";
+import {
+  ProfilePersonalPage,
+  ProfileAddressesPage,
+  ProfileActivityPage,
+  ProfileSecurityPage,
+} from "./pages/ProfileSectionPages";
 import BookingDetails from "./pages/BookingDetails";
 import Notifications from "./pages/Notifications";
 import CookDashboard from "./pages/CookDashboard";
 import CookSetup from "./pages/CookSetup";
 import CookReviews from "./pages/CookReviews";
+import CookEarnings from "./pages/CookEarnings";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminCookProfile from "./pages/AdminCookProfile";
 import AdminComplaints from "./pages/AdminComplaints";
 import BookingWaiting from "./pages/BookingWaiting";
 import BookingPayment from "./pages/BookingPayment";
-import { TermsConditions, PrivacyPolicy, RefundPolicy, ContactUs } from "./pages/Legal";
+import { TermsConditions, PrivacyPolicy, RefundPolicy, ContactUs, CancellationRefundPolicy } from "./pages/Legal";
 import "./App.css";
 
-// Customer-only pages (Find Cooks / Book a Cook).
-// Guests + customers can view; admins -> /admin, cooks -> cook dashboard.
 const NonAdminRoute = ({ children }) => {
   const user = useSelector((s) => s.auth.user);
+  const token = useSelector((s) => s.auth.token);
   const loading = useSelector((s) => s.auth.loading);
   if (loading) return <div className="loading">Loading...</div>;
+  if (!token || !user) return children;
   if (user?.role === "admin") return <Navigate to="/admin" replace />;
   if (user?.role === "cook") return <Navigate to="/dashboard/cook-bookings" replace />;
   return children;
 };
 
-// Kicks off the first-visit location bootstrap once per app mount.
+const RealtimeBootstrap = () => {
+  useRealtime();
+  return null;
+};
+
 const LocationBootstrap = () => {
   const dispatch = useDispatch();
   useEffect(() => {
     dispatch(initLocation());
+  }, [dispatch]);
+  return null;
+};
+
+const SessionBootstrap = () => {
+  const dispatch = useDispatch();
+  useEffect(() => {
+    try {
+      const token = localStorage.getItem("token") || sessionStorage.getItem("token");
+      if (token) {
+        import("./store/authSlice").then((m) => dispatch(m.fetchCurrentUser()));
+      }
+    } catch {
+    }
   }, [dispatch]);
   return null;
 };
@@ -60,25 +87,31 @@ function App() {
     <Provider store={store}>
         <Router>
         <LocationBootstrap />
+        <SessionBootstrap />
+        <RealtimeBootstrap />
         <ScrollToTop />
         <div className="App">
           <FestiveOfferBillboard />
           <Navbar />
           <main className="main-content">
             <Routes>
-              <Route path="/" element={<Home />} />
+              <Route
+                path="/"
+                element={
+                  <NonAdminRoute>
+                    <Home />
+                  </NonAdminRoute>
+                }
+              />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
-              {/* Compliance pages (required for payment-gateway activation) —
-                  public for every role, including guests. */}
               <Route path="/terms" element={<TermsConditions />} />
               <Route path="/privacy" element={<PrivacyPolicy />} />
               <Route path="/refunds" element={<RefundPolicy />} />
+              <Route path="/customer-cancellation-refund-policy" element={<CancellationRefundPolicy />} />
               <Route path="/contact" element={<ContactUs />} />
-              {/* Find Cooks listing removed — all discovery goes through
-                  Book a Cook. Old /cooks URLs land there too. */}
               <Route
                 path="/cooks"
                 element={<Navigate to="/cook-on-demand" replace />}
@@ -142,9 +175,41 @@ function App() {
                 }
               />
               <Route
+                path="/dashboard/profile/personal"
+                element={
+                  <ProtectedRoute roles={["customer"]}>
+                    <ProfilePersonalPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard/profile/addresses"
+                element={
+                  <ProtectedRoute roles={["customer"]}>
+                    <ProfileAddressesPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard/profile/activity"
+                element={
+                  <ProtectedRoute roles={["customer"]}>
+                    <ProfileActivityPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/dashboard/profile/security"
+                element={
+                  <ProtectedRoute roles={["customer"]}>
+                    <ProfileSecurityPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/dashboard/notifications"
                 element={
-                  <ProtectedRoute roles={["customer", "cook"]}>
+                  <ProtectedRoute roles={["customer", "cook", "admin"]}>
                     <Notifications />
                   </ProtectedRoute>
                 }
@@ -198,6 +263,14 @@ function App() {
                 }
               />
               <Route
+                path="/cook/earnings"
+                element={
+                  <ProtectedRoute roles={["cook"]}>
+                    <CookEarnings />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="/admin"
                 element={
                   <ProtectedRoute roles={["admin"]}>
@@ -228,6 +301,7 @@ function App() {
         </div>
         <BackToTop />
         <Toasts />
+        <NotificationPopup />
       </Router>
     </Provider>
   );

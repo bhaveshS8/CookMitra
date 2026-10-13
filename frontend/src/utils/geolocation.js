@@ -1,19 +1,25 @@
-// Shared browser-geolocation helper with GPS retry + user-friendly errors.
-//
-// Why this exists: a single getCurrentPosition call with a short timeout
-// fails silently in the common cases — cold GPS fixes take longer than the
-// timeout, plain-HTTP pages (non-localhost) are blocked by the browser, and
-// permission/timeout/unavailable all need different guidance.
-//
-// Accuracy handling: resolves with { lat, lng, accuracy, timestamp } where
-// `accuracy` is the GPS fix radius in metres reported by the browser.
-// Callers MUST surface `accuracy` ("±14 m") and warn when it is poor (>100 m)
-// instead of silently trusting a stale/cached network fix.
 
-// Good enough to treat the pin as the venue (<50 m), usable with caution
-// (<150 m), poor above that.
 export const ACCURACY_GOOD_M = 50;
 export const ACCURACY_OK_M = 150;
+
+// Single documented GPS-freshness policy (also used by the location slice
+// and both booking flows — do not invent parallel freshness windows).
+export const LOCATION_FRESH_MS = 2 * 3600 * 1000;
+// Bounded network budgets so a stalled provider can never hang detection.
+export const GEOCODE_TIMEOUT_MS = 7000;
+export const IP_TIMEOUT_MS = 6000;
+
+// Bounded race: rejects after ms so a hung operation can never stall its
+// caller forever. The timer is always cleared on settle; never unref'd.
+export const withTimeout = (promise, ms, message = "Timed out") => {
+  let timer;
+  return Promise.race([
+    Promise.resolve(promise).finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    }),
+  ]);
+};
 
 export const formatAccuracy = (accuracy) => {
   if (accuracy == null || !Number.isFinite(accuracy)) return "unknown accuracy";
@@ -33,10 +39,7 @@ const singleShot = (options) =>
     navigator.geolocation.getCurrentPosition(resolve, reject, options);
   });
 
-// Watch GPS briefly and keep the most accurate fix (lowest accuracy number).
-// Resolves early once a GOOD fix arrives, otherwise resolves with the best
-// fix seen when `watchMs` elapses. Rejects only if no fix at all arrives.
-const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M } = {}) =>
+const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M, maxAgeMs = 30000 } = {}) =>
   new Promise((resolve, reject) => {
     let best = null;
     let done = false;
@@ -49,13 +52,13 @@ const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M } = {}) =>
       try {
         if (watchId != null) navigator.geolocation.clearWatch(watchId);
       } catch {
-        // ignore
       }
       if (result) resolve(result);
       else reject(error || lastError || new Error("No position fix received"));
     };
 
     const onFix = (pos) => {
+      if (Number.isFinite(pos.timestamp) && Date.now() - pos.timestamp > maxAgeMs) return;
       const candidate = {
         lat: pos.coords.latitude,
         lng: pos.coords.longitude,
@@ -65,7 +68,6 @@ const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M } = {}) =>
       if (!best || (candidate.accuracy ?? Infinity) < (best.accuracy ?? Infinity)) {
         best = candidate;
       }
-      // Good enough — stop early instead of waiting out the full window.
       if ((candidate.accuracy ?? Infinity) <= goodEnoughM) {
         finish(best, null);
       }
@@ -73,7 +75,6 @@ const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M } = {}) =>
 
     const onError = (err) => {
       lastError = err;
-      // Permission denial can never succeed — fail fast.
       if (err?.code === 1) finish(null, err);
     };
 
@@ -94,18 +95,32 @@ const bestOfWatch = ({ watchMs = 9000, goodEnoughM = ACCURACY_GOOD_M } = {}) =>
     }, watchMs);
   });
 
-// Reverse-geocode a GPS pin into address parts for auto-filling venue forms.
-// Returns { city, area, state, street, suburb, postcode } ("" when unknown).
-// Never throws — callers always keep the pin and ask the user to type what's
-// missing. Uses BigDataCloud (fast, keyless) + Nominatim (street-level detail).
-export const reverseGeocode = async (lat, lng) => {
-  const out = { city: "", area: "", state: "", street: "", suburb: "", postcode: "" };
+// Bounded fetch: rejects after timeoutMs so a stalled provider can never
+// hang detection forever. Never throws synchronously.
+const fetchWithTimeout = (url, timeoutMs) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+};
+
+export const reverseGeocode = async (lat, lng, { timeoutMs = GEOCODE_TIMEOUT_MS } = {}) => {
+  const out = {
+    city: "",
+    area: "",
+    state: "",
+    street: "",
+    suburb: "",
+    postcode: "",
+    houseNumber: "",
+    displayName: "",
+  };
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return out;
 
   const fromBigDataCloud = (async () => {
     try {
-      const r = await fetch(
-        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`
+      const r = await fetchWithTimeout(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+        timeoutMs
       );
       if (!r.ok) return {};
       const d = await r.json();
@@ -121,11 +136,13 @@ export const reverseGeocode = async (lat, lng) => {
 
   const fromNominatim = (async () => {
     try {
-      const r = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=18&addressdetails=1`
+      const r = await fetchWithTimeout(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=18&addressdetails=1`,
+        timeoutMs
       );
       if (!r.ok) return {};
-      const a = (await r.json()).address || {};
+      const body = await r.json();
+      const a = body.address || {};
       return {
         city: a.city || a.town || a.village || a.county || a.state || "",
         area: a.suburb || a.neighbourhood || a.hamlet || a.quarter || a.residential || "",
@@ -133,6 +150,8 @@ export const reverseGeocode = async (lat, lng) => {
         street: a.road || "",
         suburb: a.suburb || a.neighbourhood || a.hamlet || "",
         postcode: a.postcode || "",
+        houseNumber: a.house_number || "",
+        displayName: body.display_name || "",
       };
     } catch {
       return {};
@@ -146,11 +165,11 @@ export const reverseGeocode = async (lat, lng) => {
   out.street = nomi.street || "";
   out.suburb = nomi.suburb || "";
   out.postcode = bdc.postcode || nomi.postcode || "";
+  out.houseNumber = nomi.houseNumber || "";
+  out.displayName = nomi.displayName || "";
   return out;
 };
 
-// Build a short human-readable header label such as "Kothrud, Pune" or
-// "Pune, Maharashtra". Prefers area + city, falls back to city + state.
 export const formatLocationLabel = ({ area, city, state } = {}) => {
   const a = (area || "").trim();
   const c = (city || "").trim();
@@ -160,103 +179,52 @@ export const formatLocationLabel = ({ area, city, state } = {}) => {
   return c || a || s || "";
 };
 
-// Forward-geocode a typed place ("Kothrud, Pune") into selectable options.
-// Returns [{ label, city, state, lat, lng }]. Never throws — returns [] when
-// the lookup fails or finds nothing.
-export const searchLocations = async (query, limit = 5) => {
-  const q = (query || "").trim();
-  if (q.length < 2) return [];
+export const fetchIpLocation = async ({ timeoutMs = IP_TIMEOUT_MS } = {}) => {
   try {
-    const r = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=${limit}&q=${encodeURIComponent(q)}`
-    );
-    if (!r.ok) return [];
-    const list = await r.json();
-    if (!Array.isArray(list)) return [];
-    return list
-      .filter((p) => p && p.lat != null && p.lon != null)
-      .map((p) => {
-        const a = p.address || {};
-        const city = a.city || a.town || a.village || a.county || a.state || (p.display_name || "").split(",")[0].trim();
-        const state = a.state || "";
-        const area = a.suburb || a.neighbourhood || a.hamlet || a.quarter || "";
-        return {
-          label: formatLocationLabel({ area, city, state }) || (p.display_name || "").split(",").slice(0, 2).join(",").trim(),
-          city,
-          state,
-          area,
-          lat: Number(p.lat),
-          lng: Number(p.lon),
-        };
-      })
-      .filter((p) => p.label && Number.isFinite(p.lat) && Number.isFinite(p.lng));
-  } catch {
-    return [];
-  }
-};
-
-// Approximate city from the network IP — no browser permission needed, so it
-// can run on page open as a non-blocking hint until the user shares precise
-// GPS or picks a place manually. Uses ipwho.is (primary) + geojs.io (backup).
-// Both are keyless, HTTPS, and send `Access-Control-Allow-Origin: *`, unlike
-// the previous providers (BigDataCloud ip-geolocation-full needs an API key
-// and answers 403 without one; ipapi.co answers 403/CORS-less when its free
-// quota is exceeded) — both of which spammed the console with 403 / CORS /
-// ERR_FAILED errors on the live site.
-// Returns { city, state, country, label } or null. Never throws.
-// NOTE: providers are tried sequentially (not Promise.all) so a failing
-// provider can't leave a dangling fetch that logs network errors after we
-// already resolved.
-export const fetchIpLocation = async () => {
-  // Primary: https://ipwho.is/ -> { city, region, country, success }
-  try {
-    const r = await fetch("https://ipwho.is/");
+    const r = await fetchWithTimeout("https://ipwho.is/", timeoutMs);
     if (r.ok) {
       const d = await r.json();
       if (d && d.success !== false) {
         const city = d.city || "";
+        const area = d.district || d.suburb || d.locality || "";
         const state = d.region || "";
         const country = d.country || "";
-        if (city || state) return { city, state, country, label: formatLocationLabel({ city, state }) };
+        if (city || state || area) return { city, area, state, country, label: formatLocationLabel({ area, city, state }) };
       }
     }
   } catch {
-    // fall through to the backup provider
   }
-  // Backup: https://get.geojs.io/v1/ip/geo.json -> { city, region, country }
   try {
-    const r2 = await fetch("https://get.geojs.io/v1/ip/geo.json");
+    const r2 = await fetchWithTimeout("https://get.geojs.io/v1/ip/geo.json", timeoutMs);
     if (!r2.ok) return null;
     const d2 = await r2.json();
     const city = d2.city || "";
+    const area = d2.district || d2.suburb || d2.locality || "";
     const state = d2.region || "";
     const country = d2.country || d2.country_name || "";
-    if (!city && !state) return null;
-    return { city, state, country, label: formatLocationLabel({ city, state }) };
+    if (!city && !state && !area) return null;
+    return { city, area, state, country, label: formatLocationLabel({ area, city, state }) };
   } catch {
     return null;
   }
 };
 
-// Resolves with { lat, lng, accuracy, timestamp }. Uses a fresh (maximumAge: 0)
-// high-accuracy watch to pick the best fix, then falls back to single-shot
-// attempts. Rejects with an Error whose message is safe to show to the user.
-export const getCurrentPositionRobust = ({ highAccuracyTimeout = 15000 } = {}) =>
+export const getCurrentPositionRobust = ({ highAccuracyTimeout = 12000, watchMs = 10000 } = {}) =>
   new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(
-        new Error("Geolocation is not supported by this browser — please type your address manually")
-      );
-      return;
-    }
-    // Browsers block geolocation on insecure (plain http://) pages except
-    // localhost — detect it early so the user gets an explanation instead of
-    // a silent failure.
+    // Secure-context first: on plain-HTTP origins the API may be hidden
+    // entirely, and "unsupported" would mislead — the real problem is the
+    // insecure page.
     if (typeof window !== "undefined" && window.isSecureContext === false) {
       reject(
         new Error(
           "Location needs a secure page (HTTPS or localhost) — please type your address manually or open the site over HTTPS"
         )
+      );
+      return;
+    }
+    if (!navigator.geolocation) {
+      reject(
+        new Error("Geolocation is not supported by this browser — please type your address manually")
       );
       return;
     }
@@ -287,17 +255,16 @@ export const getCurrentPositionRobust = ({ highAccuracyTimeout = 15000 } = {}) =
     };
 
     (async () => {
-      // 1) Best-of-watch: fresh high-accuracy fixes for a few seconds.
       try {
-        const best = await bestOfWatch({ watchMs: 8000 });
+        // Watch for up to 10s, settling early on a ≤50m fix, so entry
+        // detection lands on the most precise reading available.
+        const best = await bestOfWatch({ watchMs });
         if (best && Number.isFinite(best.lat) && Number.isFinite(best.lng)) {
           resolve(best);
           return;
         }
       } catch {
-        // fall through to single-shot attempts
       }
-      // 2) Fresh high-accuracy single shot (never accept a cached fix here).
       try {
         const pos = await singleShot({
           enableHighAccuracy: true,
@@ -311,11 +278,10 @@ export const getCurrentPositionRobust = ({ highAccuracyTimeout = 15000 } = {}) =
           reject(describe(err, "first"));
           return;
         }
-        // 3) One longer low-power attempt before giving up.
         try {
           const pos2 = await singleShot({
             enableHighAccuracy: false,
-            timeout: 30000,
+            timeout: 10000,
             maximumAge: 0,
           });
           resolve(toCoords(pos2));

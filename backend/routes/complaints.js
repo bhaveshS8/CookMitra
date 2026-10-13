@@ -10,12 +10,10 @@ const {
   updateComplaintStatus,
 } = require("../controllers/complaintController");
 
-// Cook files a complaint about a customer (booking optional — when given,
-// the customer is derived from the cook's own booking).
 router.post(
   "/",
   auth,
-  authorize("cook"),
+  authorize("cook", "customer"),
   [
     body("message")
       .trim()
@@ -23,20 +21,26 @@ router.post(
       .withMessage("Please describe the issue (10–2000 characters)"),
     body("category")
       .optional()
-      .isIn(["behaviour", "payment", "address", "no_show", "safety", "other"])
+      .isIn([
+        // cook report-form values (ComplaintForm filedBy="cook")
+        "behaviour", "payment", "address", "no_show", "safety", "quality",
+        "hygiene", "other",
+        // customer report-form values (ComplaintForm filedBy="customer";
+        // the controller maps these to the lowercase enum via
+        // CUSTOMER_REASON_MAP, so the validator must let them through)
+        "COOK_DID_NOT_ARRIVE", "MAJOR_SERVICE_DEVIATION",
+        "SERVICE_QUALITY_ISSUE", "UNPROFESSIONAL_BEHAVIOR", "OTHER",
+      ])
       .withMessage("Invalid category"),
   ],
   validate,
   createComplaint
 );
 
-// Logged-in cook's own complaints.
-router.get("/my", auth, authorize("cook"), getMyComplaints);
+router.get("/my", auth, authorize("cook", "customer"), getMyComplaints);
 
-// Full triage queue (admin only).
 router.get("/", auth, authorize("admin"), getAllComplaints);
 
-// Admin updates status / leaves a note.
 router.patch(
   "/:id/status",
   auth,

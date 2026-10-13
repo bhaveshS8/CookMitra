@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowRight,
   CheckCircle2,
-  ChefHat,
   Clock,
   CreditCard,
   Landmark,
@@ -21,13 +20,11 @@ import API from "../api/axios";
 import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
 import { AnalyticsEvents, track } from "../utils/analytics";
-import { SERVICE_DETAILS, formatCurrency, formatDate } from "../utils/constants";
+import { SERVICE_DETAILS, formatCurrency, formatDate, formatTimeRange12, formatIsoToIstDay } from "../utils/constants";
 
 const WINDOW_MS = 5 * 60 * 1000; // 5-minute payment window
-// Calmed for scale (see BookingWaiting): 8s halves sustained poll rps.
 const POLL_MS = 8000;
 const REDIRECT_S = 6;
-// Circumference of the countdown ring (SVG r=54).
 const RING = 2 * Math.PI * 54;
 
 const METHODS = [
@@ -36,10 +33,6 @@ const METHODS = [
   { id: "netbanking", label: "Net Banking", desc: "All major banks", icon: Landmark },
   { id: "wallet", label: "Wallet", desc: "Paytm · Amazon Pay", icon: Wallet },
 ];
-
-// Razorpay Checkout method keys hidden for each choice, so the gateway opens
-// focused on the method the customer picked (best-effort — unknown keys are
-// ignored by Checkout).
 const HIDE_METHODS = {
   upi: ["card", "netbanking", "wallet", "emi", "paylater", "cardless_emi"],
   card: ["upi", "netbanking", "wallet", "emi", "paylater", "cardless_emi"],
@@ -47,7 +40,6 @@ const HIDE_METHODS = {
   wallet: ["upi", "card", "netbanking", "emi", "paylater", "cardless_emi"],
 };
 
-// Load Razorpay Checkout.js once (cached promise). False when offline/blocked.
 let razorpayScriptPromise = null;
 const loadRazorpay = () => {
   if (typeof window !== "undefined" && window.Razorpay) return Promise.resolve(true);
@@ -80,15 +72,25 @@ const BookingPayment = () => {
   const [redirectIn, setRedirectIn] = useState(REDIRECT_S);
   const [cookWaUrl, setCookWaUrl] = useState(null);
   const [selfWaUrl, setSelfWaUrl] = useState(null);
+  const [waAuto, setWaAuto] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    API.get("/whatsapp/status")
+      .then((res) => {
+        if (alive && res.data?.enabled) setWaAuto(true);
+      })
+      .catch(() => {
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const handledRef = useRef(false);
   const aliveRef = useRef(true);
   const pollRef = useRef(null);
-  // True once Razorpay reports a successful payment (Checkout also fires
-  // `ondismiss` when it closes after success — this tells the two apart).
   const completedRef = useRef(false);
-  // Set when payment.failed already toasted, so the following ondismiss
-  // doesn't pile a misleading "cancelled" message on top.
   const failedSilentDismissRef = useRef(false);
+  const couponToastRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -96,6 +98,10 @@ const BookingPayment = () => {
       if (!aliveRef.current || handledRef.current) return;
       const b = res.data;
       setBooking(b);
+      if (!couponToastRef.current && b.couponCode && Number(b.discount) > 0) {
+        couponToastRef.current = true;
+        showToast(`🎉 Coupon ${b.couponCode} applied — you saved ${formatCurrency(b.discount)}!`, "success");
+      }
       const st = b.status;
       const paid = b.payment?.status === "paid";
       if (["confirmed", "in_progress", "completed"].includes(st) || paid) {
@@ -108,11 +114,9 @@ const BookingPayment = () => {
         handledRef.current = true;
         setPhase("expired");
       } else if (st === "requested") {
-        // Cook never accepted (or the window lapsed) — back to waiting.
         handledRef.current = true;
         navigate(`/bookings/${bookingId}/wait`, { replace: true });
       } else {
-        // Don't clobber an in-flight payment with the idle phase.
         setPhase((p) => (p === "processing" ? p : "pay"));
       }
     } catch (err) {
@@ -122,12 +126,11 @@ const BookingPayment = () => {
         setPhase("error");
       }
     }
-  }, [bookingId, navigate]);
+  }, [bookingId, navigate, showToast]);
 
   useEffect(() => {
     aliveRef.current = true;
     load();
-    // Pause polling while the tab is hidden (see BookingWaiting).
     const startPoll = () => {
       stopPoll();
       pollRef.current = setInterval(() => {
@@ -156,7 +159,6 @@ const BookingPayment = () => {
     };
   }, [load]);
 
-  // Expired screen auto-redirects back to finding cooks
   useEffect(() => {
     if (phase !== "expired") return undefined;
     setRedirectIn(REDIRECT_S);
@@ -173,32 +175,36 @@ const BookingPayment = () => {
     return () => clearInterval(iv);
   }, [phase, navigate]);
 
-  // Real Razorpay flow: create a gateway order for this booking's window,
-  // collect the payment in Checkout (UPI/cards per the chosen method), then
-  // confirm with the verified signature. Nothing is ever marked paid without
-  // gateway verification, and nothing auto-opens WhatsApp — the success
-  // screen offers optional share buttons instead.
+  // UX guard only — not security.
+  const payingRef = useRef(false);
   const payNow = async () => {
+    if (payingRef.current || phase === "processing") return;
+    payingRef.current = true;
+    try {
+      await payNowInner();
+    } finally {
+      payingRef.current = false;
+    }
+  };
+  const payNowInner = async () => {
     if (phase === "processing") return;
     setPhase("processing");
     completedRef.current = false;
     failedSilentDismissRef.current = false;
     try {
-      // Refuse to start when the window is nearly gone — money captured after
-      // expiry can't attach to a live booking.
       const msLeft = expiresAtMsForPay();
       if (msLeft != null && msLeft < 30000) {
         setPhase("pay");
         showToast("Payment window almost over — please rebook to get a fresh window.", "error");
         return;
       }
-      // 1) Gateway order (honest errors only — never a fake confirmation).
       const cookId = booking?.cook?._id || booking?.cook;
       let order;
       try {
+        const orderDate = formatIsoToIstDay(booking?.date) || booking?.date;
         const res = await API.post("/payments/order", {
           cook: cookId,
-          date: booking?.date,
+          date: orderDate,
           startTime: booking?.startTime,
           endTime: booking?.endTime,
           durationHours: booking?.durationHours,
@@ -207,9 +213,12 @@ const BookingPayment = () => {
         order = res.data;
       } catch (err) {
         if (err.response?.status === 503) {
-          // Gateway keys missing — testing mode: one click completes a test
-          // payment (no real money). Vanishes once real keys are added.
-          await confirmTestPayment();
+          handledRef.current = false;
+          setPhase("pay");
+          showToast(
+            "Online payment is temporarily unavailable. Please try again later — no money was charged.",
+            "error"
+          );
           return;
         }
         setPhase("pay");
@@ -219,14 +228,30 @@ const BookingPayment = () => {
         );
         return;
       }
-      // 2) Razorpay Checkout.
+      if (order?.free || order?.amountPaise === 0 || Number(order?.amountPaise || 0) <= 0) {
+        const res = await API.patch(`/bookings/${bookingId}/pay`, { method, payment: null });
+        completedRef.current = true;
+        setBooking((prev) => ({ ...(prev || {}), ...(res.data || {}) }));
+        setCookWaUrl(res.data?.cookWhatsappUrl || null);
+        setSelfWaUrl(res.data?.customerWhatsappUrl || null);
+        setPhase("success");
+        track(AnalyticsEvents.PAYMENT_SUCCESS, {
+          booking_id: String(bookingId || ""),
+          amount: 0,
+          method: "discount",
+        });
+        showToast("Discount covered the full fee — booking confirmed!", "success");
+        setTimeout(() => {
+          if (aliveRef.current) navigate(`/bookings/${bookingId}`, { replace: true });
+        }, 6000);
+        return;
+      }
       const loaded = await loadRazorpay();
       if (!loaded || !window.Razorpay) {
         setPhase("pay");
         showToast("Couldn't load the payment gateway. Check your connection and retry.", "error");
         return;
       }
-      // Pause polling auto-redirects while Checkout is open.
       handledRef.current = true;
       const rzp = new window.Razorpay({
         key: order.keyId,
@@ -234,7 +259,7 @@ const BookingPayment = () => {
         currency: order.currency || "INR",
         order_id: order.orderId,
         name: "CookMitra",
-        description: `Cook booking ${formatDate(booking?.date)} ${booking?.startTime}–${booking?.endTime}`,
+        description: `Cook booking ${formatDate(booking?.date)} ${formatTimeRange12(booking?.startTime, booking?.endTime, "-")}`,
         prefill: { contact: user?.phone || "", email: user?.email || "" },
         theme: { color: "#e8590c" },
         ...(HIDE_METHODS[method]
@@ -261,16 +286,25 @@ const BookingPayment = () => {
               method,
             });
             showToast("Payment successful — booking confirmed!", "success");
-            // Linger so the customer can use the WhatsApp share buttons.
             setTimeout(() => {
               if (aliveRef.current) navigate(`/bookings/${bookingId}`, { replace: true });
             }, 6000);
           } catch (err) {
             completedRef.current = false;
             if (err.response?.status === 410) {
-              // Server freed the slot — the window closed mid-payment.
               setPhase("expired");
               showToast(err.response?.data?.message || "Payment window expired — slot released.", "error");
+            } else if (err.response?.status === 409) {
+              if (err.response?.data?.alreadyPaid || err.response?.data?.status === "confirmed") {
+                completedRef.current = true;
+                setBooking((prev) => ({ ...(prev || {}), ...(err.response?.data || {}) }));
+                setPhase("success");
+                showToast("Payment already recorded — booking confirmed!", "success");
+              } else {
+                handledRef.current = false;
+                setPhase("pay");
+                showToast(err.response?.data?.message || "This slot was just taken — please pick another time.", "error");
+              }
             } else {
               handledRef.current = false;
               setPhase("pay");
@@ -280,8 +314,6 @@ const BookingPayment = () => {
         },
         modal: {
           ondismiss: () => {
-            // Fires on manual close AND after success/failure — only a plain
-            // manual close counts here.
             if (completedRef.current) return;
             if (failedSilentDismissRef.current) {
               failedSilentDismissRef.current = false;
@@ -308,34 +340,6 @@ const BookingPayment = () => {
     }
   };
 
-  // Dev-only simulated payment (NO real money). Only reachable when the
-  // gateway is unconfigured, and only accepted by servers explicitly opted
-  // in via ALLOW_TEST_PAYMENTS=true.
-  const confirmTestPayment = async () => {
-    try {
-      const res = await API.patch(`/bookings/${bookingId}/pay`, { method, testMode: true });
-      completedRef.current = true;
-      handledRef.current = true;
-      setBooking((prev) => ({ ...(prev || {}), ...(res.data || {}) }));
-      setCookWaUrl(res.data?.cookWhatsappUrl || null);
-      setSelfWaUrl(res.data?.customerWhatsappUrl || null);
-      setPhase("success");
-      showToast("Test payment recorded — booking confirmed! (No real money moved.)", "success");
-      setTimeout(() => {
-        if (aliveRef.current) navigate(`/bookings/${bookingId}`, { replace: true });
-      }, 6000);
-    } catch (err) {
-      if (err.response?.status === 410) {
-        setPhase("expired");
-        showToast(err.response?.data?.message || "Payment window expired — slot released.", "error");
-      } else {
-        setPhase("pay");
-        showToast(err.response?.data?.message || "Test payment failed — please try again.", "error");
-      }
-    }
-  };
-
-  // Milliseconds left in the payment window (null when unknown).
   const expiresAtMsForPay = () => {
     const acceptedEntry = (booking?.statusHistory || []).find((s) => s.status === "accepted");
     const acceptedMs = acceptedEntry?.timestamp ? new Date(acceptedEntry.timestamp).getTime() : null;
@@ -347,7 +351,6 @@ const BookingPayment = () => {
     return exp ? Math.max(0, exp - Date.now()) : null;
   };
 
-  // Countdown against the server-set 5-minute payment window.
   const acceptedEntry = (booking?.statusHistory || []).find((s) => s.status === "accepted");
   const acceptedMs = acceptedEntry?.timestamp ? new Date(acceptedEntry.timestamp).getTime() : null;
   const expiresAtMs = booking?.paymentExpiresAt
@@ -411,7 +414,6 @@ const BookingPayment = () => {
     );
   }
 
-  // phases "pay" and "processing" render below
   if (phase === "success") {
     return (
       <div className="booking-flow-page">
@@ -421,11 +423,6 @@ const BookingPayment = () => {
           </div>
           <h1 className="bf-title">Booking confirmed! 🎉</h1>
           <p className="bf-sub">{cookName} will arrive as scheduled. Redirecting to your booking…</p>
-          {booking?.payment?.testMode && (
-            <span className="badge badge-amber" style={{ marginTop: "0.5rem" }}>
-              Test payment — no real money moved
-            </span>
-          )}
           {(cookWaUrl || selfWaUrl) && (
             <div
               style={{
@@ -449,6 +446,11 @@ const BookingPayment = () => {
                 <a href={selfWaUrl} target="_blank" rel="noreferrer" className="btn btn-outline bf-btn">
                   <MessageCircle size={18} /> Send confirmation to my WhatsApp
                 </a>
+              )}
+              {waAuto && (
+                <p className="bf-sub" style={{ margin: 0 }}>
+                  Booking updates will also arrive automatically on your WhatsApp.
+                </p>
               )}
             </div>
           )}
@@ -485,10 +487,6 @@ const BookingPayment = () => {
           </div>
           <div className="bf-wait-copy">
             <h1 className="bf-title">Confirm your booking</h1>
-            <p className="bf-sub">
-              <ChefHat size={15} /> <b>{cookName}</b> accepted your request and is holding this slot
-              only for the next {clockText}. Complete payment to lock it in.
-            </p>
           </div>
         </div>
 
@@ -497,7 +495,7 @@ const BookingPayment = () => {
             <div className="bf-summary">
               <span className="bf-chip"><UtensilsCrossed size={14} /> {service.label || "Home cooking"}</span>
               <span className="bf-chip">📅 {formatDate(booking?.date)}</span>
-              <span className="bf-chip">⏰ {booking?.startTime} – {booking?.endTime}</span>
+              <span className="bf-chip">⏰ {formatTimeRange12(booking?.startTime, booking?.endTime)}</span>
               {booking?.guests ? <span className="bf-chip"><Users size={14} /> {booking.guests} guests</span> : null}
             </div>
 
@@ -516,14 +514,15 @@ const BookingPayment = () => {
                     type="button"
                     className={`bf-method${active ? " selected" : ""}`}
                     onClick={() => setMethod(m.id)}
+                    aria-pressed={active}
                   >
                     <Icon size={20} />
                     <span className="bf-method-name">{m.label}</span>
                     <span className="bf-method-desc">{m.desc}</span>
                     {m.tag ? <span className="bf-method-tag">{m.tag}</span> : null}
                   </button>
-                );
-              })}
+              );
+            })}
             </div>
           </div>
 
@@ -547,12 +546,18 @@ const BookingPayment = () => {
               <span className="bf-amount">{formatCurrency(amount)}</span>
               {items.length ? <span className="bf-amount-note">{items.join(" • ")}</span> : null}
             </div>
-            <button className="btn btn-primary bf-pay-btn" onClick={payNow}>
-              Pay {formatCurrency(amount)} & Confirm
+            <button
+              className="btn btn-primary bf-pay-btn"
+              onClick={payNow}
+              disabled={phase === "processing"}
+              aria-busy={phase === "processing"}
+            >
+              {phase === "processing" ? "Starting payment…" : `Pay ${formatCurrency(amount)} & Confirm`}
             </button>
             <p className="bf-consent">
-              By paying you agree to our <Link to="/terms">Terms</Link> and{" "}
-              <Link to="/refunds">Refund Policy</Link>. Payments are processed
+              By paying you agree to our <Link to="/terms">Terms</Link>,{" "}
+              <Link to="/refunds">Refund Policy</Link> and{" "}
+              <Link to="/customer-cancellation-refund-policy">Cancellation Policy</Link>. Payments are processed
               securely by Razorpay.
             </p>
             <div className="bf-secure"><ShieldCheck size={14} /> 256-bit encrypted • Instant confirmation</div>

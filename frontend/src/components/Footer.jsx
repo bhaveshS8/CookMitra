@@ -13,7 +13,6 @@ const Footer = () => {
     <footer className="footer-modern">
       <div className="footer-inner">
         <div className="footer-top-grid">
-          {/* Brand Col */}
           <div className="footer-brand-col">
             <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.75rem" }}>
               <img
@@ -38,7 +37,6 @@ const Footer = () => {
             </div>
           </div>
 
-          {/* Quick Links */}
           <div className="footer-links-col">
             <h4>Explore</h4>
             <ul className="footer-links-list">
@@ -60,20 +58,6 @@ const Footer = () => {
             </ul>
           </div>
 
-          {/* Services */}
-          {!hideCustomerPages && (
-            <div className="footer-links-col">
-              <h4>Services</h4>
-              <ul className="footer-links-list">
-                <li><Link to="/cook-on-demand?serviceType=cook_for_me">Cook For Me</Link></li>
-                <li><Link to="/cook-on-demand?serviceType=cook_with_me">Cook With Me</Link></li>
-                <li><Link to="/cook-on-demand?serviceType=teach_me">Teach Me</Link></li>
-                <li><Link to="/cook-on-demand?serviceType=preparation_help">Preparation Help</Link></li>
-              </ul>
-            </div>
-          )}
-
-          {/* Contact & Support */}
           <div className="footer-links-col">
             <h4>Reach Us</h4>
             <ul className="footer-links-list">
@@ -96,7 +80,6 @@ const Footer = () => {
           </div>
         </div>
 
-        {/* Bottom Bar */}
         <div className="footer-bottom-bar">
           <div>
             &copy; {new Date().getFullYear()} Cook Mitra. Crafted with <Heart size={14} style={{ display: "inline", verticalAlign: "middle", color: "#f43f5e" }} /> for festive homes.
@@ -117,6 +100,7 @@ const Footer = () => {
             <Link to="/terms">Terms</Link>
             <Link to="/privacy">Privacy</Link>
             <Link to="/refunds">Refunds</Link>
+            <Link to="/customer-cancellation-refund-policy">Cancellation Policy</Link>
             <Link to="/contact">Contact</Link>
           </div>
         </div>

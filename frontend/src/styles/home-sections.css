@@ -1,8 +1,4 @@
-/* ==========================================================================
-   Home — marquee, bands, scaffolding, services
-   ========================================================================== */
 
-/* Dish ticker — sits on the light page below the dark hero */
 .dish-marquee {
   max-width: 1200px;
   margin: 0 auto;
@@ -29,7 +25,6 @@
 }
 .mq-item i { color: var(--slate-300); }
 
-/* Bands */
 .home-band { padding: 4.2rem 1.5rem; }
 .band-abyss {
   background:
@@ -42,7 +37,6 @@
     linear-gradient(180deg, #f6f2ec 0%, #f1ece4 100%);
 }
 
-/* Scaffolding */
 .section-header { text-align: center; max-width: 640px; margin: 0 auto 2.4rem; }
 .section-eyebrow {
   display: inline-flex;
@@ -60,7 +54,6 @@
 .section-title { font-size: 1.95rem; font-weight: 800; letter-spacing: -0.02em; }
 .section-description { color: var(--slate-600); font-size: 1rem; }
 
-/* Services — modern friendly cards */
 .services-section { padding: 4.2rem 1.5rem; max-width: 1200px; margin: 0 auto; scroll-margin-top: 70px; }
 .services-grid-modern {
   display: grid;
@@ -175,4 +168,54 @@
   .service-card-modern, .service-icon-wrapper, .service-cta { transition: none; }
   .service-card-modern:hover { transform: none; }
   .service-card-modern:hover .service-icon-wrapper { transform: none; }
+}
+
+.home-registration-form .login-split {
+  display: block;
+  min-height: auto;
+  overflow: visible;
+  background: transparent;
+}
+.home-registration-form .login-split > * { min-width: auto; }
+.home-registration-form .login-showcase { display: none; }
+.home-registration-form .login-mobile-brand { display: none; }
+.home-registration-form .login-form-side {
+  display: block;
+  padding: 0;
+  background: transparent;
+  width: 100%;
+}
+.home-registration-form .login-card {
+  width: 100%;
+  max-width: 100%;
+  box-shadow: none;
+  border: none;
+  padding: 0;
+  animation: none;
+  background: transparent;
+}
+.home-registration-form .login-card-header { margin-bottom: 0.5rem; }
+.home-registration-form .login-card-header h2 { font-size: 1.15rem; }
+.home-registration-form .login-card-header p { font-size: 0.82rem; }
+.home-registration-form .register-role-grid {
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.home-registration-form .register-role-tile { padding: 0.6rem 0.7rem; }
+.home-registration-form .register-submit { min-height: 44px; font-size: 0.88rem; }
+.home-registration-form .auth-footer-prompt { margin-top: 0.75rem; font-size: 0.8rem; }
+.home-registration-form .login-secure-note { display: none; }
+.home-registration-form .register-terms { display: none; }
+.home-registration-form .register-strength { display: none; }
+.home-registration-form .register-grid-2 { grid-template-columns: 1fr 1fr; }
+@media (max-width: 375px) {
+  .services-section { padding: 2.6rem 0.95rem; }
+  .service-card-modern { padding: 1.35rem 1.15rem 1.2rem; border-radius: 18px; }
+  .section-title { font-size: 1.35rem; }
+  .section-description { font-size: 0.92rem; }
+}
+@media (max-width: 320px) {
+  .services-section { padding: 2.3rem 0.85rem; }
+  .service-card-modern { padding: 1.2rem 1rem 1.1rem; }
 }

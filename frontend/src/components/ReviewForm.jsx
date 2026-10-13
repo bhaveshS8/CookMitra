@@ -21,7 +21,6 @@ const QUICK_TAGS = [
 
 const STARS = [1, 2, 3, 4, 5];
 
-/** Read-only star row (also used by the cook-side "Customer rating" card). */
 export const ReviewStars = ({ value = 0, size = 18 }) => (
   <span className="rf-stars-static" aria-hidden="true">
     {STARS.map((s) => (
@@ -35,11 +34,6 @@ export const ReviewStars = ({ value = 0, size = 18 }) => (
   </span>
 );
 
-/**
- * Customer rating form + submitted-review card.
- * Props: bookingId, existingReview, onSubmitted, variant ("card" | "bare").
- * "bare" drops the outer chrome so the host page/card provides the header.
- */
 const ReviewForm = ({ bookingId, existingReview, onSubmitted, variant = "card" }) => {
   const showToast = useShowToast();
   const bare = variant === "bare";
@@ -60,8 +54,6 @@ const ReviewForm = ({ bookingId, existingReview, onSubmitted, variant = "card" }
   const activeMeta = RATING_META[hoverRating || rating];
   const doneMeta = RATING_META[shownRating];
 
-  // Quick tags toggle phrases in/out of the comment box (WYSIWYG — the
-  // textarea is the single source of truth for what gets submitted).
   const activeTags = useMemo(
     () => new Set(comment.split(",").map((p) => p.trim().toLowerCase()).filter(Boolean)),
     [comment]
@@ -77,8 +69,6 @@ const ReviewForm = ({ bookingId, existingReview, onSubmitted, variant = "card" }
       return parts.join(", ");
     });
 
-  // Arrow keys move the rating when a star is focused (radiogroup pattern,
-  // wrapping around at the ends).
   const handleStarsKeyDown = (e) => {
     if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
     e.preventDefault();
@@ -111,7 +101,6 @@ const ReviewForm = ({ bookingId, existingReview, onSubmitted, variant = "card" }
     }
   };
 
-  /* ---------- Submitted / existing review ---------- */
   if (done) {
     return (
       <div className={`review-card${bare ? " review-card--bare" : ""}`}>
@@ -149,7 +138,6 @@ const ReviewForm = ({ bookingId, existingReview, onSubmitted, variant = "card" }
     );
   }
 
-  /* ---------- Rating form ---------- */
   return (
     <div className={`review-form-container${bare ? " review-form-container--bare" : ""}`}>
       <form className="review-form" onSubmit={handleSubmit} noValidate>

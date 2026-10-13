@@ -1,8 +1,4 @@
-/* ==========================================================================
-   Navbar + Footer
-   ========================================================================== */
 
-/* ---- Navbar ---- */
 .navbar {
   position: sticky;
   top: 0;
@@ -56,11 +52,11 @@
   flex-shrink: 0;
 }
 
-/* Cook Mitra logo mark (PNG asset, displayed as-is) */
 .brand-logo-img {
   width: 48px;
   height: 48px;
   object-fit: contain;
+  border-radius: 24%;
   display: block;
   flex-shrink: 0;
 }
@@ -201,9 +197,8 @@
 .mobile-menu .nav-link { padding: 0.6rem 0.5rem; border-bottom: none; border-radius: 10px; }
 .mobile-menu .nav-link:hover { background: var(--slate-50); }
 
-.navbar-mobile-actions { display: none; gap: 0.6rem; margin-top: 0.5rem; margin-left: auto; }
+.navbar-mobile-actions { display: none; gap: 0.6rem; align-items: center; margin-top: 0; margin-left: auto; }
 
-/* ---- Footer ---- */
 .footer-modern {
   background: #120d08;
   color: var(--slate-400);
@@ -253,7 +248,6 @@
 .footer-bottom-bar a { color: var(--slate-400); }
 .footer-bottom-bar a:hover { color: #fff; }
 
-/* ---- Header location picker (auto-detect + manual search) ---- */
 .loc-wrap { position: relative; }
 .loc-pill {
   display: inline-flex;
@@ -334,6 +328,7 @@
   color: var(--slate-800);
 }
 .loc-current-label { font-weight: 700; font-size: 0.86rem; }
+.loc-address { font-size: 0.78rem; color: var(--slate-600); margin-top: 0.15rem; line-height: 1.35; }
 .loc-source { font-size: 0.74rem; color: var(--slate-500); }
 .loc-gps-btn { width: 100%; justify-content: center; }
 .loc-error {
@@ -348,47 +343,7 @@
   border-radius: 10px;
   padding: 0.5rem 0.6rem;
 }
-.loc-search-row { position: relative; }
-.loc-search-icon {
-  position: absolute;
-  left: 0.65rem;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--slate-400);
-  pointer-events: none;
-}
-.loc-search-input { padding-left: 2.1rem; font-size: 0.86rem; }
-.loc-hint { margin: 0; font-size: 0.79rem; color: var(--slate-500); }
-.loc-results {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  max-height: 220px;
-  overflow-y: auto;
-}
-.loc-results button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  text-align: left;
-  border: 1px solid transparent;
-  background: none;
-  border-radius: 10px;
-  padding: 0.5rem 0.6rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--slate-700);
-  cursor: pointer;
-}
-.loc-results button:hover { background: var(--slate-50, #f8fafc); border-color: var(--slate-200); }
-.loc-nohit { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
 .loc-footnote { margin: 0; font-size: 0.74rem; color: var(--slate-400); }
-/* Desktop nav sits at the right edge — anchor the dropdown to the pill's
-   right so it never overflows the viewport. */
 .navbar-nav .loc-dropdown { left: auto; right: 0; }
 
 @media (max-width: 1150px) {
@@ -396,4 +351,15 @@
   .mobile-menu .loc-pill { width: 100%; max-width: none; justify-content: flex-start; }
   .mobile-menu .loc-pill-label { max-width: none; flex: 1; text-align: left; }
   .mobile-menu .loc-dropdown { position: static; width: 100%; max-width: none; box-shadow: none; margin-top: 0.5rem; }
+}
+@media (max-width: 375px) {
+  .navbar-inner { gap: 0.6rem; }
+  .navbar-mobile-actions { gap: 0.35rem; }
+}
+@media (max-width: 320px) {
+  .navbar-inner { gap: 0.4rem; padding: 0 0.6rem; }
+  .navbar-mobile-actions { gap: 0.25rem; }
+  .navbar-brand { min-width: 0; }
+  .navbar-brand span { overflow: hidden; text-overflow: ellipsis; }
+  .loc-pill { max-width: 100%; }
 }

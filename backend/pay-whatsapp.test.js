@@ -1,8 +1,3 @@
-// Standalone regression test for the post-payment WhatsApp shares + customer
-// confirmation notification (no deps, no DB).
-// Run:  node backend/pay-whatsapp.test.js — exits non-zero on failure.
-// Uses a locally-signed Razorpay-style payment (verified path only — the old
-// demo mark-paid path is gone, so bare { method } must NOT confirm).
 const crypto = require("crypto");
 process.env.RAZORPAY_KEY_SECRET = "test_secret_for_unit_test";
 const Booking = require("./models/Booking");
@@ -27,7 +22,7 @@ const bookingDoc = new Booking({
   addressDetails: { flatNo: "H-12", society: "Green Park", city: "Delhi" },
   location: { lat: 28.6139, lng: 77.209 },
   amount: 900,
-  payment: { status: "pending" },
+  payment: { status: "pending", razorpayOrderId: "order_test_1" },
   status: "accepted",
   statusHistory: [],
 });
@@ -36,12 +31,30 @@ bookingDoc.save = async function () {
 };
 
 const savedFindOne = Booking.findOne;
+const savedFindOneAndUpdate = Booking.findOneAndUpdate;
 const savedUserFindById = User.findById;
 const savedNotifCreate = Notification.create;
 const savedProfileFindOne = CookProfile.findOne;
+const LedgerEntry = require("./models/LedgerEntry");
+const savedLedgerCreate = LedgerEntry.create;
+const ledgerRows = [];
 
 const notifications = [];
 Booking.findOne = () => bookingDoc;
+Booking.findOneAndUpdate = async (filter, update) => {
+  if (String(filter?._id) !== String(bookingDoc._id)) return null;
+  if (bookingDoc.status !== "accepted" || bookingDoc.payment?.status === "paid") return null;
+  const set = update?.$set || {};
+  if (set.payment) bookingDoc.payment = { ...(bookingDoc.payment || {}), ...set.payment };
+  if (set.status) bookingDoc.status = set.status;
+  const pushed = update?.$push?.statusHistory;
+  if (pushed) bookingDoc.statusHistory.push(pushed);
+  return bookingDoc;
+};
+LedgerEntry.create = async (e) => {
+  ledgerRows.push(e);
+  return e;
+};
 User.findById = (id) => ({
   select: async () =>
     String(id) === "507f1f77bcf86cd799439013"
@@ -72,7 +85,6 @@ const next = (e) => {
 
 (async () => {
   try {
-    // Unverified payments must NEVER confirm: bare { method } is rejected.
     const bareDoc = new Booking({
       _id: "507f1f77bcf86cd799439021",
       customer: "507f1f77bcf86cd799439012",
@@ -133,7 +145,6 @@ const next = (e) => {
     check("booking confirmed after payment", resBody.status === "confirmed", resBody.status);
     check("payment recorded as paid", resBody.payment?.status === "paid", resBody.payment?.status);
 
-    // --- In-app notifications (cook + customer website account) ---
     check(
       "two notifications created (cook + customer)",
       notifications.length === 2,
@@ -157,7 +168,6 @@ const next = (e) => {
       cookNotif?.type || "(missing)"
     );
 
-    // --- Job sheet -> cook's WhatsApp ---
     check(
       "cookWhatsappUrl targets the cook's number",
       cookWa.startsWith("https://wa.me/919876543210"),
@@ -173,7 +183,6 @@ const next = (e) => {
       "pin"
     );
 
-    // --- Confirmation -> customer's own WhatsApp ---
     const selfMsg = decodeURIComponent(selfWa.split("text=")[1] || "");
     console.log("--- Customer confirmation message ---");
     console.log(selfMsg);
@@ -196,8 +205,8 @@ const next = (e) => {
       "no live pin"
     );
     check(
-      "confirmation includes service hours",
-      selfMsg.includes("Service hours: 10:00 - 13:00 (3 hrs)"),
+      "confirmation includes service hours (12-hour clock)",
+      selfMsg.includes("Service hours: 10:00 AM - 1:00 PM (3 hrs)"),
       "service hours"
     );
     check(
@@ -225,7 +234,7 @@ const next = (e) => {
         selfMsg.includes("Cook: Priya Sharma") &&
         selfMsg.includes("Cook's number: 9876543210") &&
         !selfMsg.includes("Cook's live location: https://www.google.com/maps") &&
-        selfMsg.includes("Service hours: 10:00 - 13:00 (3 hrs)") &&
+        selfMsg.includes("Service hours: 10:00 AM - 1:00 PM (3 hrs)") &&
         !selfMsg.includes("Live tracking link:")
         ? 0
         : 1
@@ -235,8 +244,10 @@ const next = (e) => {
     process.exit(1);
   } finally {
     Booking.findOne = savedFindOne;
+    Booking.findOneAndUpdate = savedFindOneAndUpdate;
     User.findById = savedUserFindById;
     Notification.create = savedNotifCreate;
     CookProfile.findOne = savedProfileFindOne;
+    LedgerEntry.create = savedLedgerCreate;
   }
 })();

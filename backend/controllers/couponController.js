@@ -1,17 +1,12 @@
 const Coupon = require("../models/Coupon");
 const Booking = require("../models/Booking");
-const { normalizeCode, rejectionReason, computeDiscount } = require("../utils/coupons");
+const { normalizeCode, rejectionReason, computeDiscount, findCouponByCode } = require("../utils/coupons");
 const { paginationParams, applyPagination, sendList } = require("../utils/pagination");
 
-// POST /api/coupons/validate — preview a coupon against an order amount.
-// Auth required (per-user limits need the user). Never mutates usage.
-// Body: { code, amount, serviceType? }.
 exports.validateCoupon = async (req, res, next) => {
   try {
     const { code, amount, serviceType } = req.body;
-    const coupon = await Coupon.findOne({ code: normalizeCode(code) });
-    // First-booking check only runs for coupons that need it, so plain
-    // coupons never pay the extra query.
+    const coupon = await findCouponByCode(code);
     let isFirstBooking;
     if (coupon?.firstBookingOnly && req.user?.id) {
       isFirstBooking =
@@ -46,8 +41,6 @@ exports.validateCoupon = async (req, res, next) => {
   }
 };
 
-// GET /api/coupons/active — public list of currently usable offers
-// (codes are promos meant to be shared; per-user state is checked at apply).
 exports.listActiveCoupons = async (req, res, next) => {
   try {
     const now = new Date();
@@ -67,12 +60,11 @@ exports.listActiveCoupons = async (req, res, next) => {
         ],
       })
         .select(
-          "code description discountType percent flatAmount maxDiscount minOrder firstBookingOnly validTo"
+          "code description discountType percent flatAmount maxDiscount minOrder firstBookingOnly perUserLimit validTo"
         )
         .sort({ percent: -1 }),
       pg
     );
-    // Total must count the whole active set, not just the returned page.
     const countActive = () =>
       Coupon.countDocuments({
         active: true,
@@ -93,7 +85,6 @@ exports.listActiveCoupons = async (req, res, next) => {
   }
 };
 
-// GET /api/coupons — admin: every coupon with usage stats.
 exports.listCoupons = async (req, res, next) => {
   try {
     const pg = paginationParams(req);
@@ -104,12 +95,36 @@ exports.listCoupons = async (req, res, next) => {
   }
 };
 
-// POST /api/coupons — admin: create a coupon. Usage accounting is
-// server-owned: usedCount/usedBy can never be set at creation (update strips
-// them too) — otherwise promo history could be forged.
+const COUPON_WRITABLE = [
+  "code",
+  "description",
+  "discountType",
+  "percent",
+  "flatAmount",
+  "maxDiscount",
+  "minOrder",
+  "usageLimit",
+  "perUserLimit",
+  "firstBookingOnly",
+  "applicableServices",
+  "validFrom",
+  "validTo",
+  "active",
+];
+const pickCouponWritable = (obj) => {
+  const out = {};
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return out;
+  for (const key of COUPON_WRITABLE) {
+    if (Object.prototype.hasOwnProperty.call(obj, key) && obj[key] !== undefined) {
+      out[key] = obj[key];
+    }
+  }
+  return out;
+};
+
 exports.createCoupon = async (req, res, next) => {
   try {
-    const { usedCount, usedBy, ...body } = req.body;
+    const body = pickCouponWritable(req.body);
     const coupon = await Coupon.create({
       ...body,
       code: normalizeCode(req.body.code),
@@ -124,12 +139,10 @@ exports.createCoupon = async (req, res, next) => {
   }
 };
 
-// PATCH /api/coupons/:id — admin: edit a coupon (incl. active toggle).
-// usedCount/usedBy history is append-only: edits can never rewrite it.
 exports.updateCoupon = async (req, res, next) => {
   try {
-    const { usedCount, usedBy, createdBy, code, ...editable } = req.body;
-    if (code !== undefined) editable.code = normalizeCode(code);
+    const editable = pickCouponWritable(req.body);
+    if (req.body.code !== undefined) editable.code = normalizeCode(req.body.code);
     const coupon = await Coupon.findByIdAndUpdate(req.params.id, editable, {
       new: true,
       runValidators: true,
@@ -146,8 +159,6 @@ exports.updateCoupon = async (req, res, next) => {
   }
 };
 
-// DELETE /api/coupons/:id — admin: delete a coupon that was never used.
-// Used coupons are history (bookings reference them), so deactivate instead.
 exports.deleteCoupon = async (req, res, next) => {
   try {
     const coupon = await Coupon.findById(req.params.id);

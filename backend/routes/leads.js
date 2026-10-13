@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { body } = require("express-validator");
+const rateLimit = require("express-rate-limit");
 const validate = require("../middleware/validate");
 const { auth, authorize } = require("../middleware/auth");
 const {
@@ -10,8 +11,17 @@ const {
   deleteLead,
 } = require("../controllers/leadController");
 
+const leadLimiter = rateLimit({
+  standardHeaders: false,
+  legacyHeaders: false,
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_LEADS || 20),
+  message: { message: "Too many requests — please try again later." },
+});
+
 router.post(
   "/",
+  leadLimiter,
   [
     body("name")
       .trim()

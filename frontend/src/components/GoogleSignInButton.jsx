@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { useNavigate } from "react-router-dom";
 import { useDispatch } from "react-redux";
@@ -17,18 +17,53 @@ const getDashboardPath = (user) => {
   return "/";
 };
 
-// Reusable Google button for both Login (existing users) and Register
-// (new users created with `role`). Handles token exchange + navigation.
 const GoogleSignInButton = ({
   role = "customer",
   text = "signin_with",
   onError,
   next = null,
+  referralCode = "",
 }) => {
   const dispatch = useDispatch();
   const showToast = useShowToast();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const wrapRef = useRef(null);
+  const [btnWidth, setBtnWidth] = useState(320);
+  const [gsiReady, setGsiReady] = useState(false);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const update = () => {
+      const w = Math.round(el.getBoundingClientRect().width);
+      if (w > 0) {
+        const next = Math.min(400, Math.max(200, w));
+        setBtnWidth((prev) => (Math.abs(prev - next) > 2 ? next : prev));
+      }
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    if (el.querySelector("iframe")) {
+      setGsiReady(true);
+      return;
+    }
+    if (typeof MutationObserver === "undefined") return;
+    const mo = new MutationObserver(() => {
+      if (el.querySelector("iframe")) {
+        setGsiReady(true);
+        mo.disconnect();
+      }
+    });
+    mo.observe(el, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, []);
 
   if (!isGoogleConfigured) {
     return (
@@ -71,12 +106,11 @@ const GoogleSignInButton = ({
     }
     setLoading(true);
     try {
-      const { user } = await dispatch(googleLoginUser({ idToken, role })).unwrap();
+      const { user } = await dispatch(googleLoginUser({ idToken, role, referralCode })).unwrap();
       showToast(`Welcome${user?.name ? `, ${user.name}` : ""}!`, "success");
       if (user?.role === "cook") {
         track(AnalyticsEvents.COOK_SIGNUP_COMPLETE, { method: "google" });
       }
-      // Interrupted booking? Customers go straight back to it.
       const resumeTo = user?.role === "customer" ? safeNextPath(next) : null;
       navigate(resumeTo || getDashboardPath(user));
     } catch (err) {
@@ -97,8 +131,14 @@ const GoogleSignInButton = ({
   };
 
   return (
-    <div className="google-btn-wrapper">
+    <div className="google-btn-wrapper" ref={wrapRef}>
       {loading && <div className="google-btn-loading">Signing in with Google…</div>}
+      {!gsiReady && !loading && (
+        <div className="google-btn-skeleton" aria-hidden="true">
+          <span className="google-btn-skeleton-g">G</span>
+          <span>{text === "signup_with" ? "Sign up with Google" : "Sign in with Google"}</span>
+        </div>
+      )}
       <GoogleLogin
         onSuccess={handleSuccess}
         onError={handleError}
@@ -106,7 +146,7 @@ const GoogleSignInButton = ({
         shape="rectangular"
         theme="outline"
         size="large"
-        width="320"
+        width={String(btnWidth)}
       />
     </div>
   );

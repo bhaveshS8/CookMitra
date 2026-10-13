@@ -3,7 +3,7 @@ const router = express.Router();
 const { body } = require("express-validator");
 const validate = require("../middleware/validate");
 const { auth, authorize, optionalAuth } = require("../middleware/auth");
-const { cookDocUpload } = require("../middleware/upload");
+const { cookDocUpload, validateUploadedContent } = require("../middleware/upload");
 const {
   getCooks,
   getCook,
@@ -18,10 +18,37 @@ const {
   toggleAvailability,
 } = require("../controllers/cookController");
 
+const uploadErrorMessage = (err) => {
+  if (err?.code === "LIMIT_FILE_SIZE") {
+    return "File too large — each file must be 2MB or less (JPG/PNG/WEBP/PDF)";
+  }
+  return err?.message || "File upload failed";
+};
+
+// Mobile number accepted through the cook profile form (create + edit).
+// Normalized to a 10-digit Indian mobile (allows +91 / leading 0 input).
+const mobileNumberRule = (field) =>
+  body(field)
+    .optional()
+    .trim()
+    .custom((v) => {
+      if (v === "" || v == null) return true; // absent/empty = no change (controller ignores)
+      let digits = String(v).replace(/\D/g, "");
+      if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+      else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+      if (digits.length !== 10) throw new Error("Mobile number must be exactly 10 digits");
+      if (!/^[6-9]\d{9}$/.test(digits))
+        throw new Error("Enter a valid 10-digit mobile number");
+      return true;
+    });
+const cookMobileRules = [
+  mobileNumberRule("mobileNumber"),
+  mobileNumberRule("mobile"),
+  mobileNumberRule("phone"),
+];
+
 router.get("/", optionalAuth, getCooks);
 router.get("/me", auth, authorize("cook"), getMyProfile);
-// Cook ID verification file uploads (Aadhaar / PAN / photo).
-// Must be declared before "/:id" routes so "upload-docs" isn't treated as an id.
 router.post(
   "/upload-docs",
   auth,
@@ -33,16 +60,15 @@ router.post(
       { name: "photo", maxCount: 1 },
     ])(req, res, (err) => {
       if (err) {
-        return res.status(400).json({ message: err.message || "File upload failed" });
+        return res.status(400).json({ message: uploadErrorMessage(err) });
       }
       next();
     });
   },
+  validateUploadedContent,
   uploadCookDocs
 );
 router.get("/admin-overview/:id", auth, authorize("admin"), getCookAdminOverview);
-// Admin uploads verification docs on behalf of a cook (e.g. files received
-// over email/WhatsApp). Declared above "/:id" like the self-upload route.
 router.post(
   "/:id/upload-docs",
   auth,
@@ -54,11 +80,12 @@ router.post(
       { name: "photo", maxCount: 1 },
     ])(req, res, (err) => {
       if (err) {
-        return res.status(400).json({ message: err.message || "File upload failed" });
+        return res.status(400).json({ message: uploadErrorMessage(err) });
       }
       next();
     });
   },
+  validateUploadedContent,
   adminUploadCookDocs
 );
 router.get("/:id", getCook);
@@ -74,12 +101,13 @@ router.post(
     body("serviceTypes")
       .isArray({ min: 1 })
       .withMessage("At least one service type is required"),
+    ...cookMobileRules,
   ],
   validate,
   createCookProfile
 );
 
-router.put("/:id", auth, authorize("cook"), updateCookProfile);
+router.put("/:id", auth, authorize("cook"), [...cookMobileRules], validate, updateCookProfile);
 router.patch(
   "/:id/approval",
   auth,
@@ -93,7 +121,6 @@ router.patch(
   updateApprovalStatus
 );
 
-// Cook on/off switch — toggle between available / unavailable.
 router.patch(
   "/me/availability",
   auth,

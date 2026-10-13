@@ -1,8 +1,4 @@
-/* ==========================================================================
-   Misc chrome — icon buttons, admin tables, tracking niceties
-   ========================================================================== */
 
-/* Bell icon button (desktop nav) */
 .nav-icon-btn {
   width: 40px;
   height: 40px;
@@ -38,7 +34,6 @@
   box-shadow: var(--shadow-sm);
 }
 
-/* Tracking page location status */
 .loc-msg {
   display: inline-flex;
   align-items: center;
@@ -52,47 +47,47 @@
   padding: 0.5rem 0.8rem;
 }
 
-/* Auth-friendly brand box reuse */
 .auth-brand-badge svg { color: #fff; }
 
-/* Admin stat tables inside dossier (inline-table friendly) */
 table { border-collapse: collapse; width: 100%; }
 th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--slate-500); }
 td, th { padding: 0.7rem 0.5rem; }
 
-/* ---- Gap fillers (coverage audit) ---- */
 .error-message { color: var(--accent-rose); font-weight: 600; font-size: 0.9rem; }
 
-/* Cook dashboard wrapper */
 .cook-modern { max-width: 1200px; margin: 0 auto; padding: 1.75rem 1.5rem; }
 
-/* Hero floating "Live Tracking" title */
 .hero-v2-float-live-title { font-weight: 800; font-size: 0.9rem; line-height: 1.2; }
 
-/* How-it-works card header row */
 .how-card-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.35rem; }
 .how-card-header h3 { margin: 0; }
 
-/* Lead capture left copy */
 .lead-copy .section-title { margin-bottom: 0.6rem; }
 
-/* Login form layout */
-.login-form { display: flex; flex-direction: column; gap: 0.55rem; }
+.login-form { display: flex; flex-direction: column; gap: 0.85rem; }
 .login-input {
   padding-left: 2.6rem;
   border-radius: 14px;
+  min-height: 50px;
+  background: rgba(255, 255, 255, 0.85);
+  border-color: var(--slate-200);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+.login-input::placeholder {
+  color: var(--slate-400);
+}
+.login-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(232, 89, 12, 0.1);
+  background: #fff;
 }
 
-/* Best-match card top row */
 .match-card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
 
-/* Note under slot chips (on-demand) */
 .slot-pay-note { color: var(--slate-500); font-size: 0.82rem; text-align: center; margin-top: 0.6rem; }
 
-/* Booking-flow action button */
 .bf-btn { min-width: 150px; }
 
-/* ---- Login prompt modal ---- */
 .login-modal-overlay {
   position: fixed;
   inset: 0;
@@ -103,12 +98,15 @@ td, th { padding: 0.7rem 0.5rem; }
   align-items: center;
   justify-content: center;
   padding: 1.25rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   animation: loginModalFade 0.2s ease;
 }
 .login-modal {
   position: relative;
   width: 100%;
   max-width: 400px;
+  margin: auto;
   background: #fff;
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
@@ -177,12 +175,38 @@ td, th { padding: 0.7rem 0.5rem; }
 }
 .login-modal-maybe:hover { color: var(--slate-700); }
 
-/* ---- Add cook (admin) modal ---- */
+@media (max-width: 560px) {
+  .login-modal-overlay {
+    padding: 0.75rem;
+    padding-left: max(0.75rem, env(safe-area-inset-left));
+    padding-right: max(0.75rem, env(safe-area-inset-right));
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .login-modal-overlay .login-modal,
+  .login-modal-overlay .add-cook-modal,
+  .login-modal-overlay .brm-card {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100vh - 1.5rem);
+    max-height: calc(100dvh - 1.5rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    margin: auto;
+  }
+}
+@media (max-width: 400px) {
+  .login-modal-overlay { padding: 0.5rem; }
+  .login-modal { padding: 1.75rem 1.1rem; }
+  .add-cook-modal { padding: 1.4rem 1rem; }
+}
+
 .add-cook-modal {
   position: relative;
   width: 100%;
   max-width: 480px;
   max-height: 90vh;
+  max-height: 90dvh;
+  margin: auto;
   overflow-y: auto;
   background: #fff;
   border-radius: var(--radius-xl);
@@ -192,6 +216,159 @@ td, th { padding: 0.7rem 0.5rem; }
   animation: loginModalPop 0.22s ease;
 }
 .add-cook-head { text-align: center; margin-bottom: 1.25rem; margin-top: 0.5rem; }
+.add-cook-modal .booking-actions-row {
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  border-top: 1px solid var(--slate-100);
+  padding: 0.7rem 0 0.15rem;
+  margin-top: 0.9rem;
+}
+
+.brm-card {
+  position: relative;
+  width: 100%;
+  max-width: 480px;
+  max-height: calc(100vh - 2.5rem);
+  max-height: calc(100dvh - 2.5rem);
+  margin: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 22px;
+  box-shadow: var(--shadow-lg);
+  padding: 1.5rem 1.5rem 1.25rem;
+  animation: loginModalPop 0.22s ease;
+}
+.brm-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 4px;
+  background: linear-gradient(90deg, var(--primary) 0%, #ffb020 55%, transparent 100%);
+  pointer-events: none;
+}
+.brm-head { display: flex; gap: 0.75rem; align-items: flex-start; margin-bottom: 0.85rem; padding-right: 2.25rem; }
+.brm-icon {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 15px;
+  background: var(--primary-gradient);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-brand);
+}
+.brm-head-text { min-width: 0; }
+.brm-head-text h3 { margin: 0 0 0.25rem; font-size: 1.2rem; }
+.brm-head-text p { margin: 0; color: var(--slate-600); font-size: 0.86rem; line-height: 1.5; }
+.brm-timer-row { margin-bottom: 0.85rem; }
+.brm-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+  color: var(--primary-700);
+  background: var(--primary-light);
+  border: 1px solid #fed7aa;
+  border-radius: 99px;
+  padding: 0.3rem 0.75rem;
+}
+.brm-timer.is-urgent {
+  color: #be123c;
+  background: #ffe4e6;
+  border-color: #fda4af;
+  animation: brmBlink 1s ease-in-out infinite;
+}
+.brm-timer.is-expired { color: var(--slate-500); background: var(--slate-100); border-color: var(--slate-200); animation: none; }
+.brm-timer.is-static { font-family: inherit; }
+@keyframes brmBlink { 50% { opacity: 0.55; } }
+.brm-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  background: var(--slate-50);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: 0.8rem 0.9rem;
+}
+.brm-row {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--slate-700);
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
+.brm-row svg { flex-shrink: 0; color: var(--primary); margin-top: 0.15em; }
+.brm-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--slate-300); flex-shrink: 0; align-self: center; }
+.brm-amount strong { font-size: 1rem; color: var(--slate-900); }
+.brm-note {
+  margin: 0;
+  font-size: 0.84rem;
+  font-style: italic;
+  color: var(--slate-600);
+  background: #fffdf5;
+  border-left: 3px solid #fdba74;
+  border-radius: 0 10px 10px 0;
+  padding: 0.45rem 0.65rem;
+  overflow-wrap: break-word;
+}
+.brm-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 0.6rem;
+  background: #fff;
+  border-top: 1px solid var(--slate-100);
+  padding: 0.75rem 0 0.15rem;
+  margin-top: 0.9rem;
+}
+.brm-actions .btn { flex: 1 1 0; min-height: 48px; justify-content: center; }
+.brm-expired-note { margin: 0; width: 100%; text-align: center; font-size: 0.86rem; font-weight: 700; color: var(--slate-500); }
+.brm-details > * { min-width: 0; }
+.brm-row span { min-width: 0; overflow-wrap: anywhere; }
+.brm-details { overflow-wrap: break-word; word-break: break-word; }
+@media (max-width: 560px) {
+  .brm-card { padding: 1.25rem 1rem 1rem; border-radius: 20px; }
+  .brm-head { padding-right: 2rem; gap: 0.6rem; }
+  .brm-icon { width: 44px; height: 44px; border-radius: 13px; }
+  .brm-head-text h3 { font-size: 1.08rem; }
+  .brm-head-text p { font-size: 0.83rem; }
+  .brm-details { padding: 0.7rem 0.75rem; }
+  .brm-actions { flex-direction: column; }
+  .brm-actions .btn { width: 100%; }
+}
+@media (max-width: 400px) {
+  .brm-card { padding: 1.1rem 0.9rem 0.9rem; border-radius: 18px; }
+  .brm-icon { width: 40px; height: 40px; border-radius: 12px; }
+  .brm-head-text h3 { font-size: 1rem; }
+  .brm-row { font-size: 0.82rem; }
+  .brm-timer { font-size: 0.78rem; }
+}
+@media (min-width: 561px) and (max-width: 1024px) {
+  .brm-card { max-width: 520px; padding: 1.6rem 1.6rem 1.35rem; }
+}
+@media (max-height: 620px) {
+  .login-modal-overlay { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+  .brm-card { padding-top: 1rem; padding-bottom: 0.9rem; }
+  .brm-icon { width: 40px; height: 40px; border-radius: 12px; }
+  .brm-head { margin-bottom: 0.6rem; }
+  .brm-timer-row { margin-bottom: 0.6rem; }
+  .brm-actions { margin-top: 0.6rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .brm-timer.is-urgent { animation: none; }
+}
 .add-cook-icon {
   width: 56px;
   height: 56px;
@@ -209,7 +386,6 @@ td, th { padding: 0.7rem 0.5rem; }
 .add-cook-success { text-align: center; padding: 0.5rem 0; }
 .add-cook-success h4 { margin: 0 0 0.5rem; font-size: 1.2rem; }
 .add-cook-success .btn + .btn { margin-top: 0.5rem; }
-/* Login credentials card shown to the admin after adding a cook */
 .add-cook-creds {
   text-align: left;
   background: var(--slate-50);
@@ -239,7 +415,6 @@ td, th { padding: 0.7rem 0.5rem; }
 .add-cook-cred-pass { font-family: var(--font-mono); }
 .add-cook-creds-note { margin: 0; font-size: 0.78rem; color: var(--slate-500); }
 
-/* Legal / compliance pages (Terms, Privacy, Refunds, Contact) */
 .legal-page {
   max-width: 860px;
   padding: 2rem 0;
@@ -286,6 +461,60 @@ td, th { padding: 0.7rem 0.5rem; }
 
 .legal-date-stamp strong {
   font-weight: 700;
+}
+
+.legal-table-wrap {
+  overflow-x: auto;
+  margin: 0.75rem 0 1rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 10px);
+}
+.legal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  min-width: 0;
+}
+.legal-table th,
+.legal-table td {
+  text-align: left;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-wrap: anywhere;
+}
+.legal-table thead th {
+  background: var(--bg-soft, #f8fafc);
+  font-weight: 700;
+}
+.legal-table tbody tr:last-child td {
+  border-bottom: none;
+}
+@media (max-width: 480px) {
+  .legal-table thead {
+    display: none;
+  }
+  .legal-table,
+  .legal-table tbody,
+  .legal-table tr,
+  .legal-table td {
+    display: block;
+    width: 100%;
+  }
+  .legal-table tr {
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0.25rem 0;
+  }
+  .legal-table td {
+    border-bottom: none;
+    padding: 0.2rem 0.8rem;
+  }
+  .legal-table td:first-child {
+    font-weight: 700;
+    padding-top: 0.6rem;
+  }
+  .legal-table td:last-child {
+    padding-bottom: 0.6rem;
+  }
 }
 
 .legal-content {
@@ -348,7 +577,6 @@ td, th { padding: 0.7rem 0.5rem; }
   text-decoration-color: var(--primary-700);
 }
 
-/* Stamp-style "Last updated" emphasis */
 .legal-content .updated-note {
   display: inline-block;
   font-size: 0.82rem;
@@ -356,7 +584,6 @@ td, th { padding: 0.7rem 0.5rem; }
   margin-top: 0.25rem;
 }
 
-/* Responsive: legal pages */
 @media (max-width: 640px) {
   .legal-page {
     padding: 1rem 0;
@@ -397,7 +624,6 @@ td, th { padding: 0.7rem 0.5rem; }
   }
 }
 
-/* Print styles for legal / compliance pages */
 @media print {
   .legal-page .back-link-bar,
   .legal-page .badge {
@@ -454,4 +680,12 @@ td, th { padding: 0.7rem 0.5rem; }
   body {
     background: #fff;
   }
+}
+@media (max-width: 320px) {
+  .login-modal-overlay { padding: 0.45rem; }
+  .login-modal { padding: 1.4rem 0.9rem; }
+  .add-cook-modal { padding: 1.2rem 0.85rem; }
+  .brm-card { padding: 1rem 0.8rem 0.8rem; border-radius: 16px; }
+  .brm-head-text h3 { font-size: 0.96rem; }
+  .brm-row { font-size: 0.78rem; }
 }

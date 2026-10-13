@@ -58,8 +58,6 @@ const AdminComplaints = () => {
   const setStatus = async (id, status) => {
     setSavingId(id);
     try {
-      // Send adminNote only when the textarea has content — otherwise an
-      // untouched (empty) box would wipe a previously saved internal note.
       const note = (notes[id] || "").trim();
       await API.patch(`/complaints/${id}/status`, note ? { status, adminNote: note } : { status });
       showToast(`Complaint marked as ${status.replace("_", " ")}`, "success");

@@ -1,21 +1,4 @@
-/* ==========================================================================
-   Cook booking form (BookingForm.jsx — `bk-*` namespace). Single source of
-   truth, loaded last so it beats the generic layers.
 
-   Consolidates FIVE former layers (cooks.css base + responsive.css tweaks +
-   booking-refresh.css + booking-redesign.css + booking-compact.css). Audit
-   notes:
-   - `bk-head*`, `bk-date*`, `bk-status*`, `bk-pin-btn*` matched NO element
-     in the JSX (header/carousel removed with the old flows) — dropped.
-   - booking-refresh.css survived only via the `bkPulse` keyframe; its
-     spacing/motion sections were fully overridden — dropped, pulse kept.
-   - booking-redesign.css supplied structure + brand states — kept as base.
-   - booking-compact.css supplied final sizing + step indicator — kept.
-   - responsive.css keeps only generic rules; every `bk-*` tweak is folded
-     into the media queries below.
-   ========================================================================== */
-
-/* ---- Layout ---- */
 .bk {
   display: flex;
   flex-direction: column;
@@ -24,7 +7,6 @@
   margin: 0 auto;
 }
 
-/* ---- Step progress ---- */
 .bk-steps {
   display: flex;
   align-items: center;
@@ -60,14 +42,12 @@
 }
 .bk-step-meta strong { color: var(--primary-700); }
 
-/* ---- Step body: soft rise on every step change (key={step} replays it) ---- */
 .bk-step { display: contents; }
 .bk-step > .bk-card,
 .bk-step > .bk-foot { animation: bkFadeIn 0.28s ease backwards; }
 .bk-step > .bk-card + .bk-card { animation-delay: 60ms; }
 .bk-step > .bk-foot { animation-delay: 120ms; }
 
-/* ---- Cards ---- */
 .bk-card {
   background: #fff;
   border: 1px solid var(--slate-200);
@@ -122,7 +102,6 @@
   padding: 0.15rem 0.6rem;
 }
 
-/* ---- Service tiles ---- */
 .bk-service-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -226,7 +205,6 @@
   padding: 0.15rem 0.6rem;
 }
 
-/* Per-service icon tints */
 .bk-service-card:nth-child(1) > svg { color: #ea580c; background: #ffedd5; border-color: #fed7aa; }
 .bk-service-card:nth-child(1):hover > svg { color: #c2410c; border-color: #fdba74; }
 .bk-service-card:nth-child(1).active > svg { background: #ea580c; border-color: #ea580c; }
@@ -240,7 +218,6 @@
 .bk-service-card:nth-child(4):hover > svg { color: #92400e; border-color: #fcd34d; }
 .bk-service-card:nth-child(4).active > svg { background: #d97706; border-color: #d97706; }
 
-/* ---- Duration chips ---- */
 .bk-duration-row {
   display: flex;
   align-items: center;
@@ -305,7 +282,6 @@
 }
 .bk-dur-end strong { color: var(--primary-700); }
 
-/* ---- Start-hour buttons ---- */
 .bk-hour-select {
   display: flex;
   gap: 0.5rem;
@@ -348,7 +324,6 @@
 }
 .bk-hour-btn.active:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 
-/* ---- Saved address strip ---- */
 .bk-saved-wrap {
   display: flex;
   align-items: center;
@@ -372,7 +347,6 @@
 }
 .bk-saved-wrap svg { flex-shrink: 0; }
 
-/* ---- Address inputs ---- */
 .bk-addr-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -415,7 +389,6 @@
   line-height: 1.35;
 }
 
-/* ---- Auto-attached map pin cluster ---- */
 .bk-pin-bar:empty { display: none; }
 .bk-pin-icon {
   display: inline-flex;
@@ -446,7 +419,6 @@
   line-height: 1.35;
 }
 
-/* ---- Notes ---- */
 .bk-notes {
   width: 100%;
   min-height: 84px;
@@ -474,7 +446,6 @@
   font-weight: 600;
 }
 
-/* ---- Error banner ---- */
 .bk-error {
   display: flex;
   align-items: flex-start;
@@ -492,8 +463,20 @@
   animation: bkShake 0.35s ease;
 }
 .bk-error-icon { flex-shrink: 0; margin-top: 1px; }
+.bk-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 0.25rem;
+  color: var(--primary-700, #1d4ed8);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bk-link-btn:hover { color: var(--primary-800, #1e40af); }
 
-/* ---- Footer: estimate + submit ---- */
 .bk-foot {
   display: flex;
   flex-direction: column;
@@ -581,7 +564,6 @@
   line-height: 1.4;
 }
 
-/* ---- Step navigation ---- */
 .bk-nav-buttons {
   display: flex;
   justify-content: flex-end;
@@ -655,7 +637,6 @@
 }
 .bk-back-btn:disabled::after, .bk-next-btn:disabled::after { display: none; }
 
-/* ---- Keyboard focus: one consistent warm ring ---- */
 .bk-service-card:focus-visible,
 .bk-dur-chip:focus-visible,
 .bk-hour-btn:focus-visible,
@@ -667,7 +648,6 @@
   outline-offset: 2px;
 }
 
-/* ---- Motion: entrances + feedback only ---- */
 @keyframes bkFadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -690,9 +670,7 @@
   to { transform: rotate(360deg); }
 }
 
-/* ---- Responsive ---- */
 @media (max-width: 1024px) {
-  /* BookingForm sits in the cook profile's right column on tablets */
   .cook-profile-right-col .bk-card { box-shadow: var(--shadow-md); }
 }
 @media (max-width: 768px) {
@@ -708,13 +686,15 @@
   .bk-service-card { min-height: 80px; padding: 0.75rem 0.9rem; }
   .bk-service-card > svg { width: 38px; height: 38px; }
 }
-@media (max-width: 400px) {
+@media (max-width: 560px) {
   .bk-service-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 400px) {
   .bk-card { border-radius: 14px; padding: 0.9rem; }
   .bk-service-card { min-height: 72px; padding: 0.65rem 0.75rem; }
   .bk-service-label { font-size: 0.88rem; }
   .bk-service-desc { font-size: 0.72rem; }
-  .bk-hour-btn { min-width: 60px; min-height: 38px; padding: 0.4rem 0.6rem; font-size: 0.78rem; }
+  .bk-hour-btn { min-width: 60px; min-height: 44px; padding: 0.4rem 0.6rem; font-size: 0.78rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -731,17 +711,18 @@
   .bk-submit::after, .bk-next-btn::after { display: none; }
 }
 
-/* ==========================================================================
-   Book-a-Cook companion (CookBooking.jsx) — compact sizing carried over
-   from the retired booking-compact.css layer so that page keeps its look.
-   ========================================================================== */
 .ondemand-page { padding: 1.4rem 1.25rem 2.5rem; }
 .ondemand-hero { padding: 1.4rem 1.25rem; margin-bottom: 1.1rem; }
 .ondemand-hero .section-title { font-size: 1.5rem; }
 .ondemand-steps { gap: 0.7rem; margin: 1rem 0 1.1rem; }
 .ondemand-step { font-size: 0.8rem; }
 .ondemand-step-dot { width: 24px; height: 24px; font-size: 0.72rem; }
-.ondemand-form-card { padding: 1.3rem 1.2rem; animation: bkFadeIn 0.24s ease backwards; }
+.ondemand-form-card {
+  --od-pad-x: 1.2rem;
+  --od-pad-b: 1.3rem;
+  padding: 1.3rem var(--od-pad-x) var(--od-pad-b);
+  animation: bkFadeIn 0.24s ease backwards;
+}
 .ondemand-form-card .form-control { min-height: 44px; font-size: 0.9rem; }
 .ondemand-form-sub { font-size: 0.82rem; }
 .ondemand-section-title { font-size: 1.02rem; margin: 1.2rem 0 0.6rem; }
@@ -749,7 +730,6 @@
 .service-pick-card { padding: 0.85rem 0.9rem; }
 .slot-list-pick { animation: bkFadeIn 0.24s ease backwards; }
 
-/* ---- Colour: hero gets a festive gradient hairline ---- */
 .ondemand-hero { position: relative; overflow: hidden; }
 .ondemand-hero::after {
   content: "";
@@ -761,10 +741,8 @@
   background: var(--primary-gradient);
 }
 
-/* ---- Colour: section titles wear the brand ---- */
 .ondemand-section-title svg { color: var(--primary); flex-shrink: 0; }
 
-/* ---- Colour: service picker, one hue per service (same map as bk tiles) ---- */
 .service-pick-card .service-pick-icon {
   width: 34px;
   height: 34px;
@@ -853,13 +831,11 @@
   padding: 2px;
 }
 
-/* ---- Colour: address box glows warm once auto-filled ---- */
 .ondemand-locate-box {
   background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
   border: 1.5px dashed #fdba74;
 }
 
-/* ---- Colour: cook avatars rotate through festive hues ---- */
 .match-card:nth-child(4n+1) .match-avatar {
   background: linear-gradient(135deg, #ffb020 0%, #e8590c 100%);
 }
@@ -873,7 +849,6 @@
   background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%);
 }
 
-/* ---- Proper Book button over each cook card ---- */
 .od-bookbox {
   display: flex;
   flex-direction: column;
@@ -918,12 +893,7 @@
   .slot-list-pick { animation: none; }
 }
 
-/* ==========================================================================
-   Book-a-Cook UX redesign — numbered sections, steppers, sticky summary
-   CTA, recap bars. Pure addition: nothing above is altered.
-   ========================================================================== */
 
-/* Numbered section badge */
 .od-sec-num {
   display: inline-flex;
   align-items: center;
@@ -939,7 +909,6 @@
   flex-shrink: 0;
 }
 
-/* Quick-date chips row */
 .od-presets {
   display: flex;
   gap: 0.45rem;
@@ -947,7 +916,6 @@
   margin-bottom: 0.55rem;
 }
 
-/* Date row: Today · Tomorrow · calendar picker, in one line */
 .od-date-pick-row {
   display: flex;
   align-items: center;
@@ -957,20 +925,16 @@
 .od-date-pick-row .od-presets { margin-bottom: 0; }
 .od-date-pick-row .ccal { flex: 1 1 220px; }
 .od-date-pick-row .ccal-field { width: 100%; min-height: 44px; }
-/* Field sits last in the row — anchor the popup to its right edge so it
-   never spills off small laptop viewports. */
 .od-date-pick-row .ccal-pop { left: auto; right: 0; }
 @media (max-width: 480px) {
   .od-date-pick-row .ccal { flex-basis: 100%; }
 }
 
-/* Compact date picker — small width instead of full-width */
 .od-date-input {
   width: auto;
   max-width: 200px;
 }
 
-/* − value + stepper: one joined control */
 .od-stepper { display: flex; align-items: stretch; gap: 0.45rem; }
 .od-stepper .form-control { text-align: center; }
 .od-step-btn {
@@ -992,16 +956,15 @@
 }
 .od-step-btn:active { transform: scale(0.94); }
 
-/* Sticky live-summary bar with the CTA (step 1) */
 .od-stickybar {
   position: sticky;
   bottom: 0;
-  z-index: 5;
+  z-index: 6;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  margin: 0.4rem -1.2rem -1.3rem;
-  padding: 0.7rem 1.2rem calc(0.8rem + env(safe-area-inset-bottom));
+  margin: 0.4rem calc(-1 * var(--od-pad-x, 1.2rem)) calc(-1 * var(--od-pad-b, 1.3rem));
+  padding: 0.7rem var(--od-pad-x, 1.2rem) calc(0.8rem + env(safe-area-inset-bottom));
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
@@ -1023,7 +986,6 @@
 }
 .od-missing { color: var(--accent-rose); }
 
-/* Recap bar (steps 2–3): what you picked + one-tap edit */
 .od-sumbar {
   display: flex;
   align-items: center;
@@ -1052,10 +1014,70 @@
 }
 .od-sumbar .btn { flex-shrink: 0; }
 
-/* Venue card (step 3): breathing room before the cook results */
+.od-step-3 .ondemand-form-card { max-width: 880px; margin-inline: auto; }
 .od-venue-card { margin: 1rem 0 1.25rem; animation: bkFadeIn 0.24s ease backwards; }
+@media (min-width: 1024px) {
+  .od-step-3 .ondemand-form-card { max-width: 1080px; padding: 1.75rem 2rem; }
+  .od-step-3 .od-stickybar { margin: 0.4rem -2rem -1.75rem; padding-left: 2rem; padding-right: 2rem; }
+}
 
-/* Empty-slot recovery: one-tap shorter-duration retries */
+.od-venue-card .price-row { align-items: flex-start; }
+.od-venue-card .price-row > span:first-child {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--slate-500);
+  font-weight: 700;
+}
+.od-venue-card .price-row > span:last-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.od-venue-card .price-row.total { align-items: center; }
+.od-venue-card .price-row.total strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 560px) {
+  .od-venue-card .price-row { gap: 0.45rem; font-size: 0.82rem; }
+  .od-venue-card .price-row.total { flex-wrap: wrap; }
+  .od-venue-card .price-row.total strong { flex: 1 1 100%; font-size: 1.15rem; }
+}
+@media (max-width: 640px) {
+  .od-step-3 .form-row { grid-template-columns: 1fr; }
+  .od-step-3 .bk-profile-addr { align-items: flex-start; flex-wrap: wrap; }
+  .od-step-3 .bk-profile-addr .bk-recap-edit { margin-left: auto; }
+  .od-step-3 .field-hint { display: flex; align-items: flex-start; gap: 0.35rem; line-height: 1.5; overflow-wrap: anywhere; }
+  .od-step-3 .field-hint svg { flex-shrink: 0; margin-top: 0.15rem; }
+  .od-step-3 .coupon-applied-text { flex: 1 1 160px; }
+  .od-step-3 .coupon-remove { min-height: 40px; padding: 0.35rem 0.5rem; }
+  .od-step-3 .od-stickybar { gap: 0.6rem; }
+  .od-step-3 .od-summary { row-gap: 0.25rem; }
+  .od-step-3 .od-cta { width: 100%; min-height: 48px; }
+  /* Venue selects (incl. City / Area) on phones: grid items must shrink,
+     16px so iOS never zooms on focus, 48px touch target, and selected
+     text ellipsizes instead of spilling past 320px viewports. */
+  .od-step-3 .form-group { min-width: 0; }
+  .od-step-3 .form-group > label { min-width: 0; overflow-wrap: anywhere; }
+  .od-step-3 select.form-control {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    font-size: 16px;
+    text-overflow: ellipsis;
+  }
+}
+@media (max-width: 400px) {
+  .od-venue-card .price-row { font-size: 0.8rem; }
+  .od-venue-card .price-row.total strong { font-size: 1.08rem; }
+}
+
 .od-suggest-row {
   display: flex;
   align-items: center;
@@ -1073,17 +1095,10 @@
   .od-step-btn:active { transform: none; }
 }
 
-/* ==========================================================================
-   Book-a-Cook modern restyle — focused step columns, radio-card slots,
-   tinted specialty tags, CTA sheen, list entrances.
-   ========================================================================== */
 
-/* Focused single-column steps; the step-3 cook list keeps full width */
 .od-step-1 .ondemand-form-card { max-width: 740px; margin-inline: auto; }
 .od-step-2 .ondemand-form-card { max-width: 680px; margin-inline: auto; }
 
-/* Laptop and wider: use the available page width instead of narrow columns.
-   Service cards go 4-up so step 1 fills the wider card without whitespace. */
 @media (min-width: 1024px) {
   .od-step-1 .ondemand-form-card { max-width: 1020px; }
   .od-step-2 .ondemand-form-card { max-width: 960px; }
@@ -1092,11 +1107,6 @@
   .od-step-2 .ondemand-form-card { padding: 1.75rem 2rem; }
 }
 
-/* ==========================================================================
-   Booking form depth — layered elevation so cards, tiles and bars feel
-   tactile: soft ambient shadow + tight contact shadow + top highlight.
-   Scoped to the Book-a-Cook page; hover states lift, active states press.
-   ========================================================================== */
 .ondemand-page .ondemand-form-card {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
@@ -1177,10 +1187,8 @@
     0 18px 38px -14px rgba(194, 65, 12, 0.28),
     0 2px 6px rgba(15, 23, 42, 0.06);
 }
-.ondemand-page .od-livebar {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 10px 24px -12px rgba(15, 23, 42, 0.5);
+.ondemand-page .od-gobar {
+  box-shadow: none;
 }
 .ondemand-page .od-slot-recap,
 .ondemand-page .od-bookbox {
@@ -1203,13 +1211,7 @@
   .ondemand-page .service-pick-card:active { transform: none; }
 }
 
-/* ==========================================================================
-   Responsive form typography — text scales with screen size via fluid
-   clamp() sizes, tightened on phones and opened up on laptops.
-   Scoped to the two booking forms so nothing else in the app shifts.
-   ========================================================================== */
 
-/* --- Book-a-Cook page (CookBooking) : fluid base --- */
 .ondemand-page .od-title { font-size: clamp(1.2rem, 1rem + 1vw, 1.6rem); }
 .ondemand-page .od-sub { font-size: clamp(0.72rem, 0.68rem + 0.4vw, 0.82rem); }
 .ondemand-page .od-step-name { font-size: clamp(0.72rem, 0.68rem + 0.4vw, 0.82rem); }
@@ -1228,7 +1230,6 @@
 .ondemand-page .match-count-title { font-size: clamp(0.95rem, 0.88rem + 0.6vw, 1.12rem); }
 .ondemand-page .match-id h3 { font-size: clamp(0.95rem, 0.9rem + 0.5vw, 1.08rem); }
 
-/* --- Cook profile widget (BookingForm bk-v2) : fluid base --- */
 .bk-v2 .bk-title { font-size: clamp(1.25rem, 1.1rem + 1vw, 1.55rem); }
 .bk-v2 .bk-sub { font-size: clamp(0.7rem, 0.66rem + 0.4vw, 0.8rem); }
 .bk-v2 .bk-step-name { font-size: clamp(0.72rem, 0.68rem + 0.4vw, 0.8rem); }
@@ -1240,25 +1241,18 @@
 .bk-v2 .bk-date-num { font-size: clamp(1.05rem, 0.95rem + 0.8vw, 1.3rem); }
 .bk-v2 .bk-hour-btn { font-size: clamp(0.76rem, 0.72rem + 0.4vw, 0.86rem); }
 
-/* --- Phones: compact but never below readable minimums --- */
 @media (max-width: 640px) {
   .ondemand-page .od-steps-modern { gap: 0.15rem; }
-  .ondemand-page .od-livebar { font-size: 0.72rem; }
-  .ondemand-page .od-livechip { font-size: 0.68rem; }
   .bk-v2 .bk-step-desc { display: none; }
   .bk-v2 .bk-sticky-text { font-size: 0.74rem; }
 }
 
-/* --- Laptops/desktops: open the type up to fill the wider cards --- */
 @media (min-width: 1024px) {
   .ondemand-page .ondemand-form-card .form-group > label { letter-spacing: 0.01em; }
   .ondemand-page .service-pick-card > span:not(.service-pick-icon):not(.service-pick-check) { line-height: 1.5; }
   .bk-v2 .bk-card-label { letter-spacing: -0.01em; }
 }
 
-/* Cook booking Q&A rhythm — generous space after every answer block,
-   plus a hairline divider above each new question so sections read as
-   distinct steps instead of one long wall. */
 .ondemand-form-card > .service-pick-grid,
 .ondemand-form-card > .form-row,
 .ondemand-form-card > .form-group,
@@ -1276,16 +1270,13 @@
   margin-top: 1.5rem;
 }
 
-/* Steps: glowing active dot */
 .ondemand-step-dot { box-shadow: inset 0 0 0 1px var(--slate-200); }
 .ondemand-step.active .ondemand-step-dot {
   box-shadow: var(--shadow-brand), 0 0 0 3px var(--primary-glow);
 }
 
-/* Form card: softer radius */
 .ondemand-form-card { border-radius: 20px; }
 
-/* Labels with icons: small, bold, brand icons */
 .ondemand-form-card .form-group > label {
   font-size: 0.8rem;
   font-weight: 800;
@@ -1296,7 +1287,6 @@
 }
 .ondemand-form-card .form-group > label svg { color: var(--primary); flex-shrink: 0; }
 
-/* Inputs: rounded with brand focus ring */
 .ondemand-form-card .form-control {
   border-radius: 12px;
   border: 1.5px solid var(--slate-200);
@@ -1309,7 +1299,48 @@
   box-shadow: 0 0 0 4px var(--primary-glow);
 }
 
-/* Slot radio cards: lift on hover, count becomes a pill */
+.od-saved-group { min-width: 0; max-width: 100%; }
+.od-saved-wrap {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 12px;
+}
+.ondemand-locate-box { min-width: 0; max-width: 100%; }
+.ondemand-form-card,
+.od-venue-card { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.ondemand-locate-box .od-saved-select {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  box-sizing: border-box;
+  background-color: #fff;
+  font-weight: 600;
+  color: var(--slate-800);
+  cursor: pointer;
+}
+.ondemand-locate-box .od-saved-select:hover { border-color: var(--primary); }
+.ondemand-locate-box .od-saved-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-glow);
+  background-color: #fff;
+}
+.ondemand-locate-box .od-saved-select option { font-weight: 500; color: var(--slate-800); background: #fff; }
+.ondemand-locate-box .od-saved-select option[value=""] { color: var(--slate-400); }
+@media (max-width: 640px) {
+  .ondemand-page .ondemand-locate-box .od-saved-select { font-size: 16px; min-height: 48px; }
+  .ondemand-page .od-venue-card { overflow: hidden; }
+  .ondemand-page .ondemand-locate-box { padding: 0.8rem 0.85rem; }
+}
+@media (max-width: 375px) {
+  .ondemand-page .ondemand-locate-box { padding: 0.75rem 0.7rem; }
+}
+
 .slot-chip-pick { transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease; }
 .slot-chip-pick:hover { transform: translateY(-1px); box-shadow: var(--shadow-sm); }
 .slot-chip-pick.selected { transform: none; }
@@ -1325,12 +1356,7 @@
   color: #fff;
 }
 
-/* ---- Step-2 slot cards: compact start-time-first redesign ----
-   Start time is the hero (scan speed); end time + free-cook count are
-   secondary lines. The component collapses each day-part to its first
-   TOP_SLOTS_COUNT starts behind a "Show all N times" expander, and badges
-   the most-available start "★ Recommended". */
-.ondemand-page .slot-list-pick { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 0.5rem; }
+.ondemand-page .slot-list-pick { grid-template-columns: repeat(auto-fill, minmax(min(100%, 148px), 1fr)); gap: 0.5rem; }
 .ondemand-page .slot-chip-pick {
   flex-direction: column;
   align-items: flex-start;
@@ -1382,15 +1408,21 @@
 }
 .slot-toggle-btn:hover { border-color: var(--primary); background: var(--primary-light); }
 
-/* Phones: 2 tidy columns, left-aligned (responsive.css forces generic
-   .slot-list chips full-width — this picker stays a compact grid). */
-@media (max-width: 560px) {
-  .ondemand-page .slot-list-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
+@media (max-width: 768px) {
+  /* NOTE: display:grid is required here — the container also carries the
+     legacy .slot-list class (display:flex from cook-pages.css, which wins
+     the base cascade), so without this the columns below are ignored and
+     the ≤640px flex:1 1 100% rule stacks one chip per row. */
+  .ondemand-page .slot-list-pick { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; align-items: stretch; }
   .ondemand-page .slot-list-pick .slot-chip {
-    flex: 0 0 auto;
-    justify-content: flex-start;
-    text-align: left;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    min-height: 6.75rem;
+    padding: 0.6rem 0.5rem;
   }
+  /* An odd trailing chip spans the full row instead of leaving a half-empty one. */
+  .ondemand-page .slot-list-pick > .slot-chip-pick:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .slot-chip-main { font-size: 0.98rem; }
 }
 @media (max-width: 380px) {
@@ -1398,13 +1430,11 @@
   .slot-chip-rec { font-size: 0.6rem; }
 }
 
-/* Specialty tags rotate through festive hues */
 .match-card .tags .tag:nth-child(4n+1) { color: #c2410c; background: #ffedd5; }
 .match-card .tags .tag:nth-child(4n+2) { color: #047857; background: #d1fae5; }
 .match-card .tags .tag:nth-child(4n+3) { color: #6d28d9; background: #ede9fe; }
 .match-card .tags .tag:nth-child(4n+4) { color: #b45309; background: #fef3c7; }
 
-/* Primary step CTAs + per-cook Book buttons get the hover sheen */
 .ondemand-form-card .btn-primary.btn-block,
 .od-bookbtn { position: relative; overflow: hidden; }
 .ondemand-form-card .btn-primary.btn-block > *,
@@ -1423,7 +1453,6 @@
 .ondemand-form-card .btn-primary.btn-block:hover::after,
 .od-bookbtn:hover::after { animation: bkSheen 0.7s ease; }
 
-/* Error reads as a banner, shakes once for attention */
 .ondemand-page .error-message {
   background: #fef2f2;
   border: 1px solid #fecaca;
@@ -1434,16 +1463,11 @@
   animation: bkShake 0.32s ease;
 }
 
-/* Cook list entrance with a soft stagger.
-   On tablets/laptops (≥768px) cards sit side-by-side in rows at their
-   required width instead of stretching full-width; phones keep the
-   single full-width column. `auto-fill` guarantees even a lone cook
-   card holds a fixed comfortable width rather than going edge-to-edge. */
 .bookings-list { animation: bkFadeIn 0.24s ease backwards; }
 @media (min-width: 768px) {
   .ondemand-page .bookings-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr));
     gap: 0.9rem;
     align-items: start; /* uneven content heights never stretch siblings */
   }
@@ -1453,7 +1477,6 @@
 .match-card:nth-child(3) { animation-delay: 120ms; }
 .match-card:nth-child(4) { animation-delay: 180ms; }
 
-/* Empty states pick up the warm tint */
 .ondemand-page .no-data {
   background: linear-gradient(180deg, #fff7ed 0%, #ffffff 100%);
   border-color: #fed7aa;
@@ -1468,13 +1491,7 @@
   .slot-chip-pick:hover { transform: none; }
 }
 
-/* ==========================================================================
-   Colour theme — festive but calm. One hue per service tile, one accent
-   per step (0 orange · 1 blue · 2 emerald), warm estimate strip, CTA sheen.
-   Selection keeps a single meaning (brand orange gradient) everywhere.
-   ========================================================================== */
 
-/* ---- Service tiles: each service gets its own hue ---- */
 .bk-service-card:nth-child(1) > svg {
   color: #ea580c;
   background: #ffedd5;
@@ -1527,8 +1544,6 @@
 .bk-service-card:nth-child(4).active > svg { background: #d97706; border-color: #d97706; }
 .bk-service-card:nth-child(4).active .bk-service-desc { color: #b45309; }
 
-/* ---- Per-step accents: progress fill, step label, card icon chips ---- */
-/* Step 0 (service) wears the default brand orange — no overrides needed. */
 .bk-step-1 .bk-step-dot.active::after {
   background: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%);
 }
@@ -1554,20 +1569,17 @@
   border-color: var(--accent-emerald);
   box-shadow: 0 0 0 4px rgba(5, 150, 105, 0.15);
 }
-/* Confirm step: estimate strip turns green to signal "ready to send" */
 .bk-step-2 .bk-foot-estimate {
   background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
   border-color: #6ee7b7;
 }
 .bk-step-2 .bk-foot-total { color: #047857; }
 
-/* ---- Warm estimate strip (steps 0–1) ---- */
 .bk-foot-estimate {
   background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
   border: 1px dashed #fdba74;
 }
 
-/* ---- CTA: deeper festive gradient + hover sheen ---- */
 .bk-submit {
   background: var(--primary-depth);
   position: relative;
@@ -1594,9 +1606,6 @@
   .bk-submit::after { display: none; }
 }
 
-/* ==========================================================================
-   Coupon + launch price breakdown (shared by both booking flows)
-   ========================================================================== */
 .coupon-apply { display: flex; flex-direction: column; gap: 0.45rem; }
 .coupon-apply-label {
   display: inline-flex;
@@ -1665,7 +1674,6 @@
 }
 .coupon-remove:hover { color: var(--accent-rose); }
 
-/* Price breakdown rows: service price → discount → final payable */
 .price-rows { display: flex; flex-direction: column; gap: 0.4rem; }
 .price-row {
   display: flex;
@@ -1687,10 +1695,28 @@
 }
 .price-row.total strong { color: var(--primary-700); font-size: 1.2rem; }
 
-/* ==========================================================================
-   Launch pricing strip — 1hr ₹199 · 2hrs ₹349 · 3hrs ₹499 · 4hrs ₹649
-   Priced duration chips + full-rate card under the duration selector.
-   ========================================================================== */
+/* Coupon celebration: badge pops in, discount row slides in, total pulses. */
+@keyframes coupon-pop {
+  0% { transform: scale(0.92); opacity: 0; }
+  60% { transform: scale(1.03); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.coupon-applied { animation: coupon-pop 0.35s ease-out; }
+@keyframes price-slide-in {
+  from { transform: translateY(-4px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.price-row.discount { animation: price-slide-in 0.3s ease-out; }
+@keyframes amount-pulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+.price-flash { display: inline-block; animation: amount-pulse 0.45s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .coupon-applied, .price-row.discount, .price-flash { animation: none; }
+}
+
 .bk-dur-chip-priced {
   display: inline-flex;
   flex-direction: column;
@@ -1781,13 +1807,8 @@
   .bk-price-cells { grid-template-columns: repeat(2, 1fr); }
 }
 
-/* ==========================================================================
-   Modern booking redesign — header, numbered stepper, live recap bar,
-   date carousel, sticky summary footer.
-   ========================================================================== */
 .bk-modern { gap: 0.7rem; }
 
-/* Header */
 .bk-head {
   display: flex;
   align-items: flex-start;
@@ -1854,7 +1875,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Numbered stepper */
 .bk-steps-modern {
   display: flex;
   align-items: flex-start;
@@ -1902,7 +1922,6 @@
 .bk-step-link { flex: 1; height: 2px; border-radius: 2px; background: var(--slate-200); margin: 0 0.5rem; min-width: 8px; }
 .bk-step-item.done .bk-step-link { background: var(--accent-emerald); }
 
-/* Live recap bar */
 .bk-livebar {
   display: flex;
   align-items: center;
@@ -1929,10 +1948,8 @@
   margin-left: auto;
 }
 
-/* Card hint text */
 .bk-card-hint { margin: 0; font-size: 0.76rem; color: var(--slate-500); line-height: 1.4; }
 
-/* Date carousel */
 .bk-date-row {
   display: flex;
   gap: 0.45rem;
@@ -1973,6 +1990,7 @@
   font-size: 0.78rem;
   font-weight: 600;
 }
+.bk-date-manual .ccal-pop { left: auto; right: 0; }
 .bk-date-input {
   border: 1.5px solid var(--slate-200);
   border-radius: 10px;
@@ -1987,7 +2005,6 @@
 .bk-date-input:focus { border-color: var(--primary); box-shadow: 0 0 0 4px var(--primary-glow); }
 .bk-date-picked { color: var(--primary-700); font-weight: 800; }
 
-/* Recap card */
 .bk-recap { background: linear-gradient(180deg, #f8fafc 0%, #fff7ed 100%); }
 .bk-recap-rows { display: flex; flex-direction: column; gap: 0.4rem; }
 .bk-recap-row {
@@ -2016,7 +2033,6 @@
 }
 .bk-recap-edit:hover { border-color: var(--primary); background: var(--primary-light); }
 
-/* Profile-address summary (locked mode — Edit reveals the input fields) */
 .bk-profile-addr {
   display: flex;
   align-items: center;
@@ -2031,7 +2047,6 @@
 .bk-profile-addr-text strong { font-size: 0.78rem; font-weight: 800; color: var(--slate-800, #1e293b); }
 .bk-profile-addr-text span { font-size: 0.85rem; color: var(--slate-600, #475569); overflow-wrap: anywhere; }
 
-/* Sticky footer */
 .bk-stickybar {
   position: sticky;
   bottom: 0;
@@ -2067,8 +2082,6 @@
 .bk-sticky-actions .bk-next-btn { flex: 1; }
 .bk-sticky-hint { flex: 1; text-align: center; font-size: 0.76rem; font-weight: 600; color: var(--slate-400); }
 
-/* Final custom-booking polish: more room to breathe, larger touch targets,
-   and a stronger visual distinction between choosing and confirming. */
 .bk.bk-modern {
   max-width: 620px;
   gap: 0.95rem;
@@ -2134,19 +2147,12 @@
   .bk-modern .bk-step-desc { display: none; }
 }
 
-/* Legacy dots kept for compat (no longer rendered) */
 .bk-steps, .bk-step-dot, .bk-step-meta, .bk-nav-buttons { display: none; }
 .bk-steps-modern ~ .bk-step-meta { display: none; }
 
-/* ==========================================================================
-   Book-a-Cook modern redesign (CookBooking.jsx — `od-*` namespace).
-   Mirrors the bk-modern language: gradient hero, numbered stepper,
-   live recap bar, grouped slots, sticky summary CTAs.
-   ========================================================================== */
 .od-modern .ondemand-hero { display: none; }
 .od-modern .ondemand-steps { display: none; }
 
-/* Hero */
 .od-hero {
   display: flex;
   align-items: flex-start;
@@ -2217,7 +2223,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Numbered stepper */
 .od-steps-modern {
   display: flex;
   align-items: flex-start;
@@ -2255,61 +2260,76 @@
 .od-step-link { flex: 1; height: 2px; border-radius: 2px; background: var(--slate-200); margin: 0 0.5rem; min-width: 8px; }
 .od-step-item.done .od-step-link { background: var(--accent-emerald); }
 
-/* Live recap bar */
-.od-livebar {
+.od-gobar {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
-  background: var(--slate-900);
-  border-radius: 12px;
-  padding: 0.5rem 0.6rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.9rem;
 }
-.od-livechip {
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #e2e8f0;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 99px;
-  padding: 0.2rem 0.6rem;
-  white-space: nowrap;
-}
-.od-livechip-strong { color: #fff; background: rgba(255, 255, 255, 0.16); }
-.od-livechip-price { color: #fff; background: var(--primary-gradient); font-variant-numeric: tabular-nums; margin-left: auto; }
-/* Go Back inside the live recap bar — solid light pill that pops against
-   the dark bar on every screen */
-.od-livebar .btn {
-  flex-shrink: 0;
-  border: 1px solid #fff;
+.od-goback {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 44px;
+  padding: 0.45rem 0.95rem 0.45rem 0.75rem;
+  border: 1.5px solid var(--slate-200);
+  border-radius: 14px;
   background: #fff;
-  color: var(--slate-900);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.1);
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.85rem;
   font-weight: 800;
-  min-height: 34px;
-  font-size: 0.78rem;
-  padding: 0.32rem 0.8rem;
-  border-radius: 99px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  color: var(--slate-900);
+  white-space: nowrap;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease;
 }
-.od-livebar .btn:hover {
-  background: #ffedd5;
-  border-color: #ffedd5;
-  color: var(--primary-700);
+.od-goback:hover {
+  background: #fff7ed;
+  border-color: var(--primary);
 }
-.od-livebar .btn:active { transform: scale(0.96); }
-.od-livebar .btn svg { flex-shrink: 0; }
-/* Phones: tighter bar so button + chips wrap neatly without stranding */
-@media (max-width: 560px) {
-  .od-livebar { gap: 0.3rem; padding: 0.45rem 0.5rem; border-radius: 10px; }
-  .od-livechip { font-size: 0.66rem; padding: 0.16rem 0.5rem; }
-  .od-livebar .btn { font-size: 0.72rem; min-height: 38px; padding: 0.28rem 0.7rem; }
-  .od-livechip-price { margin-left: 0; }
+.od-goback:active { transform: scale(0.97); }
+.od-goback:focus-visible {
+  outline: 3px solid var(--primary-glow);
+  outline-offset: 2px;
 }
-@media (max-width: 380px) {
-  .od-livechip { font-size: 0.62rem; padding: 0.14rem 0.45rem; }
+.od-goback svg { flex-shrink: 0; color: var(--primary-700); }
+@media (max-width: 640px) {
+  .od-gobar {
+    position: sticky;
+    top: calc(62px + 2px);
+    z-index: 4;
+    padding: 0.3rem 0;
+    margin-bottom: 0.85rem;
+    background: linear-gradient(180deg, var(--bg, #fffdf9) 0%, transparent 100%);
+  }
+  .od-goback {
+    min-height: 44px;
+    padding: 0.4rem 0.85rem 0.4rem 0.65rem;
+    box-shadow: 0 2px 8px rgba(234, 88, 12, 0.18);
+  }
+}
+@media (max-width: 375px) {
+  .od-goback { font-size: 0.8rem; }
+  .od-steps-modern { flex-wrap: wrap; row-gap: 0.5rem; }
+  .od-step-item { flex: 1 1 0; }
+  .od-step-name { font-size: 0.66rem; white-space: normal; line-height: 1.25; }
+  .od-step-link { margin: 0 0.25rem; }
+  .od-summary { gap: 0.3rem; }
+  .od-summary-price { font-size: 1rem; }
+  .od-stickybar { padding-bottom: calc(0.7rem + env(safe-area-inset-bottom)); }
+  .ondemand-page .form-control { font-size: 16px; }
+}
+@media (max-width: 320px) {
+  .od-goback { padding: 0.35rem 0.7rem 0.35rem 0.55rem; gap: 0.4rem; font-size: 0.78rem; }
+  .od-steps-modern { row-gap: 0.4rem; }
+  .od-step-name { font-size: 0.62rem; }
+  .od-step-desc { display: none; }
+  .od-step-link { margin: 0 0.2rem; min-width: 6px; }
+  /* Two slots per row even at 320px (~130px per chip — fits the short time + pill content). */
+  .ondemand-page .slot-list-pick { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem; }
+  .od-summary-price { font-size: 0.95rem; }
 }
 
-/* Sticky summary upgrades */
 .od-summary-price {
   color: var(--primary-700);
   font-size: 1.05rem;
@@ -2317,10 +2337,8 @@
   font-variant-numeric: tabular-nums;
   margin-left: auto;
 }
-.od-sticky-note { margin: 0; font-size: 0.72rem; font-weight: 600; color: var(--slate-400); text-align: center; }
 .od-cta { position: relative; overflow: hidden; }
 
-/* Slot groups */
 .od-slot-group { margin-bottom: 0.9rem; }
 .od-slot-group:last-of-type { margin-bottom: 0; }
 .od-slot-group-title {
@@ -2335,7 +2353,6 @@
 .od-slot-group-title svg { color: var(--primary); }
 .od-slot-group-title span { font-weight: 600; color: var(--slate-400); }
 
-/* Chosen-slot recap (step 3) */
 .od-slot-recap {
   display: flex;
   align-items: center;
@@ -2359,31 +2376,62 @@
 }
 
 @media (max-width: 400px) {
-  /* Title & price chip sizing lives in the ≤560px block above (it wins the
-     cascade) — only the step descriptions need hiding at this width. */
   .od-step-desc { display: none; }
 }
 
-/* ---- Cook booking form: dedicated mobile pass ---- */
-/* Duration price cells: 4-across crushes phones — 2×2 grid instead.
-   (The existing 2-col rule is scoped to .bk-v2 only; the on-demand
-   flow needs its own.) */
 @media (max-width: 640px) {
   .bk-price-cells { grid-template-columns: repeat(2, 1fr); }
-  /* Stepper breathing room on narrow screens */
   .od-steps-modern { gap: 0.15rem; }
   .od-step-link { margin: 0 0.3rem; }
   .od-step-name { font-size: 0.7rem; }
-  /* Guests stepper: let the input shrink instead of overflowing */
   .od-stepper .form-control { min-width: 0; flex: 1 1 auto; }
-  /* Cook card Book button: full-width, tall thumb target */
   .od-bookbtn { width: 100%; min-height: 48px; }
+  .od-presets .bk-dur-chip { min-height: 44px; padding: 0.45rem 0.95rem; }
+  .od-date-pick-row .od-presets { flex: 1 1 100%; }
+  .od-date-pick-row .od-presets .bk-dur-chip { flex: 1 1 0; min-width: 0; }
+  .bk-price-cell { padding: 0.45rem 0.3rem; }
+  .bk-price-cell strong { font-size: 0.92rem; }
+  .od-stickybar { gap: 0.5rem; }
+  .ondemand-page .od-cta { min-height: 48px; }
 }
 
-/* ---- Hero on phones: maximum-compact 3-row layout ----
-   Row 1: "Instant booking" pill (left) + price chip pinned top-right.
-   Row 2: title. Row 3: trust line. No full-width price row, no extra
-   padding — hero stays under ~120px so the form owns the first screen. */
+/* Small-phone compaction for the booking flow (covers 425px and below):
+   trims vertical chrome while keeping ≥40px tap targets and 16px inputs
+   (inputs must NOT go below 16px — iOS Safari zooms on focus otherwise). */
+@media (max-width: 480px) {
+  .ondemand-page { padding: 1rem 0.75rem 2rem; }
+  .ondemand-page .od-steps-modern { margin-bottom: 0.75rem; }
+  .ondemand-page .od-gobar { margin-bottom: 0.7rem; }
+  .ondemand-page .od-goback { min-height: 40px; padding: 0.35rem 0.8rem 0.35rem 0.6rem; font-size: 0.8rem; }
+  .ondemand-page .ondemand-form-card .ondemand-section-title { margin-top: 1rem; padding-top: 1rem; }
+  .ondemand-form-card > .service-pick-grid,
+  .ondemand-form-card > .form-row,
+  .ondemand-form-card > .form-group,
+  .ondemand-form-card > .bk-price-strip,
+  .ondemand-form-card > .ondemand-locate-box,
+  .ondemand-form-card > .price-rows,
+  .ondemand-form-card > .coupon-apply,
+  .ondemand-form-card > .od-sumbar,
+  .ondemand-form-card > .od-slot-recap { margin-bottom: 0.9rem; }
+  .ondemand-page .od-venue-card { margin: 0.8rem 0 1rem; }
+  .ondemand-page .od-stickybar { padding-top: 0.6rem; padding-bottom: calc(0.7rem + env(safe-area-inset-bottom)); }
+  .ondemand-page .form-row { gap: 0.65rem; }
+  .ondemand-page .od-slot-group { margin-bottom: 0.7rem; }
+  .ondemand-page .bk-price-strip { padding: 0.5rem 0.6rem; gap: 0.4rem; }
+  .ondemand-page textarea.form-control { min-height: 76px; }
+  .coupon-apply-row { flex-wrap: wrap; }
+  .coupon-apply-row .coupon-input { flex: 1 1 100%; }
+  .coupon-apply-btn { width: 100%; min-height: 46px; }
+}
+
+/* No divider above the first section ("Where should the cook come?"). */
+.od-venue-card > .ondemand-section-title:first-of-type {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+  margin-bottom: 0.9rem;
+}
+
 @media (max-width: 560px) {
   .od-hero {
     position: relative;
@@ -2400,7 +2448,6 @@
   }
   .ondemand-page .od-title { margin: 0.05rem 0 0; font-size: 1.15rem; }
   .ondemand-page .od-sub { font-size: 0.7rem; line-height: 1.35; }
-  /* Price: compact single-line chip pinned to the top-right corner */
   .od-hero-price {
     position: absolute;
     top: 0.55rem;
@@ -2414,13 +2461,10 @@
   }
   .od-hero-price strong { font-size: 1.05rem; }
 }
-/* Very small phones: hero already pinned-chip compact (≤560px block);
-   just shrink the price figure a touch and keep the chip inside bounds */
 @media (max-width: 400px) {
   .od-eyebrow { max-width: calc(100% - 112px); }
   .od-hero-price { top: 0.5rem; right: 0.5rem; padding: 0.2rem 0.45rem; }
   .od-hero-price strong { font-size: 0.98rem; }
-  /* Coupon: stack input over a full-width Apply button */
   .coupon-apply-row { flex-wrap: wrap; }
   .coupon-apply-row .coupon-input { flex: 1 1 100%; }
   .coupon-apply-btn { width: 100%; min-height: 46px; }
@@ -2436,12 +2480,6 @@
   .bk-head-price strong { font-size: 1rem; }
 }
 
-/* ==========================================================================
-   Booking details page (BookingDetails.jsx — `bd-*` namespace). Modern,
-   customer-first layout: gradient hero, journey tracker, fact cards,
-   sticky action bar. Cook/admin share the layout; role-only blocks stay
-   gated in JSX. Pure addition: nothing above is altered.
-   ========================================================================== */
 .bd-wrap {
   max-width: 920px;
   margin: 0 auto;
@@ -2450,7 +2488,6 @@
 }
 .bd-back { margin-bottom: 1rem; }
 
-/* ---- Hero ---- */
 .bd-hero {
   position: relative;
   overflow: hidden;
@@ -2532,7 +2569,6 @@
 .bd-fact-chip.live { background: var(--slate-900); border-color: var(--slate-900); color: #fff; }
 .bd-fact-chip.live svg { color: #fbbf24; }
 
-/* ---- Journey tracker ---- */
 .bd-journey {
   display: flex;
   align-items: flex-start;
@@ -2575,9 +2611,8 @@
 .bd-journey-step.current .bd-journey-name { color: var(--primary-700); }
 .bd-journey-hint { font-size: 0.66rem; font-weight: 600; color: var(--slate-400); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bd-journey-link { flex: 1; height: 2px; border-radius: 2px; background: var(--slate-200); margin: 13px 0.5rem 0; min-width: 8px; }
-.bd-journey-step.done + .bd-journey-link, .bd-journey-link.done { background: var(--accent-emerald); }
+.bd-journey-step.done .bd-journey-link { background: var(--accent-emerald); }
 
-/* ---- Banners ---- */
 .bd-banner {
   display: flex;
   align-items: center;
@@ -2607,7 +2642,6 @@
 .bd-banner.bad svg { color: var(--accent-rose); }
 .bd-banner .btn { margin-left: auto; }
 
-/* ---- Merged summary card: cook / order / payment subsections ---- */
 .bd-sec-div {
   border: none;
   border-top: 1px solid var(--border-subtle);
@@ -2623,7 +2657,6 @@
   color: var(--slate-800);
 }
 
-/* ---- Live service clock card (replaces the old one-line banner) ---- */
 .bd-clock {
   border-radius: 14px;
   padding: 0.85rem 1rem;
@@ -2661,7 +2694,6 @@
   .bd-clock-remaining { font-size: 0.82rem; }
 }
 
-/* ---- Cards ---- */
 .bd-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 1rem; }
 .bd-card {
   background: linear-gradient(180deg, #ffffff, #fffdf9);
@@ -2681,8 +2713,6 @@
 .bd-card-head svg { color: var(--primary); flex-shrink: 0; }
 .bd-card-head .bd-card-action { margin-left: auto; }
 
-/* Refined details experience: a clear hero, stronger card hierarchy, and
-   enough breathing room that each decision point feels easy to scan. */
 .bd-wrap { max-width: 1040px; }
 .bd-hero {
   padding: 1.5rem 1.6rem 1.35rem;
@@ -2714,9 +2744,11 @@
   font-size: 0.85rem;
   font-weight: 800;
   flex-shrink: 0;
+  overflow: hidden;
   box-shadow: 0 4px 12px rgba(194, 65, 12, 0.3), 0 0 0 3px rgba(255, 255, 255, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.5);
 }
+.bd-hero-cook-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .bd-hero-facts { margin-top: 1rem; gap: 0.5rem; }
 .bd-fact-chip { padding: 0.38rem 0.78rem; box-shadow: 0 2px 5px rgba(146, 64, 14, 0.06); }
 .bd-journey {
@@ -2743,7 +2775,6 @@
 .bd-cook-card { background: linear-gradient(145deg, #ffffff 0%, #f8fbff 100%); }
 .bd-timings-card { background: linear-gradient(145deg, #ffffff 0%, #f8fffc 100%); }
 .bd-otp-card { background: linear-gradient(145deg, #fffaf5 0%, #ffffff 100%); }
-.bd-reschedule-card { border-color: #cbdcf8; background: linear-gradient(145deg, #ffffff 0%, #f8fbff 100%); }
 .bd-review-card { border-color: #f8d68c; background: linear-gradient(145deg, #fffdf5 0%, #ffffff 100%); }
 .bd-venue-card { background: linear-gradient(145deg, #ffffff 0%, #fbfcfd 100%); }
 .bd-actionbar {
@@ -2752,7 +2783,6 @@
   padding: 0.8rem 0.9rem calc(0.8rem + env(safe-area-inset-bottom));
 }
 
-/* Fact rows: icon tile + label/value */
 .bd-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.7rem 1rem; }
 .bd-fact { display: flex; gap: 0.6rem; align-items: flex-start; min-width: 0; }
 .bd-fact-icon {
@@ -2771,7 +2801,6 @@
 .bd-fact-body span { font-size: 0.92rem; font-weight: 700; color: var(--slate-800); overflow-wrap: anywhere; }
 .bd-fact-body .bd-pay-amount { font-size: 1.35rem; }
 
-/* Cook identity row */
 .bd-cook { display: flex; align-items: center; gap: 0.9rem; margin-bottom: 1rem; min-width: 0; }
 .bd-cook-avatar {
   width: 58px;
@@ -2801,10 +2830,19 @@
 .bd-row-actions .btn { border-radius: 99px; font-weight: 800; min-height: 42px; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08); }
 .bd-row-actions .btn:active { transform: scale(0.98); }
 
-/* Venue */
-.bd-venue-addr { margin: 0 0 0.75rem; color: var(--slate-700); font-size: 0.95rem; }
+.bd-venue-addr {
+  margin: 0 0 0.75rem;
+  color: var(--slate-900, #0f172a);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.5;
+  background: linear-gradient(180deg, #fffdf4 0%, #fef6e7 100%);
+  border: 1.5px solid #f5cf8f;
+  border-radius: 12px;
+  padding: 0.65rem 0.8rem;
+  overflow-wrap: anywhere;
+}
 
-/* Order */
 .bd-dishes { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-bottom: 0.8rem; }
 .bd-dishes:empty { display: none; }
 .bd-dishes .badge { border: 1px solid rgba(15, 23, 42, 0.06); box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06); }
@@ -2822,7 +2860,6 @@
   overflow-wrap: break-word;
 }
 
-/* Payment */
 .bd-pay-rows { margin-bottom: 0.75rem; }
 .bd-pay-amount { font-size: 1.35rem; font-weight: 800; color: var(--primary-700); font-variant-numeric: tabular-nums; }
 .bd-pay-meta { font-size: 0.82rem; color: var(--slate-500); margin-top: 0.4rem; }
@@ -2831,7 +2868,6 @@
 .bd-payout { font-size: 0.85rem; color: var(--slate-600); background: var(--slate-50); padding: 0.55rem 0.85rem; border-radius: 10px; margin-bottom: 0.75rem; }
 .bd-payout strong { color: var(--accent-emerald); }
 
-/* ---- OTP code card (customer shows it) ---- */
 .bd-otp { text-align: center; border: 2px dashed #fdba74; background: linear-gradient(180deg, #fffdf5, #ffffff); border-radius: 20px; }
 .bd-otp-code {
   font-size: clamp(2rem, 1.6rem + 3vw, 2.6rem);
@@ -2856,21 +2892,14 @@
 .bd-otp-row .btn { border-radius: 99px; min-height: 48px; }
 .bd-otp-desc { margin: 0 0 0.8rem; color: var(--slate-600); font-size: 0.89rem; line-height: 1.5; }
 
-/* ---- Reschedule panel ---- */
-.bd-rs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 0.85rem; margin-bottom: 0.8rem; }
-.bd-rs-hint { margin: 0 0 0.8rem; color: var(--slate-600); font-size: 0.89rem; line-height: 1.5; }
-.bd-rs-pick { font-size: 0.89rem; color: var(--slate-600); margin: 0 0 0.8rem; }
-.bd-rs-actions { display: flex; gap: 0.55rem; flex-wrap: wrap; }
-.bd-rs-actions .btn { border-radius: 99px; min-height: 44px; }
+.bd-note-hint { margin: 0 0 0.8rem; color: var(--slate-600); font-size: 0.89rem; line-height: 1.5; }
 .bd-mini-note { font-size: 0.88rem; color: var(--slate-500); font-weight: 600; }
 .bd-card .slot-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .bd-card .slot-chip { border-radius: 99px; min-height: 42px; font-weight: 800; }
 
-/* ---- Review + rating ---- */
 .bd-rating { margin-top: 1rem; padding: 1rem; background: var(--slate-50); border: 1px solid var(--slate-200); border-radius: 14px; font-size: 0.9rem; }
 .bd-rating-comment { margin-top: 0.3rem; color: var(--slate-600); }
 
-/* ---- Sticky action bar ---- */
 .bd-actionbar {
   position: sticky;
   bottom: 0;
@@ -2895,12 +2924,10 @@
 .bd-actionbar-hint svg { display: inline; vertical-align: -1px; }
 .bd-actionbar + .bd-card { margin-top: 1rem; }
 
-/* ---- Admin timeline rows ---- */
 .bd-tl-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .bd-tl-row { display: flex; align-items: center; gap: 0.6rem; font-size: 0.88rem; }
 .bd-tl-meta { color: var(--slate-500); }
 
-/* ---- Loading / error ---- */
 .bd-loading, .bd-error { max-width: 920px; margin: 0 auto; padding: 1.75rem 1.5rem; }
 .bd-error-link { margin-bottom: 1rem; display: inline-flex; }
 
@@ -2915,7 +2942,6 @@
   .bd-hero-cookline { margin-top: 0.8rem; font-size: 0.82rem; }
   .bd-hero-facts { gap: 0.4rem; }
   .bd-fact-chip { font-size: 0.74rem; padding: 0.3rem 0.65rem; white-space: normal; }
-  /* Journey becomes a 2x2 friendly grid — no horizontal squeeze */
   .bd-journey { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem 0.5rem; padding: 0.85rem 0.9rem; }
   .bd-journey-step { gap: 0.4rem; }
   .bd-journey-dot { width: 30px; height: 30px; }
@@ -2934,12 +2960,10 @@
   .bd-cook-name { font-size: 1rem; }
   .bd-row-actions .btn { flex: 1 1 100%; justify-content: center; min-height: 46px; }
   .bd-card .slot-list .slot-chip { flex: 1 1 calc(50% - 0.25rem); justify-content: center; }
-  .bd-rs-actions .btn { flex: 1 1 100%; justify-content: center; min-height: 48px; }
   .bd-otp-row .btn { width: 100%; justify-content: center; }
   .bd-otp-input { max-width: 100%; width: 100%; }
   .bd-actionbar .btn { flex: 1 1 100%; justify-content: center; min-height: 48px; }
   .bd-tl-row { flex-wrap: wrap; gap: 0.35rem; }
-  /* Service timings helper text is desktop-only — hidden on mobile */
   .bd-timings-card .bd-mini-note { display: none; }
 }
 
@@ -2947,11 +2971,6 @@
   .bd-wrap, .bd-card { animation: none; }
 }
 
-/* ==========================================================================
-   Booking details depth pass — layered elevation on every surface so the
-   page feels tactile: back link, hero, chips, journey, banners, clock,
-   cards, avatars, buttons, OTP, reschedule, reviews, action bar.
-   ========================================================================== */
 .bd-back .back-link-bar {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
@@ -3004,7 +3023,6 @@
     0 0 0 4px rgba(232, 89, 12, 0.12);
 }
 .bd-row-actions .btn,
-.bd-rs-actions .btn,
 .bd-otp-row .btn,
 .bd-actionbar .btn,
 .bd-banner .btn {
@@ -3014,7 +3032,6 @@
     0 8px 18px -8px rgba(15, 23, 42, 0.28);
 }
 .bd-row-actions .btn:hover,
-.bd-rs-actions .btn:hover,
 .bd-otp-row .btn:hover,
 .bd-actionbar .btn:hover {
   box-shadow:
@@ -3053,12 +3070,6 @@
     0 12px 30px -14px rgba(15, 23, 42, 0.22);
 }
 
-/* ==========================================================================
-   Live tracking page (LiveCookTracking.jsx — `lt-*` namespace). Reuses the
-   bd-* hero/banner/card language above; only tracking-specific pieces live
-   here: LIVE pulse, distance readout, map frame, waiting state.
-   ========================================================================== */
-/* Pulsing live dot in the hero eyebrow */
 .lt-live-dot {
   width: 8px;
   height: 8px;
@@ -3072,7 +3083,6 @@
   50% { opacity: 0.75; transform: scale(0.85); box-shadow: 0 0 0 5px rgba(220, 38, 38, 0); }
 }
 
-/* Hero distance readout: big number + label */
 .lt-hero-distance {
   display: flex;
   align-items: baseline;
@@ -3088,7 +3098,6 @@
 }
 .lt-hero-distance span { font-size: 0.82rem; font-weight: 600; color: var(--slate-600); }
 
-/* Map */
 .lt-map-frame {
   width: 100%;
   height: 380px;
@@ -3104,7 +3113,6 @@
 .lt-map-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.9rem; }
 .lt-map-actions:empty { display: none; }
 
-/* Waiting-for-location empty state */
 .lt-waiting {
   text-align: center;
   padding: 2rem 1.25rem;
@@ -3128,7 +3136,6 @@
 .lt-waiting h3 { margin: 0 0 0.3rem; color: var(--slate-800); font-size: 1.05rem; }
 .lt-waiting p { margin: 0 auto; font-size: 0.88rem; max-width: 46ch; }
 
-/* Slim booking strip under the map */
 .lt-booking-strip {
   display: flex;
   align-items: center;
@@ -3152,13 +3159,6 @@
   .lt-live-dot { animation: none; }
 }
 
-/* ==========================================================================
-   Custom cook booking — modern friendly restyle (BookingForm `bk-v2`).
-   Pure addition: scopes everything under `.bk-v2` so CookBooking (`od-*`)
-   and BookingDetails (`bd-*`) are untouched.
-   Goals: calmer hierarchy, labelled fields, grouped times, bigger targets,
-   one clear CTA. Mobile-first, thumb-friendly.
-   ========================================================================== */
 
 .bk-v2 {
   --bk-shadow-card: 0 2px 4px rgba(15, 23, 42, 0.04), 0 10px 24px -12px rgba(15, 23, 42, 0.18);
@@ -3178,7 +3178,6 @@
 .bk-v2 .bk-shell > form { display: flex; flex-direction: column; padding: 0 1.1rem 1.1rem; }
 .bk-v2 .bk-step { display: flex; flex-direction: column; gap: 0.9rem; }
 
-/* ---- Header ---- */
 .bk-v2 .bk-head {
   display: flex;
   align-items: center;
@@ -3202,7 +3201,9 @@
   color: #fff; font-size: 1.4rem; font-weight: 800;
   box-shadow: var(--shadow-brand);
   border: 2px solid #fff;
+  overflow: hidden;
 }
+.bk-v2 .bk-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .bk-v2 .bk-eyebrow {
   background: rgba(255,255,255,0.85);
   border-color: #fdba74;
@@ -3225,7 +3226,6 @@
 .bk-v2 .bk-head-price strong { font-size: 1.35rem; }
 .bk-v2 .bk-head-save { font-style: normal; font-size: 0.7rem; font-weight: 800; color: #047857; background: #d1fae5; border-radius: 99px; padding: 0.1rem 0.5rem; margin-top: 0.15rem; }
 
-/* ---- Progress ---- */
 .bk-v2 .bk-progress-wrap {
   padding: 0.9rem 1.1rem 0.8rem;
   background: linear-gradient(180deg, #fff 0%, var(--slate-50) 100%);
@@ -3251,7 +3251,6 @@
 .bk-v2 .bk-progress-bar { height: 4px; border-radius: 99px; background: var(--slate-100); margin-top: 0.65rem; overflow: hidden; }
 .bk-v2 .bk-progress-bar span { display: block; height: 100%; background: var(--primary-gradient); border-radius: inherit; transition: width 0.3s ease; }
 
-/* ---- Live recap ---- */
 .bk-v2 .bk-livebar {
   margin: 0.9rem 1.1rem 0;
   background: var(--slate-900);
@@ -3262,7 +3261,6 @@
 .bk-v2 .bk-livechip { display: inline-flex; align-items: center; gap: 0.3rem; }
 .bk-v2 .bk-livechip svg { flex-shrink: 0; }
 
-/* ---- Cards (generic) ---- */
 .bk-v2 .bk-card {
   border-radius: 20px;
   padding: 1.15rem 1.2rem;
@@ -3290,7 +3288,6 @@
 .bk-v2 .bk-assure-row span { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.76rem; font-weight: 700; color: var(--slate-500); }
 .bk-v2 .bk-assure-row svg { color: var(--accent-emerald); }
 
-/* ---- Service cards v2 ---- */
 .bk-v2 .bk-service-grid { gap: 0.7rem; }
 .bk-v2 .bk-service-card {
   position: relative;
@@ -3331,7 +3328,6 @@
 }
 .bk-v2 .bk-service-card.active .bk-service-check { background: var(--accent-emerald); color: #fff; }
 
-/* ---- Date grid (no sideways scroll) ---- */
 .bk-v2 .bk-date-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.5rem; }
 .bk-v2 .bk-date-row { display: grid; grid-template-columns: repeat(7, 1fr); overflow: visible; }
 .bk-v2 .bk-date-cell { position: relative; min-width: 0; min-height: 82px; border-radius: 14px; border-width: 2px; }
@@ -3354,7 +3350,6 @@
 .bk-v2 .bk-manual-text { margin-right: auto; }
 .bk-v2 .bk-date-input { max-width: 160px; }
 
-/* ---- Duration price cards ---- */
 .bk-v2 .bk-price-strip { gap: 0.6rem; padding: 0.8rem; border-radius: 16px; }
 .bk-v2 .bk-price-cells { grid-template-columns: repeat(4, 1fr); }
 .bk-v2 .bk-price-cell { position: relative; min-height: 92px; border-radius: 14px; border-width: 2px; padding-top: 0.9rem; background: #fff; }
@@ -3383,7 +3378,6 @@
 }
 .bk-v2 .bk-ends-chip.bk-ends-strong { background: var(--slate-900); border-color: var(--slate-900); color: #fff; }
 
-/* ---- Time groups ---- */
 .bk-v2 .bk-checking {
   display: flex; align-items: center; gap: 0.45rem;
   font-size: 0.78rem; font-weight: 700; color: var(--slate-500);
@@ -3409,14 +3403,12 @@
 .bk-v2 .bk-hour-btn { min-height: 44px; border-radius: 12px; border-width: 2px; min-width: 0; }
 .bk-v2 .bk-hour-btn.active { background: var(--primary-depth); }
 
-/* ---- Recap ---- */
 .bk-v2 .bk-recap { background: linear-gradient(180deg, #f8fafc 0%, #fff7ed 100%); border-color: #f2d6bc; }
 .bk-v2 .bk-recap-row { gap: 0.5rem; padding: 0.55rem 0.6rem 0.55rem 0.7rem; border-radius: 12px; }
 .bk-v2 .bk-recap-icon { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 9px; background: var(--primary-light); color: var(--primary-700); flex-shrink: 0; }
 .bk-v2 .bk-recap-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .bk-v2 .bk-recap-edit { display: inline-flex; align-items: center; gap: 0.25rem; }
 
-/* ---- Labelled fields ---- */
 .bk-v2 .bk-field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
 .bk-v2 .bk-field { display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
 .bk-v2 .bk-field > label { font-size: 0.8rem; font-weight: 800; color: var(--slate-700); }
@@ -3429,7 +3421,6 @@
 .bk-v2 .bk-saved-label { font-size: 0.78rem; font-weight: 800; white-space: nowrap; }
 .bk-v2 .bk-saved-select { font-size: 0.85rem; }
 
-/* Guests stepper */
 .bk-v2 .bk-stepper { display: grid; grid-template-columns: 48px 1fr 48px; gap: 0.5rem; align-items: stretch; }
 .bk-v2 .bk-stepper-btn {
   min-height: 48px; border-radius: 12px;
@@ -3444,7 +3435,6 @@
 .bk-v2 .bk-stepper-input::-webkit-outer-spin-button,
 .bk-v2 .bk-stepper-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 
-/* Map pin card */
 .bk-v2 .bk-pin-card {
   display: flex; align-items: center; gap: 0.6rem;
   background: var(--slate-50); border: 1px dashed var(--slate-300); border-radius: 12px;
@@ -3458,14 +3448,12 @@
 .bk-v2 .bk-pin-bar { display: none; }
 .bk-v2 .bk-pin-msg { display: none; }
 
-/* ---- Pay card ---- */
 .bk-v2 .bk-pay-card { background: linear-gradient(180deg, #fff 0%, #fffaf5 100%); border-color: #f2d6bc; }
 .bk-v2 .bk-pay-note { font-size: 0.7rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent-emerald); background: #d1fae5; border-radius: 99px; padding: 0.2rem 0.6rem; }
 .bk-v2 .bk-foot-estimate { background: #fff; border: 1px solid var(--slate-200); border-radius: 14px; padding: 0.75rem 0.85rem; }
 .bk-v2 .bk-submit-inline { margin-top: 0.15rem; min-height: 52px; font-size: 1rem; border-radius: 14px; }
 .bk-v2 .bk-spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; animation: spin 0.8s linear infinite; }
 
-/* ---- Sticky bar v2 ---- */
 .bk-v2 .bk-stickybar {
   position: sticky; bottom: 0.6rem; z-index: 5;
   margin-top: 0.9rem;
@@ -3480,15 +3468,12 @@
 .bk-v2 .bk-sticky-sub { margin: 0; font-size: 0.74rem; font-weight: 600; color: var(--slate-400); text-align: center; }
 .bk-v2 .bk-send-btn { background: linear-gradient(160deg, #059669 0%, #047857 100%); box-shadow: 0 10px 26px -8px rgba(5,150,105,0.5); }
 
-/* ---- Error ---- */
 .bk-v2 .bk-error { margin: 0.9rem 1.1rem 0; border-radius: 12px; align-items: flex-start; }
 .bk-v2 .bk-error-icon { flex-shrink: 0; margin-top: 1px; }
 
-/* ---- Focus ---- */
 .bk-v2 .bk-step-btn:focus-visible,
 .bk-v2 .bk-stepper-btn:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
 
-/* ---- Surface depth: raised choices, inset fields, floating actions ---- */
 .bk-v2 .bk-service-card,
 .bk-v2 .bk-date-cell:not(:disabled),
 .bk-v2 .bk-price-cell:not(:disabled),
@@ -3528,7 +3513,6 @@
   }
 }
 
-/* ---- Responsive ---- */
 @media (max-width: 768px) {
   .bk-v2 .bk-service-grid { grid-template-columns: 1fr; }
   .bk-v2 .bk-price-cells { grid-template-columns: 1fr 1fr; }
@@ -3560,19 +3544,11 @@
   .bk-v2 .bk-checking.on .bk-pulse-dot, .bk-v2 .bk-spinner { animation: none; }
 }
 
-/* ---- Wider form on laptop/desktop ---- */
 @media (min-width: 1200px) {
   .bk-v2 { max-width: 860px; }
   .bk-v2 .bk-shell > form { padding: 0 1.4rem 1.4rem; }
 }
 
-/* ==========================================================================
-   Modern date picker — native input dressed as a pill with a brand
-   calendar glyph. The popup itself is OS-controlled; `color-scheme`
-   keeps it on-theme while the field, icon and focus ring are ours.
-   Applies to the Book-a-Cook page (`od-date-input`) and the cook
-   profile widget (`bk-date-input`).
-   ========================================================================== */
 .od-date-input,
 .bk-date-input {
   color-scheme: light;
@@ -3603,7 +3579,6 @@
   box-shadow: 0 0 0 4px var(--primary-glow);
   transform: none;
 }
-/* Brand calendar glyph, roomy tap target */
 .od-date-input::-webkit-calendar-picker-indicator,
 .bk-date-input::-webkit-calendar-picker-indicator {
   width: 30px;
@@ -3625,13 +3600,11 @@
   background-color: #fed7aa;
   transform: scale(1.06);
 }
-/* Keep the date text tidy across browsers */
 .od-date-input::-webkit-datetime-edit,
 .bk-date-input::-webkit-datetime-edit { padding: 0; }
 .od-date-input::-webkit-datetime-edit-fields-wrapper,
 .bk-date-input::-webkit-datetime-edit-fields-wrapper { gap: 0.1rem; }
 
-/* Quick-date chips sit on the same card language */
 .od-presets .bk-dur-chip {
   min-height: 40px;
   border-width: 2px;
@@ -3639,7 +3612,6 @@
   font-weight: 700;
 }
 
-/* "Need a later date?" manual row matches the new field */
 .bk-v2 .bk-date-manual {
   background: linear-gradient(180deg, #fff 0%, var(--slate-50) 100%);
   border: 2px solid var(--slate-200);
@@ -3660,11 +3632,6 @@
 .bk-v2 .bk-date-manual .bk-date-input:hover { transform: none; box-shadow: none; }
 .bk-v2 .bk-date-manual .bk-date-input:focus { box-shadow: none; }
 
-/* ==========================================================================
-   Booking widget depth (bk-v2) — same tactile elevation language as the
-   Book-a-Cook page: ambient + contact shadows, top highlights, hover
-   lifts and press-down CTAs.
-   ========================================================================== */
 .bk-v2 .bk-shell {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.9),
@@ -3784,3 +3751,80 @@
   .od-date-input::-webkit-calendar-picker-indicator:hover,
   .bk-date-input::-webkit-calendar-picker-indicator:hover { transform: none; }
 }
+
+.bd-refund-card { border-left: 4px solid #f59e0b; }
+.bd-refund-card.is-done { border-left-color: var(--accent-emerald, #047857); }
+.bd-refund-card .bd-card-head svg { color: #d97706; }
+.bd-refund-card.is-done .bd-card-head svg { color: var(--accent-emerald, #047857); }
+
+.od-step-3 .ondemand-form-card { max-width: 740px; margin-inline: auto; }
+@media (min-width: 1024px) {
+  .od-step-3 .ondemand-form-card { max-width: 960px; padding: 1.75rem 2rem; }
+}
+/* Guest login notice above the Find Cook button. */
+.od-review-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0 0 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--slate-600);
+  line-height: 1.45;
+}
+.od-review-notice svg { flex-shrink: 0; margin-top: 0.15em; color: var(--accent-emerald); }
+.od-review-notice-login svg { color: var(--primary-700); }
+@media (max-width: 375px) {
+  .ondemand-hero { padding: 1.4rem 0.95rem; }
+  .ondemand-form-card { --od-pad-x: 0.95rem; --od-pad-b: 1.15rem; padding: 1.15rem var(--od-pad-x) var(--od-pad-b); }
+  .match-card { padding: 0.95rem 0.85rem; }
+  .bd-hero { padding: 1.4rem 1rem; }
+  .bd-facts { gap: 0.6rem 0.8rem; }
+  .bd-grid-2 { gap: 0.85rem; }
+  .od-bookbox { padding: 0.65rem; }
+  .od-slot-recap { font-size: 0.78rem; }
+  .od-slot-recap strong { flex-basis: 100%; margin-left: 0; text-align: left; }
+  .od-venue-card .price-row.total strong { flex-basis: 100%; text-align: left; }
+  .od-stepper { gap: 0.4rem; }
+  .od-step-btn { flex-basis: 44px; }
+  .od-date-pick-row { gap: 0.45rem; }
+  .coupon-apply-row { gap: 0.45rem; }
+}
+@media (max-width: 320px) {
+  .ondemand-hero { padding: 1.25rem 0.85rem; }
+  .ondemand-hero .section-title { font-size: 1.25rem; }
+  .ondemand-form-card { --od-pad-x: 0.85rem; --od-pad-b: 1.05rem; padding: 1.05rem var(--od-pad-x) var(--od-pad-b); }
+  .match-card { padding: 0.85rem 0.75rem; gap: 0.55rem; }
+  .match-id h3 { white-space: normal; }
+  .bd-hero { padding: 1.25rem 0.9rem; }
+  .bd-facts { grid-template-columns: 1fr; }
+  .slot-list .slot-chip { flex: 1 1 100%; justify-content: center; text-align: center; }
+  .bk-price-cells { grid-template-columns: 1fr; }
+  .bk-price-cell { flex-direction: row; justify-content: space-between; padding: 0.5rem 0.75rem; }
+  .od-bookbox { padding: 0.6rem; }
+  .od-bookslot { font-size: 0.8rem; }
+  .od-venue-card .form-row { gap: 0.6rem; }
+}
+
+.cancel-breakdown { display: grid; gap: 0.35rem; margin: 0.75rem 0; }
+.cancel-breakdown > div { display: flex; justify-content: space-between; gap: 0.75rem; font-size: 0.92rem; }
+.cancel-breakdown dt { color: var(--slate-600, #475569); }
+.cancel-breakdown dd { margin: 0; font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+.cancel-breakdown .cancel-total { border-top: 1px solid var(--border-subtle, #e2e8f0); padding-top: 0.4rem; font-size: 1rem; }
+.cancel-breakdown .cancel-total dd { color: var(--emerald-700, #047857); }
+.bd-cancel-card .cancel-breakdown { margin-bottom: 0.5rem; }
+.cf-card.cancel-modal { max-width: 460px; }
+.cf-card.cancel-modal .cf-field { display: grid; gap: 0.3rem; margin: 0.6rem 0; text-align: left; }
+.cf-card.cancel-modal .cf-field span { font-size: 0.85rem; font-weight: 600; }
+.cf-card.cancel-modal .cf-input,
+.cf-card.cancel-modal select.cf-input,
+.cf-card.cancel-modal textarea { width: 100%; max-width: 100%; box-sizing: border-box; }
+@media (max-width: 480px) {
+  .cf-card.cancel-modal { max-width: calc(100vw - 2rem); }
+}
+
+.admin-cancel-list { display: grid; gap: 0.6rem; }
+.admin-cancel-card { padding: 0.75rem 0.9rem; min-width: 0; }
+.admin-cancel-card .cb-note { overflow-wrap: anywhere; }
+.admin-cancel-detail { min-width: 0; }
+.admin-cancel-detail .cb-note { overflow-wrap: anywhere; }

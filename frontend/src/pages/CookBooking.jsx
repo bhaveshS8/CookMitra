@@ -1,22 +1,17 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
-  ChefHat,
   Users,
-  GraduationCap,
-  HandHelping,
   CalendarCheck,
   MapPin,
   UtensilsCrossed,
   StickyNote,
   LogIn,
   Check,
-  CheckCircle2,
   Clock3,
   Building2,
   Landmark,
   Home as HomeIcon,
-  MessageCircle,
   History,
   Pencil,
   ArrowRight,
@@ -30,8 +25,18 @@ import {
 import API from "../api/axios";
 import { formatCurrency, localTodayStr, localTomorrowStr, slabPriceForDuration, LAUNCH_SLAB_PRICES } from "../utils/constants";
 import CouponApply from "../components/CouponApply";
+import WomanPresenceCheck from "../components/WomanPresenceCheck";
+import "../components/WomanPresenceCheck.css";
+import { useWomanPresence } from "../utils/useWomanPresence";
+import { presenceGuardMessage, BLOCKED_CODE } from "../utils/womanPresence";
+import { LOCATION_FRESH_MS } from "../utils/geolocation";
+import {
+  VENUE_FIELDS,
+  pinFingerprint,
+  buildBookingLocation,
+  fingerprintForRestore,
+} from "../utils/venuePin";
 import CustomCalendar from "../components/CustomCalendar";
-import { resolveFileUrl } from "../components/CookDocUploads";
 import { useDispatch, useSelector } from "react-redux";
 import { updateUser } from "../store/authSlice";
 import { useShowToast, useSiteLocation } from "../store/hooks";
@@ -39,20 +44,37 @@ import { saveBookingDraft, loadBookingDraft, clearBookingDraft } from "../utils/
 
 import LoginPromptModal from "../components/LoginPromptModal";
 
-const SERVICE_OPTIONS = [
-  { id: "cook_for_me", label: "Cook for Me", desc: "Cook prepares food at your home", icon: <ChefHat size={24} /> },
-  { id: "cook_with_me", label: "Cook With Me", desc: "Prepare together, learn as you go", icon: <Users size={24} /> },
-  { id: "teach_me", label: "Teach Me", desc: "Hands-on lesson in festive cooking", icon: <GraduationCap size={24} /> },
-  { id: "preparation_help", label: "Preparation Help", desc: "Help with chopping, dough, frying", icon: <HandHelping size={24} /> },
-];
+const DEFAULT_SERVICE_TYPE = "cook_for_me";
 
-// One-tap hour presets — the most common booking lengths. Exact values
-// (0.5 steps, 1–12) can still be typed in the input below the chips.
+const CITY_AREA_OPTIONS = ["Hadapsar", "Manjri", "Shewalwadi", "Loni"];
+
+// Service is limited to these areas — only auto-fill/apply a city we serve,
+// otherwise leave blank so the user picks from the dropdown.
+const normCity = (c) => (CITY_AREA_OPTIONS.includes(String(c || "").trim()) ? String(c).trim() : "");
+
+// Remembered city/area: once the user picks (or a valid city is applied),
+// it stays the form default across visits until the user picks another one.
+const CITY_MEMORY_KEY = "cm-booking-city-v1";
+const loadRememberedCity = () => {
+  try {
+    return normCity(localStorage.getItem(CITY_MEMORY_KEY));
+  } catch {
+    return "";
+  }
+};
+const rememberCity = (v) => {
+  try {
+    const c = normCity(v);
+    if (c) localStorage.setItem(CITY_MEMORY_KEY, c);
+  } catch {
+  }
+};
+
+// GPS freshness follows the single documented policy in
+// utils/geolocation (LOCATION_FRESH_MS) — no parallel windows.
+
 const DURATION_QUICK = [1, 2, 3, 4];
 
-// Service day: bookable slots run 08:00–20:00 for every cook (mirrors the
-// backend slot engine in backend/utils/slots.js — defense in depth so an
-// out-of-hours slot can never be displayed even if the API ever returns one).
 const SERVICE_START_MIN = 8 * 60;
 const SERVICE_END_MIN = 20 * 60;
 
@@ -62,7 +84,6 @@ const toMinutes = (t) => {
   return Number(m[1]) * 60 + Number(m[2]);
 };
 
-// "8:00 AM – 11:00 AM" style label for a "HH:MM" slot.
 const fmtTime = (t) => {
   const m = toMinutes(t);
   if (m == null) return t;
@@ -80,17 +101,13 @@ const isSlotInServiceDay = (slot) => {
   return s != null && e != null && s >= SERVICE_START_MIN && e <= SERVICE_END_MIN;
 };
 
-// Slots starting at or before "now" are hidden when the selected date is
-// today — a customer can never pick a time that already passed.
-const isSlotInPast = (dateStr, startTime) => {
+const isSlotInPast = (dateStr, startTime, now = new Date()) => {
   if (dateStr !== localTodayStr()) return false;
   const s = toMinutes(startTime);
   if (s == null) return false;
-  const now = new Date();
   return s <= now.getHours() * 60 + now.getMinutes();
 };
 
-// Day-part for grouping time slots (Morning / Afternoon / Evening).
 const slotPart = (startTime) => {
   const m = toMinutes(startTime);
   if (m == null) return "Slots";
@@ -99,8 +116,6 @@ const slotPart = (startTime) => {
   return "Evening";
 };
 
-// Compact chip label ("9 AM" / "9:30 AM"). The full "9:00 AM – 12:00 PM"
-// range stays in the aria-label so screen readers still announce exact times.
 const fmtTimeCompact = (t) => {
   const m = toMinutes(t);
   if (m == null) return t;
@@ -112,13 +127,6 @@ const fmtTimeCompact = (t) => {
   return `${h}${mm ? ":" + String(mm).padStart(2, "0") : ""} ${ap}`;
 };
 
-// Collapsed view cap: only the first few starts per day-part render until
-// the customer taps "Show all N times" — a wall of 20+ identical chips
-// slows the pick instead of helping it.
-const TOP_SLOTS_COUNT = 6;
-
-// Presentation-only "Recommended" highlight: the start with the most cooks
-// free (earliest wins ties). Nothing is pre-selected for the customer.
 const pickRecommendedSlot = (options) => {
   if (!options || options.length === 0) return null;
   return options.reduce((best, o) => {
@@ -129,39 +137,11 @@ const pickRecommendedSlot = (options) => {
   });
 };
 
-// Friendly date label for summaries ("Today" / "Tomorrow" / 2026-09-12).
-const dateLabel = (dateStr) => {
-  if (!dateStr) return "Pick a date";
-  if (dateStr === localTodayStr()) return "Today";
-  if (dateStr === localTomorrowStr()) return "Tomorrow";
-  return dateStr;
-};
-
-// Numbered section heading — the form reads as 4 short steps.
-const SecTitle = ({ n, icon, children }) => (
+const SecTitle = ({ icon, children }) => (
   <h3 className="ondemand-section-title">
-    <span className="od-sec-num" aria-hidden="true">{n}</span>
     {icon}
     <span>{children}</span>
   </h3>
-);
-
-// Compact recap of the step-1 choices with a one-tap way back to edit.
-const SummaryBar = ({ form, serviceLabel, onEdit }) => (
-  <div className="od-sumbar">
-    <div className="od-sumchips" aria-live="polite">
-      <span className="od-sumchip">{serviceLabel}</span>
-      <span className="od-sumchip">{dateLabel(form.date)}</span>
-      <span className="od-sumchip">{form.durationHours || "–"} hr</span>
-      <span className="od-sumchip">{form.guests || "–"} guests</span>
-      <span className={`od-sumchip ${form.city.trim() ? "" : "od-missing"}`}>
-        {form.city.trim() || "Area missing"}
-      </span>
-    </div>
-    <button type="button" className="btn btn-outline btn-sm" onClick={onEdit}>
-      Edit
-    </button>
-  </div>
 );
 
 const CookBooking = () => {
@@ -170,35 +150,25 @@ const CookBooking = () => {
   const { location: siteLocation } = useSiteLocation();
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
-
-  // Deep links (Home services, Footer) may preselect the service via
-  // ?serviceType= — fall back to the default for anything unknown.
-  const initialService = (() => {
-    const q = searchParams.get("serviceType");
-    return SERVICE_OPTIONS.some((s) => s.id === q) ? q : "cook_with_me";
-  })();
 
   const [step, setStep] = useState(1);
 
-  // Every step change opens at the top of the page.
   useEffect(() => {
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
     window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
   }, [step]);
-  // Start each step at the top of the page.
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   }, [step]);
   const [form, setForm] = useState({
-    serviceType: initialService,
-    date: localTomorrowStr(),
+    serviceType: DEFAULT_SERVICE_TYPE,
+    date: localTodayStr(),
     flatNo: "",
     society: "",
     landmark: "",
-    city: "",
+    city: loadRememberedCity(),
     guests: "4",
-    durationHours: "3",
+    durationHours: "1",
     customDishes: "",
     notes: "",
   });
@@ -206,11 +176,17 @@ const CookBooking = () => {
   const [matches, setMatches] = useState([]);
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
-  const [bookingLoading, setBookingLoading] = useState(null);
+  const [findingCook, setFindingCook] = useState(false);
   const [locMsg, setLocMsg] = useState("");
   const [coords, setCoords] = useState(null);
-  const [copied, setCopied] = useState(false);
+  // Fingerprint binding the CURRENT venue fields to coords (see venuePin).
+  // Null = no pin may be submitted (manual typing, unaccepted GPS, edits).
+  const [pinFP, setPinFP] = useState(null);
+  // Explicitly accepted detected venue (snapshot, not live GPS): GPS is a
+  // suggestion until the customer taps "Use detected location".
+  const [acceptedVenue, setAcceptedVenue] = useState(null);
   const [savedLocations, setSavedLocations] = useState([]);
+  const [savedLoaded, setSavedLoaded] = useState(false);
   const [savedIdx, setSavedIdx] = useState("");
   const autoFilled = useRef(false);
   const venueErrorRef = useRef(null);
@@ -219,58 +195,93 @@ const CookBooking = () => {
     requestAnimationFrame(() =>
       venueErrorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" })
     );
-  // Step 2 (time slots): one entry per distinct start–end time with the
-  // number of cooks free at it. Step 3 (cook) shows cooks free at the slot
-  // the customer picked in step 2.
+  // Mandatory verification: explicit YES authorizes booking; explicit NO
+  // records a server-side one-hour lockout. Never preselected.
+  const wp = useWomanPresence(user, () => setShowLoginModal(true));
+  const wpGate = presenceGuardMessage(wp);
   const [slotOptions, setSlotOptions] = useState([]);
   const [selectedSlot, setSelectedSlot] = useState(null);
-  // "Show all N times" expander for the step-2 slot lists (collapse default).
-  const [showAllSlots, setShowAllSlots] = useState(false);
   const [coupon, setCoupon] = useState(null);
-  // Shorter session lengths the server confirmed free when the requested
-  // hours fit nowhere — rendered as one-tap retry chips.
+  const [couponRestore, setCouponRestore] = useState(null);
   const [slotSuggestions, setSlotSuggestions] = useState([]);
-  // Start with the most cooks free — flagged "Recommended" in step 2.
-  const recommendedSlot = useMemo(() => pickRecommendedSlot(slotOptions), [slotOptions]);
-  // Cooks offering the chosen service (0 = none exist, vs slots just full).
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (form.date !== localTodayStr()) return undefined;
+    setNowTick(Date.now());
+    const id = setInterval(() => setNowTick(Date.now()), 30000);
+    const onWake = () => {
+      if (!document.hidden) setNowTick(Date.now());
+    };
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", onWake);
+    };
+  }, [form.date]);
+
+  const visibleSlotOptions = useMemo(() => {
+    const now = new Date(nowTick);
+    return slotOptions.filter((o) => !isSlotInPast(form.date, o.startTime, now));
+  }, [slotOptions, form.date, nowTick]);
+
+  const recommendedSlot = useMemo(() => pickRecommendedSlot(visibleSlotOptions), [visibleSlotOptions]);
   const [totalCooksFound, setTotalCooksFound] = useState(null);
 
-  // Header-detected place (GPS / IP / manual) pre-fills address fields when
-  // they are still empty — typed or previously-saved input always wins.
+  // After 8 PM there is nothing bookable for today (service day is 8 AM -
+  // 8 PM) — step 2 names the hours instead of a generic "no slots" note.
+  const pastServiceDay = useMemo(() => {
+    if (form.date !== localTodayStr()) return false;
+    const n = new Date(nowTick);
+    return n.getHours() * 60 + n.getMinutes() >= SERVICE_END_MIN;
+  }, [form.date, nowTick]);
+
   useEffect(() => {
+    const hasFix =
+      Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng);
+    if (!hasFix && !siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
+    // NOTE: background GPS never seeds coords here — a pin attaches only
+    // through explicit accept (detected suggestion), a saved place, or a
+    // restored draft (see pinFP). Text prefill below is suggestion-only.
     if (!siteLocation?.city && !siteLocation?.area && !siteLocation?.state) return;
-    // Logged-in customers: hold off until the profile address (which wins the
-    // auto-fill priority) has loaded — otherwise a brief race lets the
-    // detected location fill fields the profile address should own.
-    if (user?.role === "customer" && user?.address === undefined) return;
+    const stamp = Number(siteLocation?.savedAt || siteLocation?.timestamp || 0);
+    if (stamp && Date.now() - stamp > LOCATION_FRESH_MS) return;
+    if (autoFilled.current) return;
+    if (user?.role === "customer") {
+      const profileAddr = String(user?.address || "").trim();
+      if (profileAddr || savedLocations.length > 0 || user?.address === undefined || !savedLoaded) return;
+    }
+    autoFilled.current = true;
     setForm((f) => {
-      if (f.flatNo || f.society || f.landmark || f.city) return f;
+      // City intentionally excluded: a remembered/manual city always wins
+      // over GPS, while street fields still auto-fill around it.
+      if (f.flatNo || f.society || f.landmark) return f;
+      const exact = siteLocation.hasHouseNumber ? (siteLocation.exactLine || "").trim() : "";
       return {
         ...f,
-        city: f.city.trim() ? f.city : siteLocation.city || "",
+        flatNo: exact || f.flatNo,
+        city: f.city.trim() ? f.city : normCity(siteLocation.city),
         society: f.society.trim() ? f.society : siteLocation.area || "",
         landmark: f.landmark.trim() ? f.landmark : siteLocation.street || siteLocation.area || "",
       };
     });
-    if (Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng)) {
-      setCoords((c) => c || { lat: siteLocation.lat, lng: siteLocation.lng });
-    }
-  }, [siteLocation?.city, siteLocation?.area, siteLocation?.state, siteLocation?.street, siteLocation?.lat, siteLocation?.lng, user?.role, user?.address]);
+  }, [siteLocation?.city, siteLocation?.area, siteLocation?.state, siteLocation?.street, siteLocation?.exactLine, siteLocation?.hasHouseNumber, siteLocation?.timestamp, siteLocation?.savedAt, siteLocation?.lat, siteLocation?.lng, user?.role, user?.address, savedLoaded, savedLocations]);
 
-  /* ── Profile address (locked summary card + Edit button) ── */
+  // Whatever sets a valid city (manual pick, saved place, draft, GPS)
+  // becomes the remembered default until the user picks another one.
+  useEffect(() => {
+    rememberCity(form.city);
+  }, [form.city]);
+
   const profileAddress = String(user?.address || "").trim();
   const [addrEditing, setAddrEditing] = useState(false);
-  // Summary shown while locked: the composed form address (profile/saved/
-  // detected fill), falling back to the raw profile string.
   const addrSummary =
     [form.flatNo, form.society, form.landmark ? `Near ${form.landmark}` : "", form.city]
       .map((p) => String(p || "").trim())
       .filter(Boolean)
       .join(", ") || profileAddress;
 
-  // The stored user (localStorage from an older login) can lack the address
-  // key — refresh it from /auth/me so the profile address can claim priority
-  // and the locked summary can be decided.
   const dispatch = useDispatch();
   useEffect(() => {
     if (user?.role !== "customer" || user?.address !== undefined) return;
@@ -281,17 +292,19 @@ const CookBooking = () => {
     return () => { cancelled = true; };
   }, [user?.role, user?.address, dispatch]);
 
-  // Previous locations of this customer for one-tap reuse (customers only).
+  const [addressBook, setAddressBook] = useState([]);
+  const [addressBookIdx, setAddressBookIdx] = useState("");
   useEffect(() => {
-    if (user?.role !== "customer") return;
+    if (user?.role !== "customer") { setSavedLoaded(true); return; }
     let cancelled = false;
     API.get("/bookings/my/locations")
       .then((res) => {
-        if (!cancelled) setSavedLocations(res.data || []);
+        if (!cancelled) { setSavedLocations(res.data || []); setSavedLoaded(true); }
       })
       .catch(() => {
-        if (!cancelled) setSavedLocations([]);
+        if (!cancelled) { setSavedLocations([]); setSavedLoaded(true); }
       });
+    API.get("/auth/me/addresses").then((res) => { if (!cancelled && Array.isArray(res.data)) setAddressBook(res.data); }).catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -301,10 +314,6 @@ const CookBooking = () => {
     const saved = savedLocations[Number(idx)];
     if (!saved) return;
     const d = saved.addressDetails || {};
-    // Explicit pick always replaces the auto-filled address block (header
-    // detection or a previously applied entry) — the saved entry is
-    // authoritative. Entries without structured details fall back to parsing
-    // their address string.
     const parts = String(saved.address || "").split(",").map((p) => p.trim()).filter(Boolean);
     const src = Object.keys(d).length > 0
       ? d
@@ -313,48 +322,44 @@ const CookBooking = () => {
         : parts.length === 2
           ? { flatNo: parts[0], society: parts[1] }
           : { flatNo: parts[0], society: parts.slice(1, -1).join(", "), city: parts[parts.length - 1] };
-    setForm((f) => ({
-      ...f,
+    const nextFields = {
       flatNo: src.flatNo || "",
       society: src.society || "",
       landmark: src.landmark || "",
-      city: src.city || "",
-    }));
+    };
+    const nextCity = normCity(src.city) || form.city;
+    setForm((f) => ({ ...f, ...nextFields, city: nextCity }));
     setSavedIdx(String(idx));
-    if (saved.location?.lat != null) {
-      setCoords({ lat: saved.location.lat, lng: saved.location.lng });
-      setLocMsg("Previous location applied with its saved map pin");
+    setAcceptedVenue(null); // an explicit saved choice replaces any detected one
+    if (Number.isFinite(saved.location?.lat) && Number.isFinite(saved.location?.lng)) {
+      const pin = { lat: saved.location.lat, lng: saved.location.lng };
+      setCoords(pin);
+      // Bind the pin to exactly these fields — later edits break the bond.
+      setPinFP(pinFingerprint({ ...nextFields, city: nextCity }, pin));
+      setLocMsg("");
     } else {
-      // Drop any stale pin from the auto-detected location — it would
-      // point at the wrong place for this address.
       setCoords(null);
+      setPinFP(null);
       setLocMsg("Previous location applied — verify the address below for precise navigation");
     }
   };
 
-  // Auto-fill priority: profile address > most recent previous booking
-  // (an explicit pick from the dropdown above always wins once made).
   useEffect(() => {
-    if (autoFilled.current) return;
-    // Wait for the customer's profile to settle (address key resolved) so the
-    // profile address can claim priority over saved bookings.
-    if (user?.role === "customer" && user?.address === undefined) return;
-    autoFilled.current = true;
+    if (autoFilled.current || user?.role !== "customer") return;
     const fill = (src) =>
       setForm((f) => {
-        if (f.flatNo || f.society || f.landmark || f.city) return f;
+        if (f.flatNo || f.society || f.landmark) return f;
         return {
           ...f,
           flatNo: src.flatNo || "",
           society: src.society || "",
           landmark: src.landmark || "",
-          city: src.city || "",
+          city: normCity(src.city) || f.city,
         };
       });
     const profileAddr = String(user?.address || "").trim();
     if (profileAddr) {
-      // Split "Flat 402, Sunshine Society, Baner, Pune" into the form fields,
-      // same heuristic as applySavedLocation for unstructured addresses.
+      autoFilled.current = true;
       const parts = profileAddr.split(",").map((p) => p.trim()).filter(Boolean);
       fill(
         parts.length === 1
@@ -365,30 +370,41 @@ const CookBooking = () => {
       );
       return;
     }
+    if (user?.address === undefined || !savedLoaded) return;
+    const bookDefault = addressBook.find((a) => a.isDefault) || addressBook[0];
+    if (bookDefault) {
+      autoFilled.current = true;
+      fill({ flatNo: bookDefault.flatNo, society: bookDefault.society, landmark: bookDefault.landmark, city: bookDefault.city });
+      const bi = addressBook.indexOf(bookDefault);
+      setAddressBookIdx(String(bi >= 0 ? bi : 0));
+      if (Number.isFinite(bookDefault.lat) && Number.isFinite(bookDefault.lng)) {
+        setCoords({ lat: bookDefault.lat, lng: bookDefault.lng });
+      }
+      return;
+    }
     if (savedLocations.length === 0) return;
+    autoFilled.current = true;
     fill(savedLocations[0].addressDetails || {});
     setSavedIdx("0");
     if (savedLocations[0].location?.lat != null) {
       setCoords({ lat: savedLocations[0].location.lat, lng: savedLocations[0].location.lng });
     }
-  }, [savedLocations, user?.role, user?.address]);
+  }, [savedLocations, savedLoaded, user?.role, user?.address, addressBook]);
 
-  const mapsLink = coords
-    ? `https://www.google.com/maps?q=${coords.lat},${coords.lng}`
-    : "";
-
-  const serviceLabel =
-    (SERVICE_OPTIONS.find((s) => s.id === form.serviceType) || {}).label || "Cook service";
-
-  // Launch slab pricing (server recomputes it — display + preview only).
   const slab = slabPriceForDuration(Number(form.durationHours));
   const couponDiscount = slab != null && coupon ? Math.min(coupon.discount, slab) : 0;
   const finalPayable = slab != null ? Math.max(0, slab - couponDiscount) : 0;
 
-  // Returning from login with an unfinished booking: restore the filled
-  // form + pin, re-check live availability, and land where they left off —
-  // step 3 when the picked slot is still free, else step 2 with fresh
-  // slots. Runs once; stale drafts (>2h) are dropped silently.
+  const handleCouponApplied = (result, meta) => {
+    setCoupon(result);
+    if (meta?.auto) return;
+    if (result) {
+      showToast(`🎉 Coupon ${result.code} applied — you saved ${formatCurrency(result.discount)}!`, "success");
+    } else if (coupon) {
+      showToast("Coupon removed — showing full price.", "info");
+    }
+  };
+
   const resumedDraft = useRef(false);
   useEffect(() => {
     if (resumedDraft.current || !user) return;
@@ -400,13 +416,24 @@ const CookBooking = () => {
     }
     resumedDraft.current = true;
     autoFilled.current = true;
-    setForm((f) => ({ ...f, ...d.form }));
-    if (d.coords?.lat != null) setCoords(d.coords);
+    setForm((f) => ({ ...f, ...d.form, serviceType: DEFAULT_SERVICE_TYPE }));
+    // Restore the draft's pin binding: recompute from the restored pair so
+    // a consistent restore keeps its pin while a mismatched one drops it.
+    // Bootstrap GPS never overwrites draft venues (autoFilled above).
+    if (Number.isFinite(d.coords?.lat) && Number.isFinite(d.coords?.lng)) {
+      const pin = { lat: d.coords.lat, lng: d.coords.lng };
+      setCoords(pin);
+      setPinFP(d.pinFP ?? fingerprintForRestore(d.form, pin));
+    } else {
+      setCoords(null);
+      setPinFP(null);
+    }
+    setAcceptedVenue(null);
+    if (d.couponCode) setCouponRestore(d.couponCode);
     setSearching(true);
     (async () => {
       try {
         const r = await runSlotSearch({
-          serviceType: d.form.serviceType,
           date: d.form.date,
           durationHours: d.form.durationHours,
         });
@@ -425,7 +452,7 @@ const CookBooking = () => {
         if (stillFree) {
           setSelectedSlot(d.selectedSlot);
           setStep(3);
-          showToast("Welcome back — your booking is restored. Just tap Book.", "success");
+          showToast("Welcome back — your booking is restored. Just tap Find Cook.", "success");
         } else {
           setSelectedSlot(null);
           setStep(2);
@@ -442,27 +469,45 @@ const CookBooking = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
-  const handleCopyLink = async () => {
-    if (!mapsLink) return;
-    try {
-      await navigator.clipboard.writeText(mapsLink);
-    } catch {
-      const input = document.getElementById("maps-link-input");
-      if (input) {
-        input.select();
-        document.execCommand("copy");
-      }
+  const applyAddressBookEntry = (idx) => {
+    const saved = addressBook[Number(idx)];
+    if (!saved) return;
+    const nextFields = { flatNo: saved.flatNo || "", society: saved.society || "", landmark: saved.landmark || "" };
+    const nextCity = normCity(saved.city) || form.city;
+    setForm((f) => ({ ...f, ...nextFields, city: nextCity }));
+    setAddressBookIdx(String(idx));
+    setSavedIdx("");
+    setAcceptedVenue(null);
+    if (Number.isFinite(saved.lat) && Number.isFinite(saved.lng)) {
+      const pin = { lat: saved.lat, lng: saved.lng };
+      setCoords(pin);
+      setPinFP(pinFingerprint({ ...nextFields, city: nextCity }, pin));
+      setLocMsg("");
+    } else {
+      setCoords(null);
+      setPinFP(null);
+      setLocMsg("Saved address applied — verify the address below for precise navigation");
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setForm({ ...form, [name]: value });
+    // Typing a venue field breaks the pin binding (see pinFP): the edited
+    // address must never silently submit the previous coordinates.
+    if (VENUE_FIELDS.includes(name)) {
+      setPinFP(null);
+      setAcceptedVenue(null);
+    }
+    if (fieldErrors[name]) {
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      });
+    }
   };
 
-  // Stepper helper for duration / guests: snaps to `step`, clamps to
-  // [min, max]. Empty or invalid input restarts from min so −/+ always work.
   const adjustNumber = (name, delta, { min, max, step }) => {
     setForm((f) => {
       const cur = Number(f[name]);
@@ -478,9 +523,6 @@ const CookBooking = () => {
       .map((d) => d.trim())
       .filter(Boolean);
 
-  // Step 1 → 2 validates only the plan (service is always set, date /
-  // hours / guests drive availability). Venue + menu are validated at
-  // booking time on step 3, so nobody types an address for a dead date.
   const validatePlan = (durationOverride) => {
     if (!form.date) return "Please choose a date for your session";
     if (form.date < localTodayStr()) return "That date already passed — please pick today or a future date";
@@ -494,25 +536,100 @@ const CookBooking = () => {
     return "";
   };
 
+  // Detected GPS venue is a SUGGESTION until the customer explicitly taps
+  // "Use detected location" (acceptedVenue snapshot below). It is never
+  // auto-applied to the booking — see Phase 4 venue policy.
+  const detectedVenue =
+    Number.isFinite(siteLocation?.lat) && Number.isFinite(siteLocation?.lng)
+      ? siteLocation
+      : null;
+  const detectedAddressText = (
+    detectedVenue?.fullAddress ||
+    detectedVenue?.displayName ||
+    [
+      detectedVenue?.exactLine,
+      detectedVenue?.area,
+      detectedVenue?.city,
+      detectedVenue?.state,
+      detectedVenue?.postcode,
+    ]
+      .filter(Boolean)
+      .join(", ") ||
+    detectedVenue?.label ||
+    "Current location"
+  ).trim();
+  const detectedVenueAge = detectedVenue
+    ? Date.now() - Number(detectedVenue.savedAt || detectedVenue.timestamp || 0)
+    : null;
+  const hasFreshFix =
+    detectedVenue != null &&
+    Number.isFinite(detectedVenueAge) &&
+    detectedVenueAge < LOCATION_FRESH_MS;
+  const useDetectedVenue = Boolean(hasFreshFix && acceptedVenue);
+  const showDetectedSuggestion = Boolean(hasFreshFix && !acceptedVenue);
+
+  const acceptDetectedVenue = () => {
+    if (!detectedVenue || !hasFreshFix) return;
+    const details = {
+      flatNo: detectedVenue.exactLine || detectedVenue.street || "",
+      society: detectedVenue.area || detectedVenue.street || "",
+      landmark: "",
+      city: detectedVenue.city || "",
+    };
+    const pin = { lat: detectedVenue.lat, lng: detectedVenue.lng };
+    // Snapshot (not live GPS): later position updates must not silently
+    // move an already-accepted venue.
+    setAcceptedVenue({
+      addressText: detectedAddressText,
+      details,
+      coords: pin,
+      fp: pinFingerprint(details, pin),
+      at: Date.now(),
+    });
+    setCoords(pin);
+    setPinFP(pinFingerprint(details, pin));
+    setSavedIdx("");
+    setLocMsg("");
+  };
+
   const validateVenue = () => {
-    if (!form.flatNo.trim()) return "Please enter your flat / house number";
-    if (!form.society.trim()) return "Please enter your society / building / street";
-    if (!form.city.trim()) return "Please enter your city / area";
+    const errs = {};
+    if (!useDetectedVenue) {
+      if (!form.flatNo.trim()) errs.flatNo = "Please enter your flat / house number";
+      if (!form.society.trim()) errs.society = "Please enter your society / building / street";
+      if (!CITY_AREA_OPTIONS.includes(form.city)) errs.city = "Please select your city / area";
+    }
     if (parseDishes().length === 0)
-      return "Please mention the dishes you need (comma separated)";
-    return "";
+      errs.customDishes = "Please mention the dishes you need (comma separated)";
+    return errs;
+  };
+  const [fieldErrors, setFieldErrors] = useState({});
+  const fieldRefs = useRef({});
+  const focusFirstFieldError = (errs) => {
+    const order = ["flatNo", "society", "city", "customDishes"];
+    const first = order.find((k) => errs[k]);
+    if (!first) return;
+    setAddrEditing(true);
+    requestAnimationFrame(() => {
+      const el = fieldRefs.current[first];
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.focus({ preventScroll: true });
+      }
+    });
   };
 
   const buildAddress = () =>
-    `${form.flatNo.trim()}, ${form.society.trim()}${
-      form.landmark.trim() ? `, Near ${form.landmark.trim()}` : ""
-    }, ${form.city.trim()}`;
-
+    [
+      form.flatNo.trim(),
+      form.society.trim(),
+      form.landmark.trim() ? `Near ${form.landmark.trim()}` : "",
+      form.city.trim(),
+    ]
+      .filter(Boolean)
+      .join(", ");
   const buildSelectedItems = () => parseDishes();
 
-  // Distinct start–end times across cooks with a free-cook count each,
-  // sorted earliest first. Backend already sizes slots to the selected
-  // service hours; this only aggregates them for step 2.
   const aggregateSlots = (cooksWithSlots) => {
     const map = new Map();
     cooksWithSlots.forEach((c) => {
@@ -529,13 +646,7 @@ const CookBooking = () => {
     );
   };
 
-  // Shared slot search — ONE batched request (GET /availability/search)
-  // replaces the old N+1 fan-out (1 × cooks list + N × per-cook
-  // availability). Same slot math, server-side, so a search spike costs
-  // ~3 DB round trips instead of ~3 per cook. Falls back to the fan-out
-  // only if the batched endpoint is unreachable (stale backend).
-  const runSlotSearch = async ({ serviceType, date, durationHours }) => {
-    void serviceType;
+  const runSlotSearch = async ({ date, durationHours }) => {
     try {
       const r = await API.get("/availability/search", {
         params: { date, durationHours, suggest: 1 },
@@ -559,24 +670,18 @@ const CookBooking = () => {
         failedCooks: 0,
       };
     } catch {
-      return runSlotSearchLegacy({ serviceType, date, durationHours });
+      return runSlotSearchLegacy({ date, durationHours });
     }
   };
 
-  // Legacy per-cook fan-out — fallback only (see runSlotSearch above).
-  const runSlotSearchLegacy = async ({ serviceType, date, durationHours }) => {
-    const cooksRes = await API.get(
-      `/cooks${serviceType ? `?serviceType=${encodeURIComponent(serviceType)}` : ""}`
-    );
+  const runSlotSearchLegacy = async ({ date, durationHours }) => {
+    const cooksRes = await API.get("/cooks");
     const rawCooks = cooksRes.data;
     const cooks = Array.isArray(rawCooks) ? rawCooks : rawCooks?.cooks || rawCooks?.data || [];
     const suggested = new Set();
     let failedCooks = 0;
     const withSlots = await Promise.all(
       cooks.map(async (cook) => {
-        // Cooks list populates `user` as an object, but be tolerant of
-        // string refs or a bare profile id so one shape change can't wipe
-        // every slot result to [].
         const cookId =
           cook?.user?._id ||
           (typeof cook?.user === "string" ? cook.user : null) ||
@@ -586,9 +691,6 @@ const CookBooking = () => {
           return { ...cook, slots: [] };
         }
         try {
-          // Start-time options sized to the entered service hours.
-          // suggest=1 asks the server to also name shorter sessions that
-          // DO fit, so an empty result becomes a one-tap retry.
           const slotsRes = await API.get(
             `/availability/${cookId}?date=${encodeURIComponent(date)}&durationHours=${encodeURIComponent(durationHours)}&suggest=1`
           );
@@ -606,8 +708,6 @@ const CookBooking = () => {
         }
       })
     );
-    // Service-day + past-time guard (backend enforces the same, this keeps
-    // the UI honest even with a stale cache or clock skew).
     const usable = withSlots.map((c) => ({
       ...c,
       slots: (c.slots || []).filter(
@@ -624,8 +724,6 @@ const CookBooking = () => {
     };
   };
 
-  // Step 1 → 2: validate the plan, then search. `durationOverride` lets a
-  // suggestion chip retry with shorter hours without waiting for state.
   const handleSeeSlots = async (e, durationOverride) => {
     e?.preventDefault?.();
     const err = validatePlan(durationOverride);
@@ -637,13 +735,9 @@ const CookBooking = () => {
     setSlotSuggestions([]);
     try {
       const { available, options, suggestions, totalCooks, failedCooks } = await runSlotSearch({
-        serviceType: form.serviceType,
         date: form.date,
         durationHours: effDuration,
       });
-      // Every per-cook request failed (backend down / network) — that's a
-      // load error, not "no slots". Stay on step 1 with an error instead of
-      // landing on an empty step 2 with a misleading toast.
       if (totalCooks > 0 && failedCooks >= totalCooks) {
         throw new Error("Could not load time slots. Try again.");
       }
@@ -652,13 +746,12 @@ const CookBooking = () => {
       setSlotSuggestions(suggestions);
       setTotalCooksFound(totalCooks);
       setSelectedSlot(null);
-      setShowAllSlots(false);
       setSearched(true);
       setStep(2);
       if (available.length === 0) {
         showToast(
           totalCooks === 0
-            ? "No cooks offer this service yet — try another service"
+            ? "No cooks available yet — please try another date"
             : suggestions.length > 0
               ? `No ${effDuration}-hour slots that day — shorter sessions are free below`
               : "No free slots on this date — try another date or duration",
@@ -672,60 +765,53 @@ const CookBooking = () => {
     }
   };
 
-  // Retry after a dead request (cook never responded / declined): the waiting
-  // screen navigates here with the dead booking's plan + slot. Restore the
-  // form, re-check live availability, drop the unresponsive cook from the
-  // list, and land straight on step 3 so the customer picks another chef
-  // without re-typing anything. Runs once per navigation state.
   const retryHandled = useRef(false);
   useEffect(() => {
     const retry = location.state?.retryFromBooking;
     if (!retry || retryHandled.current) return;
     retryHandled.current = true;
-    // Clear the navigation state so back/forward doesn't re-apply it.
     try {
       window.history.replaceState({}, "");
     } catch {
-      // ignore
     }
-    if (!retry.form?.date || !retry.form?.serviceType || !retry.selectedSlot) {
+    if (!retry.form?.date || !retry.selectedSlot) {
       return;
     }
     autoFilled.current = true;
-    setForm((f) => ({ ...f, ...retry.form }));
-    if (retry.coords?.lat != null) setCoords(retry.coords);
+    setForm((f) => ({ ...f, ...retry.form, serviceType: DEFAULT_SERVICE_TYPE }));
+    // Retry state derives coords + address from the same persisted booking
+    // record, so the recomputed binding matches and the pin is kept.
+    if (Number.isFinite(retry.coords?.lat) && Number.isFinite(retry.coords?.lng)) {
+      const pin = { lat: retry.coords.lat, lng: retry.coords.lng };
+      setCoords(pin);
+      setPinFP(fingerprintForRestore(retry.form, pin));
+    } else {
+      setCoords(null);
+      setPinFP(null);
+    }
+    setAcceptedVenue(null);
+    if (retry.couponCode) setCouponRestore(retry.couponCode);
     setSearching(true);
     (async () => {
       try {
         const r = await runSlotSearch({
-          serviceType: retry.form.serviceType,
           date: retry.form.date,
           durationHours: retry.form.durationHours,
         });
-        // The cook who didn't respond shouldn't be offered again for this retry.
-        const filtered = retry.excludeCookId
-          ? r.available.filter((c) => {
-              const id =
-                c?.user?._id ||
-                (typeof c?.user === "string" ? c.user : null) ||
-                c?._id;
-              return String(id || "") !== String(retry.excludeCookId);
-            })
-          : r.available;
-        setMatches(filtered);
-        setSlotOptions(aggregateSlots(filtered));
+        setMatches(r.available);
+        setSlotOptions(aggregateSlots(r.available));
         setSlotSuggestions(r.suggestions);
         setTotalCooksFound(r.totalCooks);
         setSearched(true);
-        const stillFree = (aggregateSlots(filtered)).some(
+        const stillFree = (aggregateSlots(r.available)).some(
           (o) =>
             o.startTime === retry.selectedSlot.startTime &&
             o.endTime === retry.selectedSlot.endTime
         );
-        if (stillFree && filtered.length > 0) {
+        if (stillFree && r.available.length > 0) {
           setSelectedSlot(retry.selectedSlot);
           setStep(3);
-          showToast("The last cook didn't respond — pick another chef for the same slot.", "info");
+          showToast("No cook accepted last time — review your booking and tap Find Cook to try again.", "info");
         } else {
           setSelectedSlot(null);
           setStep(2);
@@ -741,30 +827,22 @@ const CookBooking = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // One-tap retry from a suggestion chip: adopt the shorter hours, then
-  // re-run the search immediately with the adopted value.
   const retryWithDuration = (h) => {
     const v = String(h);
     setForm((f) => ({ ...f, durationHours: v }));
     handleSeeSlots(null, v);
   };
 
-  // Step 2 → 3: a time slot must be picked before cooks are shown.
-  const handleChooseCook = async () => {
+  const handleContinueToSummary = async () => {
     if (!selectedSlot) {
       setFormError("Please pick a time slot first");
       return;
     }
     setFormError("");
-    // Re-verify the picked slot is still free before showing cooks: a slot
-    // listed in step 2 can fill up while the customer is picking (another
-    // customer books the same hours). Drop cooks busy during the exact
-    // [startTime, endTime] so step 3 shows only cooks free for those hours.
     setSearching(true);
     try {
       const verify = await API.get("/cooks", {
         params: {
-          serviceType: form.serviceType,
           date: form.date,
           durationHours: form.durationHours,
           startTime: selectedSlot.startTime,
@@ -792,43 +870,46 @@ const CookBooking = () => {
         return;
       }
     } catch {
-      // Verification is best-effort: on network failure keep the step-2 list
-      // (the server re-checks the exact window at booking creation).
     } finally {
       setSearching(false);
     }
     setStep(3);
   };
 
-  // Cooks free at the step-2 slot, each carrying its matching slot object
-  // for one-tap booking.
-  // Slots built by aggregateSlots ({ startTime, endTime, freeCooks }) carry
-  // no _id — key the per-card "Booking…" state by cook + slot time so only
-  // the tapped card disables (keying by slot._id is always undefined, which
-  // makes `undefined === undefined` true for EVERY card).
-  const bookingKey = (cook, slot) => {
-    const cookId =
-      cook?.user?._id || (typeof cook?.user === "string" ? cook.user : null) || cook?._id || "";
-    return `${cookId}_${slot?.startTime || ""}_${slot?.endTime || ""}`;
+  const clientKeysRef = useRef(new Map());
+  const clientKeyFor = (key) => {
+    let k = clientKeysRef.current.get(key);
+    if (!k) {
+      try {
+        k = (typeof crypto !== "undefined" && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : `ck_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      } catch {
+        k = `ck_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      }
+      clientKeysRef.current.set(key, k);
+    }
+    return k;
   };
-  const cooksForSlot = selectedSlot
-    ? matches
-        .map((c) => ({
-          ...c,
-          slot: (c.slots || []).find(
-            (s) =>
-              s.startTime === selectedSlot.startTime &&
-              s.endTime === selectedSlot.endTime
-          ),
-        }))
-        .filter((c) => c.slot)
-    : [];
-
-  const handleBook = async (cook, slot) => {
+  const handleFindCook = async () => {
+    if (findingCook) return;
+    // Authoritative gate first: blocked / unanswered / unresolved must never
+    // reach booking creation (button disabled state alone is not enough).
+    const gate = presenceGuardMessage(wp);
+    if (gate) {
+      setFormError(gate);
+      scrollToVenueError();
+      return;
+    }
     if (!user) {
-      // Remember the unfinished booking across the login wall — form,
-      // picked slot and pin all come back after sign-in.
-      saveBookingDraft({ kind: "on-demand", form, selectedSlot, coords });
+      saveBookingDraft({
+        kind: "on-demand",
+        form,
+        selectedSlot,
+        coords,
+        pinFP,
+        couponCode: coupon?.code || "",
+      });
       setShowLoginModal(true);
       return;
     }
@@ -836,110 +917,109 @@ const CookBooking = () => {
       showToast("Only customer accounts can make bookings", "error");
       return;
     }
-    const venueErr = validateVenue();
-    if (venueErr) {
-      setFormError(venueErr);
+    const venueErrs = validateVenue();
+    if (Object.keys(venueErrs).length > 0) {
+      setFieldErrors(venueErrs);
+      setFormError("");
+      focusFirstFieldError(venueErrs);
+      return;
+    }
+    setFieldErrors({});
+    setFormError("");
+    // Explicit NO + Find Cooks click: record the decline first. The one-hour
+    // timer starts only when the backend confirms (submitDecline resolves
+    // ok) — selecting NO alone never started anything. Booking creation
+    // never proceeds on this path.
+    if (wp.presence === "no") {
+      const res = await wp.submitDecline();
+      const msg = res?.ok
+        ? "You cannot make a booking for the next 1 hour because a woman will not be present at home."
+        : res?.busy
+          ? "Recording your response — one moment…"
+          : res?.message || "Could not record your response. Please check your connection and retry.";
+      setFormError(msg);
       scrollToVenueError();
       return;
     }
-    setFormError("");
-    setBookingLoading(bookingKey(cook, slot));
+    setFindingCook(true);
     try {
-      // Last-second availability check: the slot card was rendered from the
-      // step-2 search, but another customer may have booked this cook for the
-      // same hours since. Re-verify the exact [startTime, endTime] is still
-      // free so a busy cook can never be booked from a stale card.
-      const cookIdForCheck =
-        cook?.user?._id || (typeof cook?.user === "string" ? cook.user : null) || cook?._id;
-      try {
-        const chk = await API.get(`/availability/${encodeURIComponent(cookIdForCheck)}`, {
-          params: { date: form.date, startTime: slot.startTime, endTime: slot.endTime },
-        });
-        if (chk?.data && typeof chk.data === "object" && "free" in chk.data && chk.data.free !== true) {
-          setFormError(chk.data.reason || "This cook just got booked for those hours — please pick another cook or time.");
-          // Refresh the cook list so the busy cook disappears immediately.
-          try {
-            const verify = await API.get("/cooks", {
-              params: {
-                serviceType: form.serviceType,
-                date: form.date,
-                durationHours: form.durationHours,
-                startTime: selectedSlot.startTime,
-                endTime: selectedSlot.endTime,
-              },
-            });
-            const fresh = Array.isArray(verify.data) ? verify.data : verify.data?.cooks || verify.data?.data || [];
-            const freshIds = new Set(
-              fresh.map((c) => String(c?.user?._id || (typeof c?.user === "string" ? c.user : null) || c?._id || ""))
-            );
-            const stillFree = matches.filter((c) => {
-              const id = String(c?.user?._id || (typeof c?.user === "string" ? c.user : null) || c?._id || "");
-              if (!freshIds.has(id)) return false;
-              return (c.slots || []).some(
-                (s) => s.startTime === selectedSlot.startTime && s.endTime === selectedSlot.endTime
-              );
-            });
-            setMatches(stillFree);
-            setSlotOptions(aggregateSlots(stillFree));
-          } catch {
-            // ignore — the error above already explains the state
-          }
-          return;
-        }
-      } catch (chkErr) {
-        // A 4xx here means the slot is invalid/gone — surface it. Network
-        // failures fall through to the booking attempt (server re-checks).
-        if (chkErr?.response?.status >= 400 && chkErr?.response?.status < 500) {
-          setFormError(chkErr.response?.data?.message || "That slot is no longer free — please pick another time.");
-          return;
-        }
-      }
-      // No online payment — create the booking request directly, then take
-      // the customer back to the available-cooks listing. Priced from the
-      // launch slab (server recomputes + enforces it).
       const hours = Number(form.durationHours);
       if (!Number.isInteger(hours) || hours < 1 || hours > 4 || slab == null) {
         setFormError("Please choose 1, 2, 3 or 4 hours");
         scrollToVenueError();
         return;
       }
+      if (!selectedSlot?.startTime || !selectedSlot?.endTime) {
+        setFormError("Please pick a time slot first");
+        setStep(2);
+        return;
+      }
       const payload = {
-        cook: cook?.user?._id || (typeof cook?.user === "string" ? cook.user : null) || cook?._id,
-        serviceType: form.serviceType,
+        serviceType: DEFAULT_SERVICE_TYPE,
         date: form.date,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-        address: buildAddress(),
-        addressDetails: {
-          flatNo: form.flatNo.trim(),
-          society: form.society.trim(),
-          landmark: form.landmark.trim(),
-          city: form.city.trim(),
-        },
+        startTime: selectedSlot.startTime,
+        endTime: selectedSlot.endTime,
         guests: Number(form.guests),
         durationHours: hours,
         notes: form.notes.trim(),
         selectedItems: buildSelectedItems(),
         couponCode: coupon?.code || "",
-        amount: finalPayable,
+        // Explicit YES for THIS request (verified strictly by the backend).
+        womanPresenceConfirmed: true,
       };
-      if (coords) payload.location = coords;
+      if (useDetectedVenue && acceptedVenue) {
+        // Explicitly accepted detected venue (snapshot). Refuse a stale
+        // snapshot rather than silently sending old coordinates.
+        if (Date.now() - Number(acceptedVenue.at || 0) > LOCATION_FRESH_MS) {
+          setFormError("Your detected location is no longer fresh — please tap “Use detected location” again or enter the address manually.");
+          scrollToVenueError();
+          return;
+        }
+        payload.address = acceptedVenue.addressText;
+        payload.addressDetails = { ...acceptedVenue.details };
+        payload.location = { lat: acceptedVenue.coords.lat, lng: acceptedVenue.coords.lng };
+      } else {
+        payload.address = buildAddress();
+        const { addressDetails, location } = buildBookingLocation({
+          fields: form,
+          coords,
+          pinFP,
+        });
+        payload.addressDetails = addressDetails;
+        // Omitted unless the pin is bound to these exact fields: manual
+        // edits, unaccepted GPS, and IP approximations never become pins.
+        if (location) payload.location = location;
+      }
+      payload.clientKey = clientKeyFor(`${form.date}_${selectedSlot.startTime}_${selectedSlot.endTime}`);
       const res = await API.post("/bookings", payload);
       clearBookingDraft();
-      showToast("Booking request sent! Your slot is held for 5 minutes while the cook decides.", "success");
-      // Live waiting screen while the cook decides (5-minute window).
+      showToast("Finding a cook for you — we're contacting available cooks now.", "success");
       navigate(`/bookings/${res.data?._id}/wait`);
     } catch (err) {
-      showToast(err.response?.data?.message || err.message || "Booking failed", "error");
+      const data = err.response?.data || {};
+      const msg = data?.message || err.message || "Booking failed";
+      if (err.response?.status === 403 && data?.code === BLOCKED_CODE) {
+        // Server-reported lockout (e.g. answered NO elsewhere / another
+        // device): sync the notice + countdown instead of a dead end.
+        if (data?.blockedUntil) wp.applyServerBlock(data.blockedUntil);
+        setFormError(msg);
+        scrollToVenueError();
+        return;
+      }
+      if (err.response?.status === 409) {
+        setFormError(`${msg} Please pick another time.`);
+      } else {
+        showToast(msg, "error");
+      }
     } finally {
-      setBookingLoading(null);
+      setFindingCook(false);
     }
   };
 
   const steps = [
-    { label: "Plan", desc: "Service, date & hours" },
+    { label: "Plan", desc: "Date & hours" },
     { label: "Time Slot", desc: "Pick when" },
-    { label: "Venue & Cook", desc: "Address & book" },
+    { label: "Location", desc: "Address & find cook" },
   ];
 
   return (
@@ -960,7 +1040,7 @@ const CookBooking = () => {
         {slab != null && (
           <div className="od-hero-price" aria-live="polite">
             <span>{form.durationHours || "–"} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
-            <strong>{formatCurrency(finalPayable)}</strong>
+            <strong key={finalPayable} className="price-flash">{formatCurrency(finalPayable)}</strong>
           </div>
         )}
       </div>
@@ -988,55 +1068,21 @@ const CookBooking = () => {
         })}
       </ol>
 
-      {/* Live recap once planning starts */}
-      {(step > 1 || selectedSlot) && (
-        <div className="od-livebar" aria-live="polite">
-          {step > 1 && (
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              onClick={() => setStep(step - 1)}
-            >
-              <ArrowLeft size={15} /> Go Back
-            </button>
-          )}
-          <span className="od-livechip">{serviceLabel}</span>
-          <span className="od-livechip">{dateLabel(form.date)}</span>
-          <span className="od-livechip">{form.durationHours || "–"} hr · {form.guests || "–"} guests</span>
-          {selectedSlot && (
-            <span className="od-livechip od-livechip-strong">
-              {fmtTime(selectedSlot.startTime)} – {fmtTime(selectedSlot.endTime)}
-            </span>
-          )}
-          {slab != null && <span className="od-livechip od-livechip-price">{formatCurrency(slab)}</span>}
+      {step > 1 && (
+        <div className="od-gobar">
+          <button
+            type="button"
+            className="od-goback"
+            aria-label={`Go back to step ${step - 1} of ${steps.length}: ${steps[step - 2].label}`}
+            onClick={() => { setFormError(""); setStep(step - 1); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+          >
+            <ArrowLeft size={16} aria-hidden="true" /> Go Back
+          </button>
         </div>
       )}
 
       {step === 1 && (
         <form onSubmit={handleSeeSlots} className="ondemand-form-card">
-          <h3>Step 1 — Plan your session</h3>
-          <SecTitle n="01" icon={<ChefHat size={15} />}>Which service do you need?</SecTitle>
-          <p className="ondemand-form-sub">Same launch price for every service — pick what fits today.</p>
-          <div className="service-pick-grid">
-            {SERVICE_OPTIONS.map((s) => (
-              <button
-                type="button"
-                key={s.id}
-                className={`service-pick-card ${form.serviceType === s.id ? "selected" : ""}`}
-                onClick={() => setForm({ ...form, serviceType: s.id })}
-              >
-                <span className="service-pick-check" aria-hidden="true">
-                  {form.serviceType === s.id && <CheckCircle2 size={18} />}
-                </span>
-                <span className="service-pick-icon">{s.icon}</span>
-                <strong>{s.label}</strong>
-                <span>{s.desc}</span>
-              </button>
-            ))}
-          </div>
-
-          <SecTitle n="02" icon={<CalendarCheck size={15} />}>When and for how many?</SecTitle>
-
           <div className="form-row">
             <div className="form-group">
               <label>
@@ -1105,14 +1151,11 @@ const CookBooking = () => {
             </div>
           </div>
 
-          <SecTitle n="03" icon={<Clock3 size={15} />}>How long do you need the cook?</SecTitle>
+          <SecTitle icon={<Clock3 size={15} />}>How long do you need the cook?</SecTitle>
 
           <div className="form-row">
             <div className="form-group">
               <div className="bk-price-strip" aria-label="Launch pricing">
-                <span className="bk-price-badge">
-                  <BadgePercent size={13} /> Launch pricing · flat for every cook
-                </span>
                 <div className="bk-price-cells">
                   {DURATION_QUICK.map((h) => {
                     const active = Number(form.durationHours) === h;
@@ -1131,7 +1174,7 @@ const CookBooking = () => {
                     );
                   })}
                 </div>
-                <span className="bk-price-note">Flat rate · same for every cook &amp; service · no payment now</span>
+                <span className="bk-price-note">Flat rate · same for every cook · no payment now</span>
               </div>
             </div>
           </div>
@@ -1139,12 +1182,6 @@ const CookBooking = () => {
           {formError && <div className="error-message">{formError}</div>}
 
           <div className="od-stickybar">
-            <div className="od-summary" aria-live="polite">
-              <span>{serviceLabel}</span>
-              <span>{dateLabel(form.date)}</span>
-              <span>{form.durationHours || "–"} hr · {form.guests || "–"} guests</span>
-              <strong className="od-summary-price">{slab != null ? formatCurrency(slab) : "—"}</strong>
-            </div>
             <button type="submit" className="btn btn-primary btn-block btn-lg od-cta" disabled={searching}>
               {searching ? "Finding free cooks..." : (
                 <>
@@ -1152,24 +1189,39 @@ const CookBooking = () => {
                 </>
               )}
             </button>
-            <p className="od-sticky-note">Free to check · no address needed yet · no payment now</p>
           </div>
         </form>
       )}
 
       {step === 2 && (
         <div className="ondemand-form-card">
-          <h3>Step 2 — Pick a time slot</h3>
-          {searched && slotOptions.length === 0 && (
+          <h3>Pick a time slot</h3>
+          {searched && visibleSlotOptions.length === 0 && (
             <div className="no-data">
               <p>
-                {totalCooksFound === 0
-                  ? "No cooks offer this service yet — try another service."
+                {pastServiceDay
+                  ? "Our service is available 8 AM – 8 PM — today's slots are over. Please book for tomorrow or another date."
+                  : totalCooksFound === 0
+                  ? "No cooks available yet — please try another date."
                   : slotSuggestions.length > 0
                     ? `No ${form.durationHours}-hour slots on this date — but shorter sessions are free.`
                     : "No free slots on this date — try another date or duration."}
               </p>
-              {slotSuggestions.length > 0 && (
+              {pastServiceDay ? (
+                <div className="od-suggest-row" role="group" aria-label="Book another day">
+                  <button
+                    key="tomorrow"
+                    type="button"
+                    className="bk-dur-chip"
+                    onClick={() => {
+                      setForm((f) => ({ ...f, date: localTomorrowStr() }));
+                      setStep(1);
+                    }}
+                  >
+                    Book for tomorrow
+                  </button>
+                </div>
+              ) : slotSuggestions.length > 0 && (
                 <div className="od-suggest-row" role="group" aria-label="Durations with free slots">
                   {slotSuggestions.map((h) => (
                     <button
@@ -1185,82 +1237,59 @@ const CookBooking = () => {
               )}
             </div>
           )}
-          {slotOptions.length > 0 && (
-            <>
-              <div role="radiogroup" aria-label="Available time slots">
-                {["Morning", "Afternoon", "Evening"]
-                  .map((part) => ({
-                    part,
-                    slots: slotOptions.filter((o) => slotPart(o.startTime) === part),
-                  }))
-                  .filter((g) => g.slots.length > 0)
-                  .map((g) => {
-                    // Collapsed groups show only the first few starts; a slot
-                    // picked while expanded stays visible after collapsing.
-                    const isSelected = (o) =>
-                      !!selectedSlot &&
-                      o.startTime === selectedSlot.startTime &&
-                      o.endTime === selectedSlot.endTime;
-                    let visibleSlots = g.slots;
-                    if (!showAllSlots && g.slots.length > TOP_SLOTS_COUNT) {
-                      const head = g.slots.slice(0, TOP_SLOTS_COUNT);
-                      if (selectedSlot && g.slots.some(isSelected) && !head.some(isSelected)) {
-                        visibleSlots = [...head, g.slots.find(isSelected)];
-                      } else {
-                        visibleSlots = head;
-                      }
-                    }
-                    return (
-                      <div key={g.part} className="od-slot-group">
-                        <p className="od-slot-group-title">
-                          <Clock3 size={13} /> {g.part}
-                          <span> · {g.slots.length} slot{g.slots.length > 1 ? "s" : ""}</span>
-                        </p>
-                        <div className="slot-list slot-list-pick">
-                          {visibleSlots.map((o) => {
-                            const active = isSelected(o);
-                            const recommended =
-                              !!recommendedSlot &&
-                              recommendedSlot.startTime === o.startTime &&
-                              recommendedSlot.endTime === o.endTime;
-                            return (
-                              <button
-                                key={`${o.startTime}-${o.endTime}`}
-                                type="button"
-                                role="radio"
-                                aria-checked={active}
-                                aria-label={`${recommended ? "Recommended. " : ""}${fmtTime(o.startTime)} to ${fmtTime(o.endTime)}, ${o.freeCooks} ${o.freeCooks === 1 ? "cook" : "cooks"} free`}
-                                className={`slot-chip slot-chip-pick ${active ? "selected" : ""} ${recommended ? "recommended" : ""}`}
-                                onClick={() => {
-                                  setSelectedSlot({ startTime: o.startTime, endTime: o.endTime });
-                                  setFormError("");
-                                }}
-                              >
-                                {recommended && <span className="slot-chip-rec">★ Recommended</span>}
-                                <span className="slot-chip-main">{fmtTimeCompact(o.startTime)}</span>
-                                <span className="slot-chip-end">to {fmtTimeCompact(o.endTime)}</span>
-                                <span className="slot-chip-cooks">
-                                  {o.freeCooks} {o.freeCooks === 1 ? "cook" : "cooks"} free
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
+          {visibleSlotOptions.length > 0 && (
+            <div role="radiogroup" aria-label="Available time slots">
+              {["Morning", "Afternoon", "Evening"]
+                .map((part) => ({
+                  part,
+                  slots: visibleSlotOptions.filter((o) => slotPart(o.startTime) === part),
+                }))
+                .filter((g) => g.slots.length > 0)
+                .map((g) => {
+                  const isSelected = (o) =>
+                    !!selectedSlot &&
+                    o.startTime === selectedSlot.startTime &&
+                    o.endTime === selectedSlot.endTime;
+                  return (
+                    <div key={g.part} className="od-slot-group">
+                      <p className="od-slot-group-title">
+                        <Clock3 size={13} /> {g.part}
+                        <span> · {g.slots.length} slot{g.slots.length > 1 ? "s" : ""}</span>
+                      </p>
+                      <div className="slot-list slot-list-pick">
+                        {g.slots.map((o) => {
+                          const active = isSelected(o);
+                          const recommended =
+                            !!recommendedSlot &&
+                            recommendedSlot.startTime === o.startTime &&
+                            recommendedSlot.endTime === o.endTime;
+                          return (
+                            <button
+                              key={`${o.startTime}-${o.endTime}`}
+                              type="button"
+                              role="radio"
+                              aria-checked={active}
+                              aria-label={`${recommended ? "Recommended. " : ""}${fmtTime(o.startTime)} to ${fmtTime(o.endTime)}, ${o.freeCooks} ${o.freeCooks === 1 ? "cook" : "cooks"} free`}
+                              className={`slot-chip slot-chip-pick ${active ? "selected" : ""} ${recommended ? "recommended" : ""}`}
+                              onClick={() => {
+                                setSelectedSlot({ startTime: o.startTime, endTime: o.endTime });
+                                setFormError("");
+                              }}
+                            >
+                              {recommended && <span className="slot-chip-rec">★ Recommended</span>}
+                              <span className="slot-chip-main">{fmtTimeCompact(o.startTime)}</span>
+                              <span className="slot-chip-end">to {fmtTimeCompact(o.endTime)}</span>
+                              <span className="slot-chip-cooks">
+                                {o.freeCooks} {o.freeCooks === 1 ? "cook" : "cooks"} free
+                              </span>
+                            </button>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-              </div>
-              {slotOptions.length > TOP_SLOTS_COUNT && (
-                <button
-                  type="button"
-                  className="slot-toggle-btn"
-                  aria-expanded={showAllSlots}
-                  onClick={() => setShowAllSlots((v) => !v)}
-                >
-                  {showAllSlots ? "Show fewer times" : `Show all ${slotOptions.length} times`}
-                </button>
-              )}
-            </>
+                    </div>
+                  );
+                })}
+            </div>
           )}
 
           {formError && <div className="error-message">{formError}</div>}
@@ -1280,9 +1309,9 @@ const CookBooking = () => {
               type="button"
               className="btn btn-primary btn-block btn-lg od-cta"
               disabled={!selectedSlot || searching}
-              onClick={handleChooseCook}
+              onClick={handleContinueToSummary}
             >
-              {searching ? "Checking live availability…" : <>Choose Cook <ArrowRight size={17} /></>}
+              {searching ? "Checking live availability…" : <>Continue <ArrowRight size={17} /></>}
             </button>
           </div>
         </div>
@@ -1290,27 +1319,100 @@ const CookBooking = () => {
 
       {step === 3 && selectedSlot && (
         <div>
-          <h3>Step 3 — Venue &amp; Cook</h3>
           <div className="ondemand-form-card od-venue-card">
-            <SecTitle n="04" icon={<MapPin size={15} />}>Where should the cook come?</SecTitle>
+            {useDetectedVenue && acceptedVenue ? (
+              <>
+                <SecTitle icon={<MapPin size={15} />}>Where should the cook come?</SecTitle>
+                <div className="bk-profile-addr">
+                  <MapPin size={16} />
+                  <div className="bk-profile-addr-text">
+                    <strong>Using your current location</strong>
+                    <span>{acceptedVenue.addressText}</span>
+                  </div>
+                </div>
+                <p className="ondemand-form-sub">You confirmed this location — we&apos;ll share it with the cook.</p>
+                <button
+                  type="button"
+                  className="bk-recap-edit"
+                  onClick={() => { setAcceptedVenue(null); setPinFP(null); }}
+                  aria-label="Enter the location address manually instead"
+                >
+                  <Pencil size={12} /> Enter address manually instead
+                </button>
+              </>
+            ) : (
+            <>
+            <SecTitle icon={<MapPin size={15} />}>Where should the cook come?</SecTitle>
+            {showDetectedSuggestion && (
+              <div className="od-detected-box" data-testid="od-detected-suggestion">
+                <div className="od-detected-text" style={{ flexBasis: "100%", display: "flex", gap: "6px", alignItems: "flex-start" }}>
+                  <MapPin size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: "2px" }} />
+                  <span>{detectedAddressText}</span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm loc-gps-btn"
+                  onClick={acceptDetectedVenue}
+                >
+                  Use detected location
+                </button>
+              </div>
+            )}
             <div className="ondemand-locate-box">
+              {addressBook.length > 0 && (
+                <div className="form-group od-saved-group">
+                  <label htmlFor="od-addressbook-select">
+                    <History size={15} /> Use saved address
+                  </label>
+                  <div className="od-saved-wrap">
+                  <select
+                    id="od-addressbook-select"
+                    className="form-control od-saved-select"
+                    value={addressBookIdx}
+                    onChange={(e) => applyAddressBookEntry(e.target.value)}
+                    aria-label="Use a saved address from your address book"
+                  >
+                    <option value="">Select from address book…</option>
+                    {addressBook.map((s, i) => {
+                      const nm = s.label === "Other" && s.customLabel ? s.customLabel : s.label;
+                      const addr = [s.flatNo, s.society, s.city].filter(Boolean).join(", ");
+                      const label = `${nm} — ${addr}`;
+                      return (
+                        <option key={s._id || i} value={i} title={label}>
+                          {label.length > 52 ? `${label.slice(0, 52)}…` : label}{s.isDefault ? " · Default" : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  </div>
+                </div>
+              )}
               {savedLocations.length > 0 && (
-                <div className="form-group">
-                  <label>
+                <div className="form-group od-saved-group">
+                  <label htmlFor="od-saved-select">
                     <History size={15} /> Use previous location
                   </label>
+                  <div className="od-saved-wrap">
                   <select
-                    className="form-control"
+                    id="od-saved-select"
+                    className="form-control od-saved-select"
                     value={savedIdx}
                     onChange={(e) => applySavedLocation(e.target.value)}
+                    aria-label="Use a location from your past bookings"
+                    title={savedIdx !== "" && savedLocations[Number(savedIdx)] ? savedLocations[Number(savedIdx)].address : undefined}
                   >
                     <option value="">Select from your past bookings...</option>
-                    {savedLocations.map((s, i) => (
-                      <option key={i} value={i}>
-                        {s.address}{s.timesUsed > 1 ? ` (used ${s.timesUsed}x)` : ""}
-                      </option>
-                    ))}
+                    {savedLocations.map((s, i) => {
+                      const suffix = s.timesUsed > 1 ? ` (used ${s.timesUsed}x)` : "";
+                      const label = s.address.length > 48 ? `${s.address.slice(0, 48)}…${suffix}` : `${s.address}${suffix}`;
+                      return (
+                        <option key={i} value={i} title={`${s.address}${suffix}`}>
+                          {label}
+                        </option>
+                      );
+                    })}
                   </select>
+                  </div>
                 </div>
               )}
               {locMsg && (
@@ -1318,37 +1420,7 @@ const CookBooking = () => {
                   {locMsg}
                 </p>
               )}
-              {coords && (
-                <div className="form-group" style={{ marginBottom: 0 }}>
-                  <label htmlFor="maps-link-input">
-                    <MapPin size={15} /> Google Maps link of your location
-                  </label>
-                  <div className="maps-link-group">
-                    <input
-                      id="maps-link-input"
-                      type="text"
-                      className="form-control"
-                      value={mapsLink}
-                      readOnly
-                      onFocus={(e) => e.target.select()}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn-outline btn-sm"
-                      onClick={handleCopyLink}
-                    >
-                      {copied ? (
-                        <>
-                          <Check size={15} /> Copied
-                        </>
-                      ) : (
-                        "Copy"
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+              </div>
             {profileAddress && !addrEditing ? (
               <div className="bk-profile-addr">
                 <MapPin size={16} />
@@ -1380,7 +1452,10 @@ const CookBooking = () => {
                   onChange={handleChange}
                   placeholder="e.g. Flat 402, Wing B"
                   required
+                  ref={(el) => { fieldRefs.current.flatNo = el; }}
+                  aria-invalid={Boolean(fieldErrors.flatNo)}
                 />
+                {fieldErrors.flatNo && <p className="field-error" role="alert">{fieldErrors.flatNo}</p>}
               </div>
               <div className="form-group">
                 <label>
@@ -1394,7 +1469,10 @@ const CookBooking = () => {
                   onChange={handleChange}
                   placeholder="e.g. Sunshine Society, MG Road"
                   required
+                  ref={(el) => { fieldRefs.current.society = el; }}
+                  aria-invalid={Boolean(fieldErrors.society)}
                 />
+                {fieldErrors.society && <p className="field-error" role="alert">{fieldErrors.society}</p>}
               </div>
             </div>
             <div className="form-row">
@@ -1415,23 +1493,32 @@ const CookBooking = () => {
                 <label>
                   <MapPin size={15} /> City / Area *
                 </label>
-                <input
-                  type="text"
+                <select
                   name="city"
                   className="form-control"
-                  value={form.city}
+                  value={CITY_AREA_OPTIONS.includes(form.city) ? form.city : ""}
                   onChange={handleChange}
-                  placeholder="e.g. Pune"
                   required
-                />
+                  ref={(el) => { fieldRefs.current.city = el; }}
+                  aria-invalid={Boolean(fieldErrors.city)}
+                >
+                  <option value="">Select city / area…</option>
+                  {CITY_AREA_OPTIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+                {fieldErrors.city && <p className="field-error" role="alert">{fieldErrors.city}</p>}
               </div>
             </div>
             </>
             )}
+            </>
+            )}
 
-            <SecTitle n="05" icon={<UtensilsCrossed size={15} />}>What dishes do you need? *</SecTitle>
+            <SecTitle icon={<UtensilsCrossed size={15} />}>What dishes do you need? *</SecTitle>
             <div className="form-group">
-              <label>Dishes <small>(comma separated)</small></label>
               <input
                 type="text"
                 name="customDishes"
@@ -1440,7 +1527,11 @@ const CookBooking = () => {
                 onChange={handleChange}
                 placeholder="e.g. Puran Poli, Shankarpali, Modak"
                 required
+                aria-label="Dishes, comma separated"
+                ref={(el) => { fieldRefs.current.customDishes = el; }}
+                aria-invalid={Boolean(fieldErrors.customDishes)}
               />
+              {fieldErrors.customDishes && <p className="field-error" role="alert">{fieldErrors.customDishes}</p>}
             </div>
 
             <div className="form-group">
@@ -1457,12 +1548,14 @@ const CookBooking = () => {
               />
             </div>
 
-            <SecTitle n="06" icon={<BadgePercent size={15} />}>Price &amp; coupon</SecTitle>
+            <SecTitle icon={<BadgePercent size={15} />}>Price &amp; coupon</SecTitle>
             <div className="price-rows">
-              <div className="price-row">
-                <span>Service Price · {form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
-                <span>{slab != null ? formatCurrency(slab) : "—"}</span>
-              </div>
+              {coupon && (
+                <div className="price-row">
+                  <span>Service Price · {form.durationHours} hr{Number(form.durationHours) === 1 ? "" : "s"}</span>
+                  <span>{slab != null ? formatCurrency(slab) : "—"}</span>
+                </div>
+              )}
               {coupon && (
                 <div className="price-row discount">
                   <span>Coupon {coupon.code}</span>
@@ -1471,101 +1564,39 @@ const CookBooking = () => {
               )}
               <div className="price-row total">
                 <span>Final Amount</span>
-                <strong>{slab != null ? formatCurrency(finalPayable) : "—"}</strong>
+                <strong key={finalPayable} className="price-flash">{slab != null ? formatCurrency(finalPayable) : "—"}</strong>
               </div>
             </div>
             {slab != null && (
               <CouponApply
                 amount={slab}
-                serviceType={form.serviceType}
-                onApplied={setCoupon}
+                serviceType={DEFAULT_SERVICE_TYPE}
+                onApplied={handleCouponApplied}
+                initialCode={couponRestore}
               />
-            )}
-
-            {user?.phone && (
-              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem", color: "var(--slate-600)", background: "var(--slate-50)", borderRadius: "var(--radius-md)", padding: "0.6rem 0.9rem" }}>
-                <MessageCircle size={15} style={{ color: "var(--accent-emerald)", flexShrink: 0 }} />
-                <span>Booking on mobile <strong>+91 {user.phone}</strong> — shared with the cook for coordination.</span>
-              </div>
             )}
 
             {formError && <div ref={venueErrorRef} className="error-message">{formError}</div>}
           </div>
-          <div className="match-results-head">
-            <h3 className="match-count-title">
-              {cooksForSlot.length > 0
-                ? `${cooksForSlot.length} cook${cooksForSlot.length > 1 ? "s" : ""} free ${fmtTime(selectedSlot.startTime)} – ${fmtTime(selectedSlot.endTime)} on ${form.date}`
-                : `No cooks free ${fmtTime(selectedSlot.startTime)} – ${fmtTime(selectedSlot.endTime)} on ${form.date}`}
-            </h3>
-          </div>
-          {cooksForSlot.length === 0 && (
-            <div className="no-data">
-              <p>That slot just filled up — pick another time.</p>
-              <button className="btn btn-outline btn-sm" onClick={() => setStep(2)}>
-                ← Back to slots
-              </button>
-            </div>
+          <WomanPresenceCheck wp={wp} />
+          {!user && (
+            <p className="od-review-notice od-review-notice-login">
+              <LogIn size={13} /> Login as a customer to find a cook for this slot
+            </p>
           )}
-          <div className="bookings-list">
-            {cooksForSlot.map((cook) => {
-              const fee = finalPayable;
-              return (
-                <div key={cook._id} className="match-card">
-                  <div className="match-card-top">
-                    <div className="match-avatar">
-                      {cook.photoUrl ? (
-                        <img
-                          src={resolveFileUrl(cook.photoUrl)}
-                          alt={cook.user?.name || "Cook"}
-                          loading="lazy"
-                        />
-                      ) : (
-                        cook.user?.name?.[0]?.toUpperCase() || "C"
-                      )}
-                    </div>
-                    <div className="match-id">
-                      <h3>{cook.user?.name}</h3>
-                      <p className="match-meta">
-                        {cook.serviceArea} • {cook.experienceYears} yrs exp • ★{" "}
-                        {cook.rating?.average?.toFixed(1) || "New"} ({cook.rating?.count || 0} reviews)
-                      </p>
-                    </div>
-                    <span className="match-rate" title={`Launch price · ${form.durationHours} hr`}>
-                      {slab != null ? formatCurrency(slab) : `₹${cook.rate}/hr`}
-                    </span>
-                  </div>
-                  <div className="tags">
-                    {cook.specialties?.slice(0, 4).map((s, i) => (
-                      <span key={i} className="tag">{s}</span>
-                    ))}
-                  </div>
-                  <div className="od-bookbox">
-                    <div className="od-bookslot">
-                      <span className="od-bookslot-time">
-                        <Clock3 size={15} /> {fmtTime(cook.slot.startTime)} – {fmtTime(cook.slot.endTime)}
-                      </span>
-                      <span className="od-bookfee">{formatCurrency(fee)} total</span>
-                    </div>
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-block btn-lg od-bookbtn"
-                      disabled={bookingLoading === bookingKey(cook, cook.slot)}
-                      onClick={() => handleBook(cook, cook.slot)}
-                      title={`Book ${cook.user?.name || "this cook"} for ${formatCurrency(fee)}`}
-                    >
-                      {bookingLoading === bookingKey(cook, cook.slot)
-                        ? <span className="bk-submit-loading">Booking…</span>
-                        : <>Book {(cook.user?.name || "Cook").split(" ")[0]} <ArrowRight size={17} /></>}
-                    </button>
-                  </div>
-                  {!user && (
-                    <p className="field-hint">
-                      <LogIn size={13} /> Login as a customer to book this slot
-                    </p>
-                  )}
-                </div>
-              );
-            })}
+          <div className="od-stickybar">
+            <button
+              type="button"
+              className="btn btn-primary btn-block btn-lg od-cta"
+              disabled={findingCook || Boolean(wpGate)}
+              onClick={handleFindCook}
+            >
+              {findingCook ? (
+                <span className="bk-submit-loading">Finding a cook…</span>
+              ) : (
+                <>Find Cook <ArrowRight size={17} /></>
+              )}
+            </button>
           </div>
         </div>
       )}
@@ -1573,7 +1604,7 @@ const CookBooking = () => {
       <LoginPromptModal
         open={showLoginModal}
         onClose={() => setShowLoginModal(false)}
-        returnTo={`/cook-on-demand${initialService !== "cook_with_me" ? `?serviceType=${initialService}` : ""}`}
+        returnTo="/cook-on-demand"
       />
     </div>
   );

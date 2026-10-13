@@ -1,5 +1,3 @@
-// Launch pricing + coupon math (pure functions, no DB).
-// Run:  node backend/launch-pricing.test.js  — exits non-zero on failure.
 
 const {
   LAUNCH_SLABS,
@@ -21,24 +19,21 @@ const check = (name, ok, detail) => {
   if (!ok) failures++;
 };
 
-// ── Launch slabs ────────────────────────────────────────────────────────────
 check("slab table matches launch prices", JSON.stringify(LAUNCH_SLABS) === JSON.stringify({ 1: 199, 2: 349, 3: 499, 4: 649 }));
 check("3h costs 499", slabPriceForDuration(3) === 499);
 check("5h has no slab", slabPriceForDuration(5) === null);
 check("halves have no slab", slabPriceForDuration(1.5) === null);
 check("isSlabDuration guards", isSlabDuration(4) === true && isSlabDuration(0) === false);
-check("commission is 25%", COMMISSION_RATE === 0.25);
+check("commission is 15%", COMMISSION_RATE === 0.15);
 const split = splitPayout(449);
-check("449 splits 112/337", split.commission === 112 && split.cookPayout === 337, JSON.stringify(split));
+check("449 splits 67/382", split.commission === 67 && split.cookPayout === 382, JSON.stringify(split));
 
-// ── Flat coupons ────────────────────────────────────────────────────────────
 const flat50 = { discountType: "flat", flatAmount: 50, minOrder: 399 };
 check("flat 50 off 499", computeDiscount(flat50, 499) === 50);
 check("flat never exceeds order", computeDiscount({ discountType: "flat", flatAmount: 500 }, 199) === 199);
 check("percent still works", computeDiscount({ discountType: "percent", percent: 20, maxDiscount: 500 }, 1000) === 200);
 check("legacy coupon without type stays percent", computeDiscount({ percent: 10 }, 500) === 50);
 
-// ── Eligibility ─────────────────────────────────────────────────────────────
 check("unknown code rejected", rejectionReason(null, { amount: 499 }) === "This coupon is not valid for this booking.");
 check("min order enforced", rejectionReason(flat50, { amount: 199 }) === "This coupon needs a minimum order of ₹399.");
 check("min order passes", rejectionReason(flat50, { amount: 499 }) === null);
@@ -53,10 +48,6 @@ check("wrong service rejected", rejectionReason(scoped, { amount: 499, serviceTy
 check("right service passes", rejectionReason(scoped, { amount: 499, serviceType: "teach_me" }) === null);
 check("code normalized", normalizeCode(" welcome50 ") === "WELCOME50");
 
-// ── Coupon catalogue invariants ─────────────────────────────────────────────
-// These guard the class of bug where a shipped coupon can never be redeemed
-// (FESTIVE100 shipped with a ₹799 minimum against a ₹649 top slab) and the
-// promise that a discount never eats into the cook's 75% share.
 const SLABS = Object.values(LAUNCH_SLABS);
 const cache = {};
 
@@ -64,7 +55,6 @@ for (const c of INITIAL_COUPONS) {
   const label = `[${c.code}]`;
   cache[c.code] = c;
 
-  // 1. At least one launch slab must actually qualify for the offer.
   const eligible = SLABS.filter(
     (slab) =>
       rejectionReason({ ...c, active: true }, { amount: slab }) === null &&
@@ -76,20 +66,20 @@ for (const c of INITIAL_COUPONS) {
     eligible.length ? `slabs ${eligible.join(", ")}` : `min order ₹${c.minOrder} exceeds top slab ₹${Math.max(...SLABS)}`
   );
 
-  // 2. The discount must fit inside the platform's 25% commission on the
-  //    cheapest eligible slab — otherwise the cook silently funds the promo.
   if (eligible.length > 0) {
     const cheapest = Math.min(...eligible);
     const discount = computeDiscount(c, cheapest);
     const commission = splitPayout(cheapest).commission;
+    // Deliberate loss-leader: a 100%-off first-booking promo is funded by the
+    // business as acquisition cost, not from the 15% platform commission.
+    const isLossLeader = c.firstBookingOnly === true && Number(c.percent) === 100;
     check(
       `${label} discount fits platform commission`,
-      discount <= commission,
+      isLossLeader || discount <= commission,
       `₹${discount} off ₹${cheapest} vs ₹${commission} commission`
     );
   }
 
-  // 3. Percent coupons must be capped, or deep slabs get over-discounted.
   if (c.discountType === "percent") {
     check(`${label} percent coupon has a cap`, c.maxDiscount != null, `maxDiscount=${c.maxDiscount}`);
   }

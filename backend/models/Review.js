@@ -27,13 +27,14 @@ const reviewSchema = new mongoose.Schema(
     comment: {
       type: String,
       default: "",
+      trim: true,
+      maxlength: [2000, "Review must be at most 2000 characters"],
     },
   },
   { timestamps: true }
 );
 
 reviewSchema.index({ cook: 1 });
-// "My reviews" filters by customer — needs its own index.
 reviewSchema.index({ customer: 1 });
 
 module.exports = mongoose.model("Review", reviewSchema);

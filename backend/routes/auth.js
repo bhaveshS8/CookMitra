@@ -3,14 +3,24 @@ const router = express.Router();
 const { body } = require("express-validator");
 const validate = require("../middleware/validate");
 const { auth, authorize } = require("../middleware/auth");
+const rateLimit = require("express-rate-limit");
+const { rateLimitStore } = require("../utils/rateLimitStore");
 const {
   register,
   login,
+  logout,
   googleAuth,
   forgotPassword,
   resetPassword,
   getMe,
   updateProfile,
+  getMyStats,
+  changePassword,
+  getMyAddresses,
+  addMyAddress,
+  updateMyAddress,
+  deleteMyAddress,
+  setDefaultMyAddress,
   getAllUsers,
   adminSetUserStatus,
   adminDeleteUser,
@@ -18,21 +28,73 @@ const {
   adminAddAdmin,
 } = require("../controllers/authController");
 
+const sensitiveLimiter = rateLimit({
+  store: rateLimitStore("auth"),
+  standardHeaders: false,
+  legacyHeaders: false,
+  windowMs: 15 * 60 * 1000,
+  max: Number(process.env.RATE_LIMIT_AUTH_SENSITIVE || 20),
+  message: { message: "Too many attempts — please try again later." },
+});
+
+const emailRule = body("email")
+  .trim()
+  .notEmpty()
+  .withMessage("Email is required")
+  .isEmail()
+  .withMessage("Enter a valid email address")
+  .normalizeEmail({ gmail_remove_dots: false });
+const passwordRule = (field = "password") =>
+  body(field)
+    .notEmpty()
+    .withMessage("Password is required")
+    .isLength({ min: 8, max: 128 })
+    .withMessage("Password must be 8–128 characters");
+const phoneOrMobileRule = [
+  body("phone").optional().trim(),
+  body("mobile").optional().trim(),
+  body("phone")
+    .optional()
+    .custom((v) => {
+      if (!v) return true;
+      let digits = String(v).replace(/\D/g, "");
+      if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+      else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+      if (digits.length !== 10) throw new Error("Mobile number must be exactly 10 digits");
+      if (!/^[6-9]\d{9}$/.test(digits))
+        throw new Error("Enter a valid 10-digit mobile number");
+      return true;
+    }),
+  body("mobile")
+    .optional()
+    .custom((v) => {
+      if (!v) return true;
+      let digits = String(v).replace(/\D/g, "");
+      if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+      else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+      if (digits.length !== 10) throw new Error("Mobile number must be exactly 10 digits");
+      if (!/^[6-9]\d{9}$/.test(digits))
+        throw new Error("Enter a valid 10-digit mobile number");
+      return true;
+    }),
+  body().custom((_, { req }) => {
+    if (!req.body.phone && !req.body.mobile) throw new Error("Phone/mobile is required");
+    return true;
+  }),
+];
+
 router.post(
   "/register",
   [
-    body("name").trim().notEmpty().withMessage("Name is required"),
-    body("email").isEmail().withMessage("Valid email is required"),
-    // Spec §17 calls it `mobile`; legacy clients send `phone` — accept either.
-    body("phone").optional().trim(),
-    body("mobile").optional().trim(),
-    body().custom((_, { req }) => {
-      if (!req.body.phone && !req.body.mobile) throw new Error("Phone/mobile is required");
-      return true;
-    }),
-    body("password")
-      .isLength({ min: 6 })
-      .withMessage("Password must be at least 6 characters"),
+    body("name")
+      .trim()
+      .notEmpty()
+      .withMessage("Full name is required")
+      .isLength({ min: 2, max: 80 })
+      .withMessage("Name must be 2–80 characters"),
+    emailRule,
+    ...phoneOrMobileRule,
+    passwordRule("password"),
     body("role")
       .optional()
       .customSanitizer((v) => String(v).toUpperCase())
@@ -46,14 +108,17 @@ router.post(
 router.post(
   "/login",
   [
-    body("email").isEmail().withMessage("Valid email is required"),
+    emailRule,
     body("password").notEmpty().withMessage("Password is required"),
+    body("rememberMe")
+      .optional()
+      .custom((v) => typeof v === "boolean" || v === "true" || v === "false")
+      .withMessage("rememberMe must be true or false"),
   ],
   validate,
   login
 );
 
-// Password reset (public, throttled + enumeration-safe in-controller).
 router.post(
   "/forgot-password",
   [body("email").isEmail().withMessage("Valid email is required")],
@@ -65,8 +130,8 @@ router.post(
   [
     body("token").trim().notEmpty().withMessage("Reset token is required"),
     body("password")
-      .isLength({ min: 6 })
-      .withMessage("Password must be at least 6 characters"),
+      .isLength({ min: 8, max: 128 })
+      .withMessage("Password must be 8–128 characters"),
   ],
   validate,
   resetPassword
@@ -87,6 +152,42 @@ router.post(
 );
 
 router.get("/me", auth, getMe);
+router.get("/me/stats", auth, getMyStats);
+router.post("/logout", logout);
+router.post(
+  "/change-password",
+  auth,
+  sensitiveLimiter,
+  [
+    body("currentPassword").optional().trim(),
+    body("current_password").optional().trim(),
+    body("oldPassword").optional().trim(),
+    body("newPassword").optional().isLength({ min: 8, max: 128 }).withMessage("New password must be 8–128 characters"),
+    body("new_password").optional().isLength({ min: 8, max: 128 }).withMessage("New password must be 8–128 characters"),
+    body("password").optional().isLength({ min: 8, max: 128 }).withMessage("New password must be 8–128 characters"),
+  ],
+  validate,
+  changePassword
+);
+
+router.get("/me/addresses", auth, getMyAddresses);
+router.post(
+  "/me/addresses",
+  auth,
+  [
+    body("label").optional().trim(),
+    body("flatNo").optional().trim(),
+    body("society").optional().trim(),
+    body("city").optional().trim(),
+  ],
+  validate,
+  addMyAddress
+);
+router.put("/me/addresses/:addressId", auth, validate, updateMyAddress);
+router.delete("/me/addresses/:addressId", auth, deleteMyAddress);
+router.patch("/me/addresses/:addressId/default", auth, setDefaultMyAddress);
+
+
 router.put(
   "/me",
   auth,
@@ -100,20 +201,41 @@ router.put(
       .optional()
       .trim()
       .notEmpty()
-      .withMessage("Phone is required"),
+      .withMessage("Phone is required")
+      .custom((v) => {
+        let digits = String(v).replace(/\D/g, "");
+        if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+        else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+        if (!/^[6-9]\d{9}$/.test(digits)) throw new Error("Enter a valid 10-digit mobile number");
+        return true;
+      }),
     body("mobile")
       .optional()
       .trim()
       .notEmpty()
-      .withMessage("Mobile is required"),
+      .withMessage("Mobile is required")
+      .custom((v) => {
+        let digits = String(v).replace(/\D/g, "");
+        if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+        else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+        if (!/^[6-9]\d{9}$/.test(digits)) throw new Error("Enter a valid 10-digit mobile number");
+        return true;
+      }),
     body("address").optional().trim().isLength({ max: 500 }).withMessage("Address is too long"),
+    body("avatar").optional().trim().isLength({ max: 500 }).withMessage("Avatar URL is too long"),
+    body("preferredLanguage").optional().trim().isLength({ max: 40 }).withMessage("Language is too long"),
+    body("email")
+      .optional()
+      .trim()
+      .isEmail()
+      .withMessage("Enter a valid email address")
+      .normalizeEmail(),
   ],
   validate,
   updateProfile
 );
 router.get("/users", auth, authorize("admin"), getAllUsers);
 
-// Admin: create a cook account (+ approved profile) directly.
 router.post(
   "/cooks",
   auth,
@@ -128,8 +250,8 @@ router.post(
       return true;
     }),
     body("password")
-      .isLength({ min: 6 })
-      .withMessage("Password must be at least 6 characters"),
+      .isLength({ min: 8, max: 128 })
+      .withMessage("Password must be 8–128 characters"),
     body("rate").optional().isNumeric().withMessage("Rate must be a number"),
     body("serviceTypes").optional().isArray().withMessage("serviceTypes must be an array"),
   ],
@@ -137,8 +259,6 @@ router.post(
   adminAddCook
 );
 
-// Admin: register a new admin account (admin-gated — the public /register
-// route only accepts customer/cook, so this is the sole way to add admins).
 router.post(
   "/admins",
   auth,
@@ -153,14 +273,13 @@ router.post(
       return true;
     }),
     body("password")
-      .isLength({ min: 6 })
-      .withMessage("Password must be at least 6 characters"),
+      .isLength({ min: 8, max: 128 })
+      .withMessage("Password must be 8–128 characters"),
   ],
   validate,
   adminAddAdmin
 );
 
-// Admin account management: block/unblock and delete customer/cook accounts.
 router.patch(
   "/users/:id/status",
   auth,

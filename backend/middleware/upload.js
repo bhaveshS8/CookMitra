@@ -2,9 +2,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 
-// Local disk storage for cook verification documents (Aadhaar / PAN / photo).
-// Files go to <backend>/uploads/cook-docs and are served via /uploads.
-const uploadDir = path.join(__dirname, "..", "uploads", "cook-docs");
+const { uploadDir } = require("../utils/storage");
 fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -26,9 +24,6 @@ const ALLOWED_MIME = new Set([
   "application/pdf",
 ]);
 
-// MIME types are client-supplied and spoofable, so enforce the file extension
-// too — otherwise an .html/.svg upload passes as image/jpeg and is served
-// back verbatim under /uploads (stored XSS / content spoofing).
 const ALLOWED_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".pdf"]);
 
 const fileFilter = (req, file, cb) => {
@@ -39,12 +34,69 @@ const fileFilter = (req, file, cb) => {
   cb(err);
 };
 
+const BYTE = (buf, ...sig) => sig.every((b, i) => buf[i] === b);
+const SIGNATURE_CHECKS = {
+  ".jpg": (buf) => BYTE(buf, 0xff, 0xd8, 0xff),
+  ".jpeg": (buf) => BYTE(buf, 0xff, 0xd8, 0xff),
+  ".png": (buf) => BYTE(buf, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a),
+  ".webp": (buf) =>
+    buf.length >= 12 &&
+    buf.toString("ascii", 0, 4) === "RIFF" &&
+    buf.toString("ascii", 8, 12) === "WEBP",
+  ".pdf": (buf) => buf.length >= 5 && buf.toString("ascii", 0, 5) === "%PDF-",
+};
+const DANGEROUS_MARKERS = ["<html", "<script", "<?php", "<%", "<!doctype", "mz\x90\x00"];
+const HEADER_SCAN_BYTES = 4096;
+
+const unlinkQuiet = (p) => {
+  try {
+    if (p) fs.unlinkSync(p);
+  } catch {
+  }
+};
+
+const validateUploadedContent = (req, res, next) => {
+  try {
+    const groups = req.files && typeof req.files === "object" ? Object.values(req.files) : [];
+    const files = [...groups.flat(), ...(req.file ? [req.file] : [])].filter(Boolean);
+    if (!files.length) return next();
+    for (const file of files) {
+      const ext = path.extname(file.path || file.originalname || "").toLowerCase();
+      const check = SIGNATURE_CHECKS[ext];
+      let header;
+      try {
+        const fd = fs.openSync(file.path, "r");
+        try {
+          const buf = Buffer.alloc(Math.min(HEADER_SCAN_BYTES, file.size || HEADER_SCAN_BYTES));
+          const read = fs.readSync(fd, buf, 0, buf.length, 0);
+          header = buf.slice(0, read);
+        } finally {
+          fs.closeSync(fd);
+        }
+      } catch {
+        header = null;
+      }
+      const badSignature = !header || !check || !check(header);
+      const headText = header ? header.toString("latin1").toLowerCase() : "";
+      const hasMarker = DANGEROUS_MARKERS.some((m) => headText.includes(m));
+      if (badSignature || hasMarker) {
+        for (const f of files) unlinkQuiet(f.path);
+        return res.status(400).json({
+          message: "File content does not match its type — upload a genuine JPG, PNG, WEBP or PDF file.",
+          code: "INVALID_FILE_CONTENT",
+        });
+      }
+    }
+    return next();
+  } catch {
+    return res.status(400).json({ message: "File upload failed" });
+  }
+};
+
 const cookDocUpload = multer({
   storage,
   fileFilter,
-  // 5 MB per file, at most 3 files / 5 fields per request — a single-file
-  // cap alone still allows disk-fill via many small parts.
-  limits: { fileSize: 5 * 1024 * 1024, files: 3, fields: 5 },
+  limits: { fileSize: 2 * 1024 * 1024, files: 3, fields: 5 },
 });
 
-module.exports = { cookDocUpload, cookDocUploadDir: uploadDir };
+module.exports = { cookDocUpload, cookDocUploadDir: uploadDir, validateUploadedContent };

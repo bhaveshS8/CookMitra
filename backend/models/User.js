@@ -1,11 +1,24 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
-// COOKMITRA EVENTS (MVP §17) — canonical roles are UPPERCASE:
-// CUSTOMER, COOK, ADMIN. Lowercase legacy values ("customer"/"cook"/"admin")
-// from the earlier on-demand flow are auto-uppercased by the setter below so
-// old documents, seeds and clients keep working without a data migration.
 const USER_ROLES = ["CUSTOMER", "COOK", "ADMIN"];
+
+const ADDRESS_LABELS = ["Home", "Office", "Parents' Home", "Other"];
+
+const savedAddressSchema = new mongoose.Schema(
+  {
+    label: { type: String, enum: ADDRESS_LABELS, required: [true, "Address label is required"], trim: true },
+    customLabel: { type: String, default: "", trim: true, maxlength: [40, "Label is too long"] },
+    flatNo: { type: String, required: [true, "Flat/house number is required"], trim: true, maxlength: [120, "Flat/house number is too long"] },
+    society: { type: String, required: [true, "Society/building is required"], trim: true, maxlength: [160, "Society/building is too long"] },
+    landmark: { type: String, default: "", trim: true, maxlength: [160, "Landmark is too long"] },
+    city: { type: String, required: [true, "City is required"], trim: true, maxlength: [80, "City is too long"] },
+    lat: { type: Number, min: -90, max: 90 },
+    lng: { type: Number, min: -180, max: 180 },
+    isDefault: { type: Boolean, default: false },
+  },
+  { timestamps: true }
+);
 
 const normalizeRole = (v) => {
   if (v == null) return v;
@@ -29,14 +42,9 @@ const userSchema = new mongoose.Schema(
     },
     phone: {
       type: String,
-      // Optional for Google sign-in accounts (no phone from Google profile).
-      // Still required for email/password registration via route validation.
       default: "",
       trim: true,
     },
-    // COOKMITRA EVENTS spec (§17) names this field `mobile`. `phone` above is
-    // the legacy name used across the app — both are kept in sync (see
-    // pre-validate / pre-save hooks) so either one can be used.
     mobile: {
       type: String,
       default: "",
@@ -48,13 +56,15 @@ const userSchema = new mongoose.Schema(
     },
     password: {
       type: String,
-      // Not required for Google-only accounts (they authenticate via ID token).
-      // Email/password registration still enforces this via route validation.
       required: function () {
         return !this.googleId;
       },
-      minlength: 6,
+      minlength: 8,
       select: false,
+    },
+    tokenVersion: {
+      type: Number,
+      default: 0,
     },
     role: {
       type: String,
@@ -78,14 +88,20 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    preferredLanguage: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: [40, "Language is too long"],
+    },
+    emailVerified: { type: Boolean, default: false },
+    phoneVerified: { type: Boolean, default: false },
+    savedAddresses: { type: [savedAddressSchema], default: [] },
     authProvider: {
       type: String,
       enum: ["local", "google", "local+google"],
       default: "local",
     },
-    // Password-reset (forgot flow): sha256(token) + expiry. The raw token
-    // only ever travels by email (or dev-only response); the hash here is
-    // useless without it.
     resetPasswordToken: {
       type: String,
       default: "",
@@ -100,11 +116,21 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.pre("validate", function (next) {
-  // Normalize role before enum validation so legacy lowercase passes.
   if (this.role != null) this.role = normalizeRole(this.role);
-  // Keep phone <-> mobile in sync (spec §17 uses `mobile`).
   if (!this.mobile && this.phone) this.mobile = this.phone;
   if (!this.phone && this.mobile) this.phone = this.mobile;
+  // Backward compat: legacy users get safe defaults.
+  if (!Array.isArray(this.savedAddresses)) this.savedAddresses = [];
+  // Maintain at most one default address.
+  if (Array.isArray(this.savedAddresses) && this.savedAddresses.length > 1) {
+    let seen = false;
+    for (let i = this.savedAddresses.length - 1; i >= 0; i -= 1) {
+      if (this.savedAddresses[i]?.isDefault) {
+        if (!seen) seen = true;
+        else this.savedAddresses[i].isDefault = false;
+      }
+    }
+  }
   next();
 });
 
@@ -122,12 +148,13 @@ userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// Hot-pathed by role directory scans (complaint escalation, admin lists).
 userSchema.index({ role: 1, status: 1 });
+userSchema.index({ name: 1 });
 
 const User = mongoose.model("User", userSchema);
 
 User.USER_ROLES = USER_ROLES;
 User.normalizeRole = normalizeRole;
+User.ADDRESS_LABELS = ADDRESS_LABELS;
 
 module.exports = User;

@@ -1,20 +1,3 @@
-// Live end-to-end test of the Redis-free SHARED rate-limit store.
-// Run:  ALLOW_LIVE_TESTS=1 node backend/rate-limit.e2e.js
-//        (PowerShell: $env:ALLOW_LIVE_TESTS='1'; node backend/rate-limit.e2e.js)
-//
-// Safety: this script CLEARS rate-limit counters in the target database and
-// boots its own server on PORT 5094, so point MONGODB_URI at a scratch database.
-//
-// What it proves (things a pure unit test cannot):
-//   1. The boot log reports which buckets are MongoDB-backed.
-//   2. The auth bucket really counts hits in MongoDB: with the limit set to 3,
-//      requests 1-3 answer 401 and 4-6 answer exactly 429 — not the 500 that a
-//      broken store would produce.
-//   3. The counter document lands in the `ratelimithits` collection keyed
-//      "<bucket>:<client>".
-//   4. The TTL index on `resetAt` actually exists on the live database (a
-//      model-level index only helps if Mongoose created it).
-//   5. In-memory buckets still serve normally — no collateral damage.
 const { spawn } = require("child_process");
 const mongoose = require("mongoose");
 require("dotenv").config();
@@ -47,7 +30,6 @@ const child = spawn(process.execPath, ["server.js"], {
     ...process.env,
     PORT: String(PORT),
     RATE_LIMIT_SHARED: "auth,strict",
-    // Low enough to prove the shared counter is real, not theoretical.
     RATE_LIMIT_AUTH: String(AUTH_MAX),
   },
   cwd: __dirname,
@@ -81,15 +63,8 @@ const clearCounters = async () => {
 const main = async () => {
   await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 8000 });
 
-  // Clear counters left by an earlier run FIRST: a persisted window would make
-  // every request 429 (correct behaviour, but not a deterministic assertion).
   console.log(`PRE-CLEARED=${await clearCounters()}`);
 
-  // Wait for READINESS, not just liveness. /api/health answers 200 while the
-  // database is still "connecting", and during that window the shared store
-  // deliberately degrades to memory (assertConnected throws -> withFallback), so
-  // the first hit lands in a different counter and the exact-count assertion
-  // below is off by one. Probe only once health reports db=connected.
   let health = null;
   for (let i = 0; i < 60; i++) {
     await sleep(500);
@@ -100,7 +75,6 @@ const main = async () => {
         if (health?.db === "connected") break;
       }
     } catch {
-      /* not up yet */
     }
   }
   step("server boots healthy with the shared store configured", Boolean(health));
@@ -117,8 +91,6 @@ const main = async () => {
     storeLine.trim() || "MISSING"
   );
 
-  // The real assertion: the 429 must land exactly on request AUTH_MAX+1, and a
-  // store failure would surface as a 500 instead.
   const statuses = [];
   for (let i = 0; i < AUTH_MAX * 2; i++) {
     statuses.push(
@@ -162,7 +134,6 @@ const main = async () => {
       .join(" | ")
   );
 
-  // In-memory buckets must be untouched by the shared-store wiring.
   const cooks = await fetch(`${BASE}/api/cooks?limit=3`);
   const body = await cooks.text();
   step(
@@ -186,10 +157,7 @@ main()
       await clearCounters();
       await mongoose.disconnect();
     } catch {
-      /* best effort */
     }
     child.kill();
-    // The spawned server holds the port and mongoose keeps sockets open; exit
-    // explicitly rather than waiting for both to unwind.
     setTimeout(() => process.exit(failures > 0 ? 1 : 0), 800);
   });

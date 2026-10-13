@@ -6,8 +6,6 @@ const SUPPORT_EMAIL = "contactuscookmitra@gmail.com";
 const SUPPORT_PHONE = "+91 9322321831";
 const UPDATED = "September 2026";
 
-// Shared layout for the compliance pages Razorpay requires merchants to
-// publish: Terms, Privacy, Refunds/Cancellation, and Contact.
 const LegalShell = ({ icon: Icon, eyebrow, title, intro, children }) => (
   <div className="dashboard-container legal-page">
     <Link to="/" className="back-link-bar">
@@ -56,8 +54,9 @@ export const TermsConditions = () => (
     <h3>4. Cancellation & refunds</h3>
     <p>
       Cancellations follow our <Link to="/refunds">Cancellation & Refund Policy</Link>:
-      paid bookings cancelled in time are refunded to the original payment method within
-      5–7 business days.
+      paid bookings cancelled in time are eligible for a refund to the original payment method
+      within 5–7 business days of approval. All refunds are reviewed and approved by our team —
+      nothing is refunded automatically.
     </p>
     <h3>5. Your responsibilities</h3>
     <ul>
@@ -110,6 +109,13 @@ export const PrivacyPolicy = () => (
         <strong>Cookies and device info:</strong> we use lightweight cookies to keep you
         logged in and to remember your location preference. We do not use tracking cookies
         for advertising.
+      </li>
+      <li>
+        <strong>Anonymous site analytics:</strong> we count visits using an anonymous
+        browser identifier stored in localStorage (not a cookie) and an approximate
+        city derived from your network IP via a third-party lookup. Raw IP addresses
+        are never sent to or stored on our servers, and city data is approximate —
+        never exact.
       </li>
     </ul>
 
@@ -197,36 +203,40 @@ export const RefundPolicy = () => (
     <h3>1. Free cancellation before acceptance</h3>
     <ul>
       <li>
-        You can cancel a request at any time <strong>before the cook accepts</strong> — there is
-        no charge and the slot is released immediately.
+        You can cancel a request at any time <strong>before the cook accepts</strong> (and up to{" "}
+        <strong>30 minutes before the service start time</strong>) — there is no charge and the
+        slot is released immediately.
       </li>
       <li>
         If the cook declines your request, or if the request expires unanswered, you are never
-        charged.
+        charged. If payment was already collected, a refund is raised for our team&apos;s approval.
       </li>
     </ul>
 
     <h3>2. Cancelling a paid booking</h3>
     <p>
       Once a booking is accepted and paid, you can still cancel — but refunds follow the rules
-      below. You can cancel from <strong>My Bookings</strong> or from the booking page.
+      below. You can cancel from <strong>My Bookings</strong> or from the booking page. No refund
+      is processed automatically: every request is <strong>reviewed and approved by our
+      team</strong> first.
     </p>
     <ul>
       <li>
-        Cancel <strong>before the session start time</strong> and you are eligible for a full
-        refund of the amount paid.
+        Cancel until 30 minutes before the session start time and you are eligible for a full
+        refund of the amount paid. Inside that 30-minute window the booking can no longer be
+        cancelled online — please contact support.
       </li>
       <li>
         Paid bookings are refunded to the <strong>original payment method</strong> (UPI, card,
         net-banking, or wallet).
       </li>
       <li>
-        Refunds typically reach your account within <strong>5–7 business days</strong>, depending
-        on your bank or payment provider.
+        Refunds typically reach your account within <strong>5–7 business days</strong> of approval,
+        depending on your bank or payment provider.
       </li>
       <li>
-        If an automatic refund fails, our team will settle it manually and notify you. Please
-        contact us with your booking ID and Razorpay payment ID.
+        If an approved refund needs follow-up, our team will settle it manually and notify you.
+        Please contact us with your booking ID and Razorpay payment ID.
       </li>
     </ul>
 
@@ -253,7 +263,7 @@ export const RefundPolicy = () => (
       If a session is interrupted or partially completed due to circumstances beyond our control
       (for example, severe weather, a public emergency, or illness that prevents the cook from
       attending), we will work with you to find a fair resolution — which may include a partial
-      refund, rescheduling, or a replacement cook where possible.
+      refund or a replacement cook where possible.
     </p>
 
     <h3>5. Payment-window expiry</h3>
@@ -267,12 +277,109 @@ export const RefundPolicy = () => (
 
     <h3>6. How to request a refund</h3>
     <p>
+      For the full time-based cancellation slabs, see our{" "}
+      <Link to="/customer-cancellation-refund-policy">Customer Cancellation & Refund Policy</Link>.
       For any refund or cancellation issue, contact us with:
     </p>
     <ul>
       <li>Your <strong>booking ID</strong> (from your booking confirmation or receipt).</li>
       <li>Your <strong>Razorpay payment ID</strong> (from the payment receipt).</li>
       <li>A short description of the issue.</li>
+    </ul>
+    <p>
+      Refund help: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> ·{" "}
+      <a href="tel:+919322321831">{SUPPORT_PHONE}</a>. Please include your booking ID and
+      Razorpay payment ID so we can assist you quickly.
+    </p>
+  </LegalShell>
+);
+
+export const CancellationRefundPolicy = () => (
+  <LegalShell
+    icon={RotateCcw}
+    eyebrow="Legal"
+    title="Customer Cancellation & Refund Policy"
+    intro="Exactly when you can cancel a booking and what refund applies. All amounts and percentages are enforced by our backend — what you see here is what the system applies."
+  >
+    <h3>1. Cancellation charges & refunds</h3>
+    <p>
+      The refund percentage applies to the eligible booking amount you paid
+      (after any coupon discount). Non-refundable payment gateway charges, if
+      any, are deducted separately and shown in your cancellation summary.
+    </p>
+    <div className="legal-table-wrap">
+      <table className="legal-table">
+        <thead>
+          <tr>
+            <th>When you cancel</th>
+            <th>Cancellation charge</th>
+            <th>You get back</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Before a cook is assigned</td>
+            <td>0%</td>
+            <td>100% refund</td>
+          </tr>
+          <tr>
+            <td>More than 24 hours before the service</td>
+            <td>10%</td>
+            <td>90% refund</td>
+          </tr>
+          <tr>
+            <td>Within 24 hours before the service</td>
+            <td>25%</td>
+            <td>75% refund</td>
+          </tr>
+          <tr>
+            <td>Within 6 hours before the service</td>
+            <td>50%</td>
+            <td>50% refund</td>
+          </tr>
+          <tr>
+            <td>After the cook reaches your location, or you are a no-show</td>
+            <td>100%</td>
+            <td>No refund</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>
+      Example: a ₹999 booking cancelled within 24 hours carries a 25% charge —
+      refund ₹749.25 (before any non-refundable gateway charges).
+    </p>
+    <h3>2. How cancellation works</h3>
+    <ul>
+      <li>Open your booking and choose <strong>Cancel Booking</strong> — you will first see the exact charge and refund for your booking, calculated by our system.</li>
+      <li>Nothing is cancelled until you confirm. Confirming records the refund for our team&apos;s review.</li>
+      <li>Online cancellation closes <strong>30 minutes before the service start time</strong> — after that, please contact support.</li>
+      <li>Once the service has started, or the cook has reached your venue, online cancellation is no longer available.</li>
+    </ul>
+    <h3>3. If the cook cancels</h3>
+    <ul>
+      <li>If your cook cancels, we first try to find you a suitable alternative cook.</li>
+      <li>If no replacement is available, you receive a <strong>100% refund</strong> of the eligible amount paid — no cancellation penalty applies to you.</li>
+    </ul>
+    <h3>4. No-shows</h3>
+    <ul>
+      <li>If the cook reaches your location and you are unavailable, refuse access, refuse the confirmed service without a valid reason, or cannot be contacted within a reasonable waiting period, the booking is treated as a customer no-show with <strong>no refund</strong>.</li>
+    </ul>
+    <h3>5. Rescheduling</h3>
+    <ul>
+      <li>Booking changes depend on cook availability and the remaining reschedule limit.</li>
+      <li>If a change cannot be accommodated, it is handled as a cancellation plus a fresh booking under the rules above.</li>
+    </ul>
+    <h3>6. Complaints & refund requests</h3>
+    <ul>
+      <li>Use <strong>Report a Problem</strong> on your booking for genuine service issues (cook did not arrive, major service deviation, quality issue, unprofessional behaviour).</li>
+      <li>Please report within <strong>24 hours</strong> of completion. Every complaint is reviewed by our team — complaints are never refunded automatically.</li>
+      <li>No automatic refunds for: change of personal plans, unavailability at the agreed time, a wrong address given by the customer, requests outside the confirmed booking, preferences when the service was properly delivered, or unsupported complaints.</li>
+    </ul>
+    <h3>7. Receiving your refund</h3>
+    <ul>
+      <li>Approved refunds go to the <strong>original payment method</strong> within <strong>5–7 business days</strong>.</li>
+      <li>Track progress on your booking page: Pending → Under Review → Approved → Processing → Processed.</li>
     </ul>
     <p>
       Refund help: <a href={`mailto:${SUPPORT_EMAIL}`}>{SUPPORT_EMAIL}</a> ·{" "}

@@ -12,12 +12,12 @@ import {
 } from "lucide-react";
 import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
-import { SERVICE_DETAILS, formatDate } from "../utils/constants";
+import { SERVICE_DETAILS, formatDate, formatTimeRange12 } from "../utils/constants";
+import { buildRetryState } from "../utils/bookingRetry";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 const WINDOW_MS = 5 * 60 * 1000; // 5-minute acceptance window
-// Calmed for scale: 4s x 1000 waiting users ~= 250 rps sustained. 8s halves
-// that; visibility-change pause below stops background-tab polling entirely.
-const POLL_MS = 8000;
+const POLL_MS = 4000;
 const REDIRECT_S = 6;
 
 const FACTS = [
@@ -33,57 +33,17 @@ const FACTS = [
 
 const SORRY_COPY = {
   expired: {
-    title: "Time's up — no response",
-    body: "The cook didn't accept within 5 minutes, so we've released your slot. Plenty of other chefs are ready for your date!",
+    title: "We couldn't find an available cook",
+    body: "No cook accepted within 5 minutes, so we've released your slot. Try again — plenty of other chefs take new requests every minute!",
   },
   rejected: {
     title: "Request declined",
-    body: "Unfortunately this cook can't take your booking. Let's find another chef who can.",
+    body: "Unfortunately this request can't be served. Let's start a fresh search for another chef.",
   },
   cancelled: {
     title: "Request cancelled",
     body: "Your booking request was cancelled and the slot has been released.",
   },
-};
-
-// Snapshot of the dead request so "Find another cook" can land straight on
-// step 3 (venue + cook list) with the same date/slot, minus the cook who
-// didn't respond. CookBooking.jsx consumes this via location.state.
-const toLocalDayStr = (d) => {
-  if (!d) return "";
-  const dt = d instanceof Date ? d : new Date(d);
-  if (Number.isNaN(dt.getTime())) return "";
-  const p = (n) => String(n).padStart(2, "0");
-  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
-};
-
-const buildRetryState = (b) => {
-  if (!b) return null;
-  const addr = b.addressDetails || {};
-  return {
-    form: {
-      serviceType: b.serviceType,
-      date: toLocalDayStr(b.date),
-      guests: b.guests != null ? String(b.guests) : "4",
-      durationHours: b.durationHours != null ? String(b.durationHours) : "",
-      flatNo: addr.flatNo || "",
-      society: addr.society || "",
-      landmark: addr.landmark || "",
-      city: addr.city || "",
-      customDishes: (b.selectedItems || []).join(", "),
-      notes: b.notes || "",
-    },
-    selectedSlot:
-      b.startTime && b.endTime
-        ? { startTime: b.startTime, endTime: b.endTime }
-        : null,
-    coords:
-      b.location?.lat != null && b.location?.lng != null
-        ? { lat: b.location.lat, lng: b.location.lng }
-        : null,
-    excludeCookId:
-      (typeof b.cook === "string" ? b.cook : b.cook?._id) || null,
-  };
 };
 
 const BookingWaiting = () => {
@@ -97,15 +57,18 @@ const BookingWaiting = () => {
   const [now, setNow] = useState(Date.now());
   const [factIdx, setFactIdx] = useState(0);
   const [cancelling, setCancelling] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [redirectIn, setRedirectIn] = useState(REDIRECT_S);
   const handledRef = useRef(false);
   const aliveRef = useRef(true);
   const pollRef = useRef(null);
 
+  const failCountRef = useRef(0);
   const load = useCallback(async () => {
     try {
       const res = await API.get(`/bookings/${bookingId}`);
       if (!aliveRef.current || handledRef.current) return;
+      failCountRef.current = 0;
       const b = res.data;
       setBooking(b);
       const st = b.status;
@@ -118,7 +81,9 @@ const BookingWaiting = () => {
         setPhase("accepted");
         showToast(`${b.cook?.name || "Your cook"} accepted your request!`, "success");
         setTimeout(() => {
-          if (aliveRef.current) navigate(`/bookings/${bookingId}/pay`, { replace: true });
+          // 100% coupon (nothing payable): server auto-confirms — go to
+          // details, never the payment page.
+          if (aliveRef.current) navigate(Number(b.amount) <= 0 ? `/bookings/${bookingId}` : `/bookings/${bookingId}/pay`, { replace: true });
         }, 1800);
       } else if (["rejected", "cancelled", "expired"].includes(st)) {
         handledRef.current = true;
@@ -128,8 +93,14 @@ const BookingWaiting = () => {
         setPhase("waiting");
       }
     } catch (err) {
-      if (!aliveRef.current) return;
+      if (!aliveRef.current || handledRef.current) return;
       if (err.response?.status === 404) {
+        handledRef.current = true;
+        setPhase("error");
+        return;
+      }
+      failCountRef.current += 1;
+      if (failCountRef.current >= 3) {
         handledRef.current = true;
         setPhase("error");
       }
@@ -139,8 +110,6 @@ const BookingWaiting = () => {
   useEffect(() => {
     aliveRef.current = true;
     load();
-    // Pause polling while the tab is hidden — background tabs otherwise keep
-    // hammering the API for users who switched away mid-wait.
     const startPoll = () => {
       stopPoll();
       pollRef.current = setInterval(() => {
@@ -171,9 +140,26 @@ const BookingWaiting = () => {
     };
   }, [load]);
 
-  // Sorry screen auto-redirects back to finding cooks — carrying the
-  // booking snapshot so the customer lands on step 3 (pick another cook
-  // for the same slot) instead of starting over on step 1.
+  useEffect(() => {
+    const mine = String(bookingId || "");
+    const onAssigned = (e) => {
+      const d = e?.detail || {};
+      if (d.bookingId && String(d.bookingId) !== mine) return;
+      load();
+    };
+    const onExpired = (e) => {
+      const d = e?.detail || {};
+      if (d.bookingId && String(d.bookingId) !== mine) return;
+      load();
+    };
+    window.addEventListener("realtime-booking-assigned", onAssigned);
+    window.addEventListener("realtime-booking-expired", onExpired);
+    return () => {
+      window.removeEventListener("realtime-booking-assigned", onAssigned);
+      window.removeEventListener("realtime-booking-expired", onExpired);
+    };
+  }, [bookingId, load]);
+
   useEffect(() => {
     if (phase !== "sorry") return undefined;
     setRedirectIn(REDIRECT_S);
@@ -195,21 +181,21 @@ const BookingWaiting = () => {
 
   const cancelNow = async () => {
     if (cancelling || handledRef.current) return;
+    setConfirmCancel(false);
     setCancelling(true);
     try {
-      await API.patch(`/bookings/${bookingId}/cancel`);
+      const res = await API.patch(`/bookings/${bookingId}/cancel`);
       handledRef.current = true;
-      setSorryReason("cancelled");
+      setSorryReason(res.data?.status || "cancelled");
       setPhase("sorry");
-      showToast("Request cancelled — the slot has been released.", "info");
+      showToast(res.data?.message || "Request cancelled — the slot has been released.", "info");
     } catch (err) {
       showToast(err.response?.data?.message || "Could not cancel the request", "error");
       setCancelling(false);
+      load();
     }
   };
 
-  // "Find another cook" — back to step 3 with the same plan/slot, so the
-  // customer picks a different chef without re-typing anything.
   const goFindAnotherCook = useCallback(() => {
     navigate("/cook-on-demand", {
       replace: true,
@@ -217,7 +203,6 @@ const BookingWaiting = () => {
     });
   }, [navigate, booking]);
 
-  // Countdown against the server-set 5-minute acceptance window.
   const createdAtMs = booking?.createdAt ? new Date(booking.createdAt).getTime() : null;
   const expiresAtMs = booking?.requestExpiresAt
     ? new Date(booking.requestExpiresAt).getTime()
@@ -225,6 +210,15 @@ const BookingWaiting = () => {
       ? createdAtMs + WINDOW_MS
       : null;
   const remainingMs = expiresAtMs ? Math.max(0, expiresAtMs - now) : WINDOW_MS;
+  useEffect(() => {
+    if (phase !== "waiting" || !expiresAtMs || handledRef.current) return;
+    if (expiresAtMs - Date.now() > 0) return;
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    load();
+  }, [phase, expiresAtMs, now, load]);
   const secondsLeft = Math.ceil(remainingMs / 1000);
   const clockText = `${String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:${String(
     secondsLeft % 60
@@ -232,7 +226,7 @@ const BookingWaiting = () => {
   const progress = Math.max(0, Math.min(1, remainingMs / WINDOW_MS));
   const RING = 2 * Math.PI * 54; // r = 54 in the SVG viewBox
   const service = SERVICE_DETAILS[booking?.serviceType] || {};
-  const cookName = booking?.cook?.name || "the cook";
+  const cookName = booking?.cook?.name || "Your cook";
 
   if (phase === "loading") {
     return (
@@ -246,15 +240,26 @@ const BookingWaiting = () => {
   }
 
   if (phase === "error") {
+    const retryLoad = () => {
+      failCountRef.current = 0;
+      handledRef.current = false;
+      setPhase("loading");
+      load();
+    };
     return (
       <div className="booking-flow-page">
         <div className="bf-card bf-center">
           <XCircle className="bf-sorry-icon" size={56} />
-          <h1 className="bf-title">Booking not found</h1>
-          <p className="bf-sub">We couldn't find this request. It may have been removed.</p>
-          <button className="btn btn-primary bf-btn" onClick={() => navigate("/cook-on-demand")}>
-            <Search size={18} /> Browse cooks
-          </button>
+          <h1 className="bf-title">Couldn't load this request</h1>
+          <p className="bf-sub">We couldn't reach the server or find this request. It may have been removed.</p>
+          <div style={{ display: "flex", gap: "0.6rem", justifyContent: "center", flexWrap: "wrap" }}>
+            <button className="btn btn-primary bf-btn" onClick={retryLoad}>
+              Try again
+            </button>
+            <button className="btn btn-outline bf-btn" onClick={() => navigate("/cook-on-demand")}>
+              <Search size={18} /> Browse cooks
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -294,7 +299,6 @@ const BookingWaiting = () => {
     );
   }
 
-  // phase === "waiting"
   return (
     <div className="booking-flow-page">
       <span className="bf-emoji e1" aria-hidden="true">🥟</span>
@@ -324,27 +328,30 @@ const BookingWaiting = () => {
           </div>
           <div className="bf-wait-copy">
             <h1 className="bf-title">
-              Waiting for <span className="bf-cook-name">{cookName}</span>
+              Finding a cook for you
               <span className="bf-dots" aria-hidden="true"><i>.</i><i>.</i><i>.</i></span>
             </h1>
             <p className="bf-sub">
-              Your request was sent successfully. The cook has about 5 minutes to accept — if they
-              don't respond in time, the slot is released automatically and we'll help you find
-              another chef right away.
+              Your request was sent successfully. We&apos;re contacting available cooks for your selected time —
+              the first to accept gets your booking. If nobody responds in about 5 minutes, the slot is
+              released automatically and you can start a fresh search right away.
+            </p>
+            <p className="bf-sub">
+              Booking ID: <b>{booking?._id ? String(booking._id).slice(-6).toUpperCase() : "—"}</b>
             </p>
           </div>
         </div>
 
         <div className="bf-steps">
           <div className="bf-step done"><CheckCircle2 size={18} /><span>Request sent</span></div>
-          <div className="bf-step active"><UtensilsCrossed size={18} /><span>Cook reviewing</span></div>
+          <div className="bf-step active"><UtensilsCrossed size={18} /><span>Cooks reviewing</span></div>
           <div className="bf-step"><Clock size={18} /><span>Slot confirmed</span></div>
         </div>
 
         <div className="bf-summary">
           <span className="bf-chip"><UtensilsCrossed size={14} /> {service.label || "Home cooking"}</span>
           <span className="bf-chip">📅 {formatDate(booking?.date)}</span>
-          <span className="bf-chip">⏰ {booking?.startTime} – {booking?.endTime}</span>
+          <span className="bf-chip">⏰ {formatTimeRange12(booking?.startTime, booking?.endTime)}</span>
           {booking?.guests ? <span className="bf-chip">👨‍👩‍👧 {booking.guests} guests</span> : null}
         </div>
 
@@ -354,11 +361,20 @@ const BookingWaiting = () => {
         </div>
 
         <div className="bf-actions">
-          <button className="btn btn-outline bf-btn-ghost" onClick={cancelNow} disabled={cancelling}>
+          <button className="btn btn-outline bf-btn-ghost" onClick={() => setConfirmCancel(true)} disabled={cancelling}>
             <XCircle size={16} /> {cancelling ? "Cancelling…" : "Cancel request"}
           </button>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmCancel}
+        title="Cancel this booking request?"
+        message="The cook will be notified and the slot released. This cannot be undone — but you can still find another cook afterwards."
+        confirmLabel="Yes, cancel it"
+        tone="danger"
+        onCancel={() => setConfirmCancel(false)}
+        onConfirm={cancelNow}
+      />
     </div>
   );
 };

@@ -10,12 +10,28 @@ services:
     rootDir: .
     buildCommand: cd frontend && npm ci && npm run build && cd ../backend && npm ci
     startCommand: cd backend && node server.js
-    healthCheckPath: /api/health
+    # Readiness gate (not just liveness): /api/ready returns 200 only when
+    # MongoDB is connected, so Render stops routing to DB-down instances
+    # instead of serving financial operations in a degraded state.
+    healthCheckPath: /api/ready
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: 5000
+      # Business clock (F-08): booking math is IST-anchored in code; the
+      # pinned TZ keeps every other Date call consistent with it.
+      - key: TZ
+        value: Asia/Kolkata
+      # Persistent upload volume mount point (Render Disk → mount at /data,
+      # then UPLOAD_DIR=/data/cook-docs). Without this, verification docs are
+      # lost on redeploy (see docs/UPLOAD_STORAGE.md).
+      # - key: UPLOAD_DIR
+      #   value: /data/cook-docs
+      # Hard gate: refuse to boot without live Razorpay keys + webhook secret.
+      # Set "true" for any deployment that takes real payments.
+      # - key: REQUIRE_PAYMENTS
+      #   value: "true"
       # Mongo: create a free cluster at mongodb.com/atlas and paste the SRV URI,
       # or create a Render MongoDB add-on and reference its internal URI.
       - key: MONGODB_URI
@@ -42,6 +58,29 @@ services:
       # not needed. Set this only if you host the frontend elsewhere.
       # - key: CLIENT_URL
       #   sync: false
+      # ---- Password-reset email (required for "forgot password" to send) ----
+      # Without these, /auth/forgot-password answers a generic message and no
+      # email ever leaves the server (production never returns the dev token).
+      # For Gmail use an App Password (Google account → 2-Step Verification →
+      # App passwords), NOT your login password. Defaults PORT=587/SECURE=false
+      # suit Gmail; uncomment to override.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      # - key: SMTP_PORT
+      #   value: "587"
+      # - key: SMTP_SECURE
+      #   value: "false"
+      # Origin used to build the emailed reset link. MUST be your live domain
+      # (same-origin deploys leave CLIENT_URL empty, and the fallback would
+      # otherwise point the link at localhost:3000).
+      - key: FRONTEND_BASE_URL
+        sync: false
       # ---- Scale knobs (optional; sensible defaults ship in code) ----
       # Mongo pool per instance (default 50) and per-IP rate limits
       # (defaults: 300/min general, 100/15min auth, 30/15min payments).
@@ -53,8 +92,8 @@ services:
       # replicas multiply every bucket by N. The buckets named here are backed
       # by a small MongoDB collection instead (no Redis needed), which keeps
       # the security-critical ones exact across the fleet.
-      # Default "auth,strict"; use "all" to share every bucket (heavier).
+      # Default "auth,strict,otp"; use "all" to share every bucket (heavier).
       # - key: RATE_LIMIT_SHARED
-      #   value: "auth,strict"
+      #   value: "auth,strict,otp"
       # NOTE: the server writes uploads to local disk, so multiple
       # instances need a shared/object store (S3/R2) before scaling out.

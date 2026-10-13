@@ -1,37 +1,47 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import API from "../api/axios";
 import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
 import ReviewForm, { ReviewStars } from "../components/ReviewForm";
 import ComplaintForm from "../components/ComplaintForm";
+import CookAvatar from "../components/CookAvatar";
+import CancelBookingModal, { NoShowModal } from "../components/CancelBookingModal";
+import RescheduleModal from "../components/RescheduleModal";
+import RefundRequestModal from "../components/RefundRequestModal";
 import {
+  formatCurrency,
   formatDate,
   mapsNavigateUrl,
   bookingWhatsAppUrl,
   bookingCookJobWhatsAppUrl,
-  bookingRescheduleWhatsAppUrl,
   hoursCompleteWhatsAppUrl,
   sessionEndDate,
   effectiveServiceWindow,
-  hasServiceHoursStarted,
   formatRemaining,
   isReviewable,
+  isCancelLocked,
+  canRescheduleBooking,
+  isRescheduleLocked,
   timeAgo,
-  localTodayStr,
+  formatTime12,
+  formatTimeRange12,
+  dayTagLabel,
   SERVICE_DETAILS,
 } from "../utils/constants";
+import { useLocalDay } from "../hooks/useLocalDay";
 import {
   ArrowLeft,
   Calendar,
+  CheckCircle2,
+  AlertCircle,
   Clock,
   MapPin,
   Navigation,
   Phone,
   MessageCircle,
   XCircle,
-  CheckCircle2,
-  AlertCircle,
+  CalendarClock,
   Sparkles,
   BellRing,
   Receipt,
@@ -45,25 +55,30 @@ import {
 const BookingDetails = () => {
   const { bookingId } = useParams();
   const user = useSelector((s) => s.auth.user);
+  const today = useLocalDay();
   const showToast = useShowToast();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [cancelling, setCancelling] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [noShowOpen, setNoShowOpen] = useState(false);
+  const [cancelPreview, setCancelPreview] = useState(null);
   const [now, setNow] = useState(Date.now());
-  // Cook enters the customer's OTP to start the service clock.
   const [otpInput, setOtpInput] = useState("");
   const [startingService, setStartingService] = useState(false);
   const [otpError, setOtpError] = useState("");
-  // Reschedule (customer moves an upcoming booking to a new date/time —
-  // duration and fee stay fixed).
-  const [reschedOpen, setReschedOpen] = useState(false);
-  const [rsDate, setRsDate] = useState("");
-  const [rsStart, setRsStart] = useState("");
-  const [freeStarts, setFreeStarts] = useState([]);
-  const [startsLoading, setStartsLoading] = useState(false);
-  const [reschedSaving, setReschedSaving] = useState(false);
-  const [rsError, setRsError] = useState("");
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [refundInfo, setRefundInfo] = useState(null);
+  const [refundOpen, setRefundOpen] = useState(false);
+  const refundAction = new URLSearchParams(location.search).get("action");
+  useEffect(() => {
+    if (refundAction === "refund" && refundInfo?.eligible && !refundOpen) {
+      setRefundOpen(true);
+      navigate(`/bookings/${bookingId}`, { replace: true });
+    }
+  }, [refundAction, refundInfo, refundOpen, bookingId, navigate]);
 
   const fetchDetails = useCallback(async () => {
     setLoading(true);
@@ -81,6 +96,27 @@ const BookingDetails = () => {
   useEffect(() => {
     fetchDetails();
   }, [fetchDetails]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setRefundInfo(null);
+      if (!booking?._id) return;
+      if (user?.role !== "customer") return;
+      if (booking?.payment?.status !== "paid") return;
+      if (["cancelled", "completed", "rejected", "expired"].includes(booking.status)) return;
+      try {
+        const res = await API.get(`/bookings/${booking._id}/refund-eligibility`);
+        if (!cancelled) setRefundInfo(res.data);
+      } catch {
+        if (!cancelled) setRefundInfo(null);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [booking?._id, booking?.status, booking?.payment?.status, user?.role]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30000);
@@ -109,122 +145,38 @@ const BookingDetails = () => {
     }
   };
 
-  const handleCancel = async () => {
-    if (!window.confirm("Are you sure you want to cancel this booking session?")) return;
-    setCancelling(true);
-    try {
-      const res = await API.patch(`/bookings/${bookingId}/cancel`);
-      setBooking((prev) => ({ ...prev, ...res.data }));
-      showToast("Booking cancelled successfully", "info");
-    } catch (err) {
-      showToast(err.response?.data?.message || "Failed to cancel booking", "error");
-    } finally {
-      setCancelling(false);
+  const handleCancelled = (updated) => {
+    if (updated && typeof updated === "object") {
+      setBooking((prev) => ({ ...prev, ...updated }));
+    } else {
+      fetchDetails();
     }
+    setCancelPreview(null);
   };
 
-  /* ── Reschedule helpers ── */
-  const dayInputStr = (d) => {
-    const dt = new Date(d);
-    if (Number.isNaN(dt.getTime())) return "";
-    const p = (n) => String(n).padStart(2, "0");
-    return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
-  };
-  const addHours = (t, h) => {
-    const m = String(t || "").match(/^(\d{1,2}):(\d{2})/);
-    if (!m) return "";
-    const total = Number(m[1]) * 60 + Number(m[2]) + Math.round(Number(h) * 60);
-    if (!Number.isFinite(total)) return "";
-    return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-  };
-  const fmtSlot12 = (t) => {
-    const m = String(t || "").match(/^(\d{1,2}):(\d{2})/);
-    if (!m) return t;
-    let h = Number(m[1]);
-    const ap = h >= 12 ? "PM" : "AM";
-    h = h % 12 || 12;
-    return `${h}:${m[2]} ${ap}`;
-  };
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      setCancelPreview(null);
+      if (!booking?._id) return;
+      if (user?.role !== "customer") return;
+      if (!["requested", "accepted", "confirmed"].includes(booking.status)) return;
+      if (booking?.serviceStartedAt) return;
+      try {
+        const res = await API.get(`/bookings/${booking._id}/cancellation-preview`);
+        if (alive) setCancelPreview(res.data);
+      } catch {
+        if (alive) setCancelPreview(null);
+      }
+    };
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [booking?._id, booking?.status, booking?.serviceStartedAt, user?.role]);
 
-  // Once the service is under way — schedule reached OR cook verified the
-  // OTP — Cancel and Reschedule disappear; it can no longer be moved or
-  // called off here.
-  const serviceStarted = hasServiceHoursStarted(booking);
-  const canReschedule =
-    user?.role === "customer" &&
-    ["requested", "accepted", "confirmed"].includes(booking?.status) &&
-    !serviceStarted;
-
-  // Latest "Rescheduled …" timeline note, if the time was ever moved.
-  const reschedNote =
-    [...(booking?.statusHistory || [])]
-      .reverse()
-      .find((h) => String(h.note || "").startsWith("Rescheduled"))?.note || "";
-  const reschedOldSlot = (() => {
-    const m = String(reschedNote).match(/from (.*) to (.*) by /);
-    return m ? m[1] : "";
-  })();
-
-  const loadFreeStarts = async (dateStr) => {
-    const cuid = booking?.cook?._id || booking?.cook;
-    if (!cuid || !dateStr || !booking?.durationHours) {
-      setFreeStarts([]);
-      return;
-    }
-    setStartsLoading(true);
-    try {
-      const res = await API.get(
-        `/availability/${cuid}?date=${dateStr}&durationHours=${booking.durationHours}`
-      );
-      const list = Array.isArray(res.data) ? res.data : res.data?.slots || [];
-      setFreeStarts(list);
-    } catch {
-      setFreeStarts([]);
-    } finally {
-      setStartsLoading(false);
-    }
-  };
-
-  const openReschedule = () => {
-    setRsError("");
-    setRsStart("");
-    const d = dayInputStr(booking.date) || localTodayStr();
-    setRsDate(d);
-    setReschedOpen(true);
-    loadFreeStarts(d);
-  };
-
-  const handleReschedule = async () => {
-    if (!rsDate || !rsStart) {
-      setRsError("Pick a new date and start time");
-      return;
-    }
-    setReschedSaving(true);
-    setRsError("");
-    try {
-      const res = await API.patch(`/bookings/${bookingId}/reschedule`, {
-        date: rsDate,
-        startTime: rsStart,
-      });
-      setBooking((prev) => ({ ...prev, ...res.data }));
-      setReschedOpen(false);
-      showToast(`Moved to ${rsDate} ${fmtSlot12(rsStart)} — your cook has been notified`, "success");
-    } catch (err) {
-      const msg = err.response?.data?.message || "Could not reschedule — try another time";
-      setRsError(msg);
-      showToast(msg, "error");
-    } finally {
-      setReschedSaving(false);
-    }
-  };
-
-  const reschedWa = bookingRescheduleWhatsAppUrl({
-    cookPhone: booking?.cook?.phone,
-    customerName: user?.name,
-    customerPhone: user?.phone,
-    booking,
-    oldSlot: reschedOldSlot,
-  });
+  const serviceStarted = Boolean(booking?.serviceStartedAt);
+  const cancelLocked = isCancelLocked(booking, now);
 
   const getStatusBadge = (status) => {
     if (booking?.hoursCompleted && ["accepted", "confirmed", "in_progress"].includes(status)) {
@@ -301,16 +253,26 @@ const BookingDetails = () => {
     label: (booking.serviceType || "").replace(/_/g, " "),
   };
   const end = sessionEndDate(booking);
-  // Redefined window: after OTP start this is actual start → actual end.
   const serviceWindow = effectiveServiceWindow(booking);
   const remainingLabel = end ? formatRemaining(end, now) : null;
   const isActive = ["requested", "accepted", "confirmed", "in_progress"].includes(booking.status);
-  // OTP service-start state.
+  const canCancel =
+    isActive &&
+    !serviceStarted &&
+    user?.role !== "admin" &&
+    booking.status !== "in_progress" &&
+    !cancelLocked;
   const sessionLive = ["accepted", "confirmed", "in_progress"].includes(booking.status);
-  const showOtpCard =
-    user?.role === "customer" && sessionLive && booking.serviceOtp && !booking.serviceStartedAt;
   const showOtpForm =
     user?.role === "cook" && sessionLive && !booking.serviceStartedAt;
+  const canReschedule = canRescheduleBooking(booking, user, now);
+  const reschedulableStatus =
+    ["requested", "accepted", "confirmed"].includes(booking.status) &&
+    !serviceStarted &&
+    !booking.cookArrived &&
+    !booking.hoursCompleted;
+  const showRescheduleLockedNote =
+    reschedulableStatus && user?.role === "customer" && !canReschedule;
   const startedAtLabel = booking.serviceStartedAt
     ? new Date(booking.serviceStartedAt).toLocaleString("en-IN", {
         day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
@@ -323,8 +285,6 @@ const BookingDetails = () => {
     customerPhone: user?.phone,
     booking,
   });
-  // After payment the cook needs the customer's name, number and location —
-  // prefer the server-built job sheet link, fall back to the client builder.
   const isPaid = booking?.payment?.status === "paid";
   const jobSheetWa = isPaid
     ? booking.cookWhatsappUrl ||
@@ -346,8 +306,6 @@ const BookingDetails = () => {
         customerName: user?.name,
       }));
 
-  // Journey tracker: where is this booking in its life? Note "accepted"
-  // means the cook said yes but payment may still be pending.
   const journeySteps = [
     { key: "requested", label: "Requested", hint: "Waiting for cook" },
     {
@@ -369,6 +327,33 @@ const BookingDetails = () => {
         : booking?.status === "expired"
           ? "Expired"
           : "";
+
+  const refundLine = (() => {
+    if (user?.role === "cook") return "";
+    if (booking?.status !== "cancelled") return "";
+    const pay = booking?.payment || {};
+    if (pay.status !== "paid") return "";
+    const amt = pay.refundAmount || pay.paidAmount || booking?.amount;
+    const amtLabel = amt ? ` of ${formatCurrency(amt)}` : "";
+    if (pay.refundStatus === "processed") {
+      return `Refund${amtLabel} initiated — it reaches your account in 5–7 business days.`;
+    }
+    if (pay.refundStatus === "manual") {
+      return pay.testMode
+        ? "Test payment — no real money moved."
+        : "Your refund will be settled manually within 5–7 business days.";
+    }
+    if (pay.refundStatus === "failed") {
+      return "The approved refund hit a gateway error — our team is following up.";
+    }
+    if (pay.refundStatus === "rejected") {
+      return "The refund request was declined — please contact support if you need help.";
+    }
+    if (pay.refundStatus === "pending") {
+      return "Refund requested — our team will review it shortly.";
+    }
+    return "Our team will review your refund shortly.";
+  })();
 
   return (
     <div className="bd-wrap">
@@ -392,7 +377,6 @@ const BookingDetails = () => {
         </Link>
       </div>
 
-      {/* Hero */}
       <div className="bd-hero">
         <div className="bd-hero-top">
           <span className="bd-eyebrow">
@@ -406,13 +390,24 @@ const BookingDetails = () => {
         </p>
         <div className="bd-hero-cookline">
           <span className="bd-hero-cook-avatar" aria-hidden="true">
-            {booking.cook?.name?.[0]?.toUpperCase() || "C"}
+            <CookAvatar photoUrl={booking.cook?.photoUrl} name={booking.cook?.name} alt="" />
           </span>
           <span>Hosted by <strong>{booking.cook?.name || "your assigned cook"}</strong></span>
         </div>
         <div className="bd-hero-facts">
           <span className="bd-fact-chip"><Calendar size={13} /> {formatDate(booking.date)}</span>
-          <span className="bd-fact-chip"><Clock size={13} /> {serviceWindow.startTime} – {serviceWindow.endTime}{booking.serviceStartedAt ? " (actual)" : ""}</span>
+          {user?.role === "cook" && (() => {
+            const tag = dayTagLabel(booking, today);
+            return tag ? (
+              <span
+                className={`bd-fact-chip cook-day-tag ${tag === "Today" ? "is-today" : "is-tomorrow"}`}
+                aria-label={`This booking is for ${tag.toLowerCase()}`}
+              >
+                {tag}
+              </span>
+            ) : null;
+          })()}
+          <span className="bd-fact-chip"><Clock size={13} /> {formatTimeRange12(serviceWindow.startTime, serviceWindow.endTime)}{booking.serviceStartedAt ? " (actual)" : ""}</span>
           {booking.durationHours && (
             <span className="bd-fact-chip">{booking.durationHours} hr{Number(booking.durationHours) === 1 ? "" : "s"}</span>
           )}
@@ -425,7 +420,6 @@ const BookingDetails = () => {
         </div>
       </div>
 
-      {/* Journey tracker */}
       {!journeyEndedBad && journeyIdx >= 0 && (
         <ol className="bd-journey" aria-label="Booking progress">
           {journeySteps.map((s, i) => (
@@ -454,13 +448,16 @@ const BookingDetails = () => {
           <span>
             This booking {endedLabel.toLowerCase()}
             {booking.status === "rejected" ? " — try another cook or time." : " — the slot is free again."}
+            {booking.status === "cancelled" && refundLine && (
+              <>
+                <br />
+                {refundLine}
+              </>
+            )}
           </span>
         </div>
       )}
 
-      {/* NOTE: no arrival banner here by design — "cook has reached your
-          location" is delivered only as an in-app notification (type
-          "cook_arrived"), not on the booking details page. */}
       {booking.hoursCompleted && !booking.review && (
         <div className="bd-banner warn">
           <BellRing size={18} />
@@ -470,123 +467,6 @@ const BookingDetails = () => {
               <MessageCircle size={15} /> Hours Done on WhatsApp
             </a>
           )}
-        </div>
-      )}
-      {reschedNote && (
-        <div className="bd-banner info">
-          <Clock size={18} />
-          <span>{reschedNote}. Session length unchanged.</span>
-          {user?.role === "customer" && reschedWa && (
-            <a href={reschedWa} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">
-              <MessageCircle size={15} /> Send update to cook
-            </a>
-          )}
-        </div>
-      )}
-
-      {/* Reschedule panel (customer moves upcoming bookings; duration fixed) */}
-      {reschedOpen && canReschedule && (
-        <div className="bd-card bd-reschedule-card">
-          <h3 className="bd-card-head">
-            <Calendar size={18} /> Move to a new time
-          </h3>
-          <p className="bd-rs-hint">
-            Session stays {booking.durationHours} hr{Number(booking.durationHours) === 1 ? "" : "s"} — only the date and start
-            time change. Your cook is notified instantly.
-          </p>
-          <div className="bd-rs-grid">
-            <div className="meta-field">
-              <label>New date</label>
-              <input
-                type="date"
-                className="form-control"
-                value={rsDate}
-                min={localTodayStr()}
-                onChange={(e) => {
-                  setRsDate(e.target.value);
-                  setRsStart("");
-                  setRsError("");
-                  loadFreeStarts(e.target.value);
-                }}
-              />
-            </div>
-            <div className="meta-field">
-              <label>New start time</label>
-              {startsLoading ? (
-                <span className="bd-mini-note">Checking free times…</span>
-              ) : freeStarts.length === 0 ? (
-                <span className="bd-mini-note">
-                  No {booking.durationHours}-hr starts that day — try another date.
-                </span>
-              ) : (
-                <div className="slot-list" role="radiogroup" aria-label="Free start times">
-                  {freeStarts.map((s) => (
-                    <button
-                      key={s.startTime}
-                      type="button"
-                      role="radio"
-                      aria-checked={rsStart === s.startTime}
-                      className={`slot-chip ${rsStart === s.startTime ? "selected" : ""}`}
-                      onClick={() => {
-                        setRsStart(s.startTime);
-                        setRsError("");
-                      }}
-                    >
-                      <Clock size={15} /> {fmtSlot12(s.startTime)}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-          {rsStart && (
-            <p className="bd-rs-pick">
-              New slot: <strong>{rsDate} · {fmtSlot12(rsStart)} – {fmtSlot12(addHours(rsStart, booking.durationHours))}</strong>
-            </p>
-          )}
-          {rsError && (
-            <div className="error-alert-banner" style={{ marginBottom: "0.75rem" }}>
-              <AlertCircle size={16} /> {rsError}
-            </div>
-          )}
-          <div className="bd-rs-actions">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              disabled={!rsStart || reschedSaving}
-              onClick={handleReschedule}
-            >
-              <CheckCircle2 size={16} /> {reschedSaving ? "Moving…" : "Confirm new time"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline btn-sm"
-              onClick={() => setReschedOpen(false)}
-              disabled={reschedSaving}
-            >
-              Keep current time
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Service-start OTP: customer shows it, cook enters it. The hours
-          below only start counting once the code is verified. */}
-      {showOtpCard && (
-        <div className="bd-card bd-otp bd-otp-card">
-          <h3 className="bd-card-head center">
-            <Clock size={18} /> Your service-start code
-          </h3>
-          <div
-            className="bd-otp-code"
-            aria-label={`Your service start code is ${booking.serviceOtp}`}
-          >
-            {booking.serviceOtp}
-          </div>
-          <p className="bd-otp-sub">
-            Share this 4-digit code with {booking.cook?.name || "your cook"} when they arrive —
-            your cooking hours start counting only after they enter it.
-          </p>
         </div>
       )}
 
@@ -602,7 +482,7 @@ const BookingDetails = () => {
             </div>
             <div className="bd-clock-meta">
               <span>Started {startedAtLabel}</span>
-              {serviceWindow.endTime && <span>Ends {serviceWindow.endTime}</span>}
+              {serviceWindow.endTime && <span>Ends {formatTime12(serviceWindow.endTime)}</span>}
             </div>
             <p className="bd-clock-sub">
               {overdue
@@ -613,21 +493,18 @@ const BookingDetails = () => {
         );
       })()}
 
-      {/* Service timings: actual OTP clock when the service started, else
-          the scheduled slot (covers old bookings from before the OTP clock).
-          Hidden for requests that never became a service. */}
       {(booking.serviceStartedAt ||
         ["in_progress", "completed"].includes(booking.status) ||
         booking.hoursCompleted) && (() => {
         const started = !!booking.serviceStartedAt;
         const startLabel = started
           ? startedAtLabel
-          : `${formatDate(booking.date)} • ${booking.startTime || ""}`;
+          : `${formatDate(booking.date)} • ${formatTime12(booking.startTime)}`;
         const endLabel = started && booking.serviceEndsAt
           ? new Date(booking.serviceEndsAt).toLocaleString("en-IN", {
               day: "numeric", month: "short", hour: "numeric", minute: "2-digit",
             })
-          : `${formatDate(booking.date)} • ${booking.endTime || ""}`;
+          : `${formatDate(booking.date)} • ${formatTime12(booking.endTime)}`;
         return (
           <div className="bd-card bd-timings-card">
             <h3 className="bd-card-head">
@@ -699,46 +576,46 @@ const BookingDetails = () => {
         </div>
       )}
 
-      {/* Booking summary: cook + order in one card
-          (session facts live in the hero chips above) */}
       <div className="bd-card">
         <h3 className="bd-card-head">
           <Receipt size={18} /> Booking Summary
         </h3>
 
-        {/* Cook */}
-        <div className="bd-cook">
-          <div className="bd-cook-avatar" aria-hidden="true">
-            {booking.cook?.name?.[0]?.toUpperCase() || "C"}
-          </div>
-          <div>
-            <div className="bd-cook-name">{booking.cook?.name || "Assigned Cook"}</div>
-            <div className="bd-cook-sub">
-              {booking.cookServiceArea || "Verified cook"}
+        {user?.role !== "cook" && (
+          <>
+            <div className="bd-cook">
+              <div className="bd-cook-avatar" aria-hidden="true">
+                <CookAvatar photoUrl={booking.cook?.photoUrl} name={booking.cook?.name} alt="" />
+              </div>
+              <div>
+                <div className="bd-cook-name">{booking.cook?.name || "Assigned Cook"}</div>
+                <div className="bd-cook-sub">
+                  {booking.cookServiceArea || "Verified cook"}
+                </div>
+                {booking.cook?.phone && (
+                  <div className="bd-cook-phone">
+                    <Phone size={13} /> {booking.cook.phone}
+                  </div>
+                )}
+              </div>
             </div>
-            {booking.cook?.phone && (
-              <div className="bd-cook-phone">
-                <Phone size={13} /> {booking.cook.phone}
+            {(booking.cook?.phone || jobSheetWa || waToCook) && (
+              <div className="bd-row-actions">
+                {booking.cook?.phone && (
+                  <a href={`tel:${booking.cook.phone}`} className="btn btn-outline btn-sm">
+                    <Phone size={15} /> Call
+                  </a>
+                )}
+                {(jobSheetWa || waToCook) && (
+                  <a href={jobSheetWa || waToCook} target="_blank" rel="noreferrer" className="btn btn-success btn-sm">
+                    <MessageCircle size={15} /> {jobSheetWa ? "Send details to cook" : "WhatsApp Cook"}
+                  </a>
+                )}
               </div>
             )}
-          </div>
-        </div>
-        {(booking.cook?.phone || user?.role !== "cook" || jobSheetWa || waToCook) && (
-          <div className="bd-row-actions">
-            {booking.cook?.phone && (
-              <a href={`tel:${booking.cook.phone}`} className="btn btn-outline btn-sm">
-                <Phone size={15} /> Call
-              </a>
-            )}
-            {(jobSheetWa || waToCook) && (
-              <a href={jobSheetWa || waToCook} target="_blank" rel="noreferrer" className="btn btn-success btn-sm">
-                <MessageCircle size={15} /> {jobSheetWa ? "Send details to cook" : "WhatsApp Cook"}
-              </a>
-            )}
-          </div>
+          </>
         )}
 
-        {/* Order (only when there is something in it) */}
         {(booking.selectedItems?.length > 0 || booking.notes) && (
           <>
             <hr className="bd-sec-div" />
@@ -761,9 +638,38 @@ const BookingDetails = () => {
         )}
       </div>
 
-      {/* Venue card — hidden for customers ("user"): they already know their
-          own address. Cooks (and admins) still see it to navigate to the
-          customer's location. */}
+      {user?.role === "cook" && (
+        <div className="bd-card">
+          <h3 className="bd-card-head">
+            <User size={18} /> Customer
+          </h3>
+          <div className="bd-cook">
+            <div className="bd-cook-avatar" aria-hidden="true">
+              {booking.customer?.name?.[0]?.toUpperCase() || "C"}
+            </div>
+            <div>
+              <div className="bd-cook-name">{booking.customer?.name || "Customer"}</div>
+              {booking.customer?.phone ? (
+                <div className="bd-cook-phone">
+                  <Phone size={13} /> {booking.customer.phone}
+                </div>
+              ) : (
+                <div className="bd-cook-sub">
+                  Number is shared once you accept this booking.
+                </div>
+              )}
+            </div>
+          </div>
+          {booking.customer?.phone && (
+            <div className="bd-row-actions">
+              <a href={`tel:${booking.customer.phone}`} className="btn btn-primary btn-sm">
+                <Phone size={15} /> Call Customer
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+
       {user?.role !== "customer" && (
         <div className="bd-card bd-summary-card">
           <h3 className="bd-card-head">
@@ -772,16 +678,14 @@ const BookingDetails = () => {
           <p className="bd-venue-addr">{booking.address}</p>
           {mapsNavigateUrl(booking) && (
             <div className="bd-row-actions">
-              <a href={mapsNavigateUrl(booking)} target="_blank" rel="noreferrer" className="btn btn-primary btn-sm">
-                <Navigation size={15} /> {user?.role === "cook" ? "Go to Customer Location" : "Open in Google Maps"}
+              <a href={mapsNavigateUrl(booking)} target="_blank" rel="noreferrer" className="btn btn-primary">
+                <Navigation size={17} /> {user?.role === "cook" ? "Go to Customer Location" : "Open in Google Maps"}
               </a>
             </div>
           )}
         </div>
       )}
 
-      {/* Timeline (admin only — hidden on customer/cook logins; customers
-          still see the reschedule banner above when the time was moved) */}
       {booking.statusHistory?.length > 0 && user?.role === "admin" && (
         <div className="bd-card bd-venue-card">
           <h3 className="bd-card-head">
@@ -801,28 +705,215 @@ const BookingDetails = () => {
         </div>
       )}
 
-      {/* Actions — one of each: move, cancel. Rendered only when at least
-          one applies, so completed/cancelled/expired bookings never show an
-          empty bar. Contextual shares live in their banners. */}
-      {(canReschedule || (isActive && !serviceStarted && user?.role !== "admin")) && (
+      {Array.isArray(booking.reschedules) && booking.reschedules.length > 0 && (
+        <div className="bd-card bd-venue-card">
+          <h3 className="bd-card-head">
+            <CalendarClock size={18} /> Reschedule History
+          </h3>
+          <div className="bd-tl-list">
+            {booking.reschedules.map((r, i) => {
+              const cookChanged =
+                r.fromCook && r.toCook && String(r.fromCook) !== String(r.toCook);
+              return (
+                <div key={i} className="bd-tl-row">
+                  <span className="badge badge-blue">
+                    {r.at ? new Date(r.at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "Moved"}
+                  </span>
+                  <span className="bd-tl-meta">
+                    Previous: {r.fromDate ? formatDate(r.fromDate) : "—"}
+                    {r.fromStartTime ? ` • ${formatTime12(r.fromStartTime)}${r.fromEndTime ? ` – ${formatTime12(r.fromEndTime)}` : ""}` : ""}
+                    {r.fromCookName ? ` • Cook: ${r.fromCookName}` : ""}
+                    <br />
+                    Changed to: {r.toDate ? formatDate(r.toDate) : "—"}
+                    {r.toStartTime ? ` • ${formatTime12(r.toStartTime)}${r.toEndTime ? ` – ${formatTime12(r.toEndTime)}` : ""}` : ""}
+                    {r.toCookName ? ` • Cook: ${r.toCookName}` : cookChanged ? " • Cook reassigned" : ""}
+                    {r.reason ? (
+                      <>
+                        <br />
+                        Reason: {r.reason}
+                      </>
+                    ) : null}
+                    {r.by ? (
+                      <>
+                        <br />
+                        Changed by: {String(r.by).charAt(0).toUpperCase() + String(r.by).slice(1)}
+                      </>
+                    ) : null}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {user?.role === "customer" && refundInfo && (() => {
+        const rs = refundInfo.refundStatus || booking?.payment?.refundStatus || "none";
+        const amt = refundInfo.refundAmount || refundInfo.paidAmount || booking?.payment?.paidAmount || booking?.amount;
+        if (refundInfo.eligible) {
+          return (
+            <div className="bd-card bd-refund-card" role="region" aria-label="Refund available">
+              <h3 className="bd-card-head">
+                <AlertCircle size={18} /> Service not completed
+              </h3>
+              <p className="bd-note-hint">
+                {refundInfo.scheduledEnd
+                  ? `Scheduled end: ${new Date(refundInfo.scheduledEnd).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}. `
+                  : ""}
+                Refund request available because the service was not marked completed.
+              </p>
+              <div className="bd-row-actions">
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => setRefundOpen(true)}>
+                  <Receipt size={16} /> Request refund
+                </button>
+              </div>
+            </div>
+          );
+        }
+        if (rs === "pending" || rs === "processing") {
+          return (
+            <div className="bd-card bd-refund-card" role="status">
+              <h3 className="bd-card-head">
+                <Clock size={18} /> Refund request under review
+              </h3>
+              <p className="bd-note-hint">
+                Requested{amt ? `: ${formatCurrency(amt)}` : ""}
+                {refundInfo.refundRequestedAt
+                  ? ` · Submitted ${new Date(refundInfo.refundRequestedAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}`
+                  : ""}. Our admin team will review it shortly.
+              </p>
+            </div>
+          );
+        }
+        if (rs === "failed" || rs === "manual") {
+          return (
+            <div className="bd-card bd-refund-card" role="status">
+              <h3 className="bd-card-head">
+                <Clock size={18} /> Refund processing
+              </h3>
+              <p className="bd-note-hint">
+                {amt ? `${formatCurrency(amt)} · ` : ""}Our team is completing your refund — we will notify you.
+              </p>
+            </div>
+          );
+        }
+        if (rs === "processed") {
+          const paid = Number(refundInfo.paidAmount || booking?.payment?.paidAmount || booking?.amount || 0);
+          const refunded = Number(refundInfo.refundAmount || 0);
+          const isPartial = paid > 0 && refunded > 0 && refunded < paid;
+          const remaining = isPartial ? paid - refunded : 0;
+          return (
+            <div className="bd-card bd-refund-card is-done" role="status">
+              <h3 className="bd-card-head">
+                <CheckCircle2 size={18} /> {isPartial ? "Partial refund completed" : "Refund completed"}
+              </h3>
+              <p className="bd-note-hint">
+                {isPartial
+                  ? `Refund of ${formatCurrency(refunded)} processed (from ${formatCurrency(paid)} paid). Remaining unrefunded: ${formatCurrency(remaining)}.`
+                  : `Refunded${amt ? `: ${formatCurrency(amt)}` : ""} — it reaches your account in 5–7 business days.`}
+                {refundInfo.refundAdminNote ? ` Note: ${refundInfo.refundAdminNote}` : ""}
+              </p>
+            </div>
+          );
+        }
+        if (rs === "rejected") {
+          return (
+            <div className="bd-card bd-refund-card" role="status">
+              <h3 className="bd-card-head">
+                <XCircle size={18} /> Refund request rejected
+              </h3>
+              <p className="bd-note-hint">
+                Reason: {refundInfo.refundAdminNote || "Reviewed by our team — please contact support if you need help."}
+              </p>
+            </div>
+          );
+        }
+        return null;
+      })()}
+
+      {user?.role === "customer" && cancelPreview?.canCancel && (
+        <div className="bd-card bd-cancel-card" role="status">
+          <h3 className="bd-card-head">
+            <XCircle size={18} /> Cancellation
+          </h3>
+          <p className="bd-note-hint">You can cancel this booking.</p>
+          <dl className="cancel-breakdown">
+            <div><dt>Cancellation charge ({cancelPreview.cancellationChargePercent}%)</dt><dd>{formatCurrency(cancelPreview.bookingAmount - cancelPreview.grossRefund)}</dd></div>
+            <div className="cancel-total"><dt>Estimated refund</dt><dd>{formatCurrency(cancelPreview.finalRefund)}</dd></div>
+          </dl>
+          <p className="bd-mini-note">
+            Non-refundable payment charges may apply.{" "}
+            <Link to="/customer-cancellation-refund-policy">Cancellation & Refund Policy</Link>
+          </p>
+        </div>
+      )}
+      {user?.role === "customer" && cancelPreview && !cancelPreview.canCancel && ["requested", "accepted", "confirmed"].includes(booking.status) && (
+        <div className="bd-card bd-cancel-card" role="status">
+          <h3 className="bd-card-head">
+            <XCircle size={18} /> Cancellation unavailable
+          </h3>
+          <p className="bd-note-hint">{cancelPreview.message || "The service has already started."}</p>
+        </div>
+      )}
+      {booking.status === "cancelled" && booking.cancellationInfo?.cancelledAt && (
+        <div className="bd-card bd-cancel-card" role="status">
+          <h3 className="bd-card-head">
+            <XCircle size={18} /> Cancellation details
+          </h3>
+          <dl className="cancel-breakdown">
+            <div><dt>Booking amount</dt><dd>{formatCurrency(booking.cancellationInfo.bookingAmount)}</dd></div>
+            <div><dt>Cancellation charge ({booking.cancellationInfo.cancellationChargePercentage}%)</dt><dd>{formatCurrency(booking.cancellationInfo.bookingAmount - booking.cancellationInfo.grossRefundAmount)}</dd></div>
+            <div className="cancel-total"><dt>Refund</dt><dd>{formatCurrency(booking.cancellationInfo.finalRefundAmount)}</dd></div>
+            <div><dt>Refund status</dt><dd>{String(booking.cancellationInfo.refundStatus || "").replace(/_/g, " ")}</dd></div>
+            {booking.cancellationInfo.refundReference && (
+              <div><dt>Refund reference</dt><dd>{booking.cancellationInfo.refundReference}</dd></div>
+            )}
+          </dl>
+          <p className="bd-mini-note">
+            <Link to="/customer-cancellation-refund-policy">Cancellation & Refund Policy</Link>
+          </p>
+        </div>
+      )}
+
+      {(canCancel ||
+        canReschedule ||
+        showRescheduleLockedNote ||
+        (isActive && !serviceStarted && user?.role !== "admin" && cancelLocked)) && (
         <div className="bd-actionbar">
           {canReschedule && (
             <button
+              type="button"
               className="btn btn-outline btn-sm"
-              onClick={() => (reschedOpen ? setReschedOpen(false) : openReschedule())}
+              onClick={() => setRescheduleOpen(true)}
             >
-              <Calendar size={16} /> {reschedOpen ? "Close reschedule" : "Reschedule"}
+              <CalendarClock size={16} /> Reschedule
             </button>
           )}
-          {isActive && !serviceStarted && user?.role !== "admin" && (
-            <button className="btn btn-danger-outline btn-sm" onClick={handleCancel} disabled={cancelling}>
+          {canCancel && (
+            <button className="btn btn-danger-outline btn-sm" onClick={() => setConfirmCancel(true)}>
               <XCircle size={16} />{" "}
-              {cancelling
-                ? "Cancelling..."
-                : booking.status === "requested"
-                  ? "Cancel Request"
-                  : "Cancel Booking"}
+              {booking.status === "requested"
+                ? "Cancel Request"
+                : "Cancel Booking"}
             </button>
+          )}
+          {user?.role === "cook" && String(booking.cook?._id || booking.cook) === String(user?._id || user?.id) && ["accepted", "confirmed", "in_progress"].includes(booking.status) && !serviceStarted && (
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => setNoShowOpen(true)}>
+              <AlertCircle size={16} /> Mark customer no-show
+            </button>
+          )}
+          {!canCancel && cancelLocked && (
+            <p className="bd-mini-note" style={{ margin: 0 }}>
+              Cancellation closes 30 minutes before the start time — please contact
+              support for help with this booking.
+            </p>
+          )}
+          {showRescheduleLockedNote && !canReschedule && (
+            <p className="bd-mini-note" style={{ margin: 0 }}>
+              {isRescheduleLocked(booking, now)
+                ? "Rescheduling closes 30 minutes before the start time — please contact support for help with this booking."
+                : "This booking has already been rescheduled twice — please contact support if you need another change."}
+            </p>
           )}
         </div>
       )}
@@ -839,16 +930,34 @@ const BookingDetails = () => {
           />
         </div>
       )}
-      {/* Cook-only: report an issue about this customer to the admin. */}
       {user?.role === "cook" && booking.customer && (
         <div className="bd-card bd-review-card">
           <h3 className="bd-card-head">
             <ShieldAlert size={18} /> Report an issue
           </h3>
-          <p className="bd-rs-hint">
+          <p className="bd-note-hint">
             Faced a problem with {booking.customer?.name || "this customer"}? Tell our team — we review every complaint.
           </p>
-          <ComplaintForm bookingId={booking._id} customerName={booking.customer?.name} />
+          <ComplaintForm
+            bookingId={booking._id}
+            filedBy="cook"
+            counterpartyName={booking.customer?.name}
+          />
+        </div>
+      )}
+      {user?.role === "customer" && booking.cook && (
+        <div className="bd-card bd-review-card">
+          <h3 className="bd-card-head">
+            <ShieldAlert size={18} /> Report an issue
+          </h3>
+          <p className="bd-note-hint">
+            Faced a problem with {booking.cook?.name || "your cook"} or this session? Tell our team — we review every complaint.
+          </p>
+          <ComplaintForm
+            bookingId={booking._id}
+            filedBy="customer"
+            counterpartyName={booking.cook?.name}
+          />
         </div>
       )}
       {booking.status === "completed" && booking.review && user?.role !== "customer" && (
@@ -875,6 +984,49 @@ const BookingDetails = () => {
             </div>
           )}
         </div>
+      )}
+      {confirmCancel && (
+        <CancelBookingModal
+          bookingId={booking._id}
+          onClose={() => setConfirmCancel(false)}
+          onCancelled={handleCancelled}
+        />
+      )}
+      {noShowOpen && (
+        <NoShowModal
+          bookingId={booking._id}
+          onClose={() => setNoShowOpen(false)}
+          onMarked={(updated) => {
+            if (updated && typeof updated === "object") setBooking((prev) => ({ ...prev, ...updated }));
+            else fetchDetails();
+          }}
+        />
+      )}
+      {rescheduleOpen && (
+        <RescheduleModal
+          booking={booking}
+          onClose={() => setRescheduleOpen(false)}
+          onRescheduled={(updated) => {
+            if (updated && typeof updated === "object") {
+              setBooking((prev) => ({ ...prev, ...updated }));
+            } else {
+              fetchDetails();
+            }
+          }}
+        />
+      )}
+      {refundOpen && (
+        <RefundRequestModal
+          booking={booking}
+          eligibility={refundInfo}
+          onClose={() => setRefundOpen(false)}
+          onRequested={() => {
+            fetchDetails();
+            API.get(`/bookings/${booking._id}/refund-eligibility`)
+              .then((res) => setRefundInfo(res.data))
+              .catch(() => setRefundInfo(null));
+          }}
+        />
       )}
     </div>
   );

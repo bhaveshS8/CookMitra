@@ -1,18 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 
-// CustomCalendar — modern popup calendar for booking date fields.
-// Fully styled month grid (the native date popup is OS-controlled and
-// can't be branded). Controlled by YYYY-MM-DD strings — same shape as
-// <input type="date"> so it drops into the booking forms directly.
-//
-// Props:
-//   value    — selected "YYYY-MM-DD" (or "" for none)
-//   min      — earliest selectable "YYYY-MM-DD" (optional)
-//   max      — latest selectable "YYYY-MM-DD" (optional)
-//   onChange — (dateStr) => void
-//   id       — field id for the label htmlFor (optional)
-//   placeholder — field text when nothing is picked
 const parseDay = (s) => {
   const m = String(s || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
@@ -60,21 +48,17 @@ const CustomCalendar = ({ value, min, max, onChange, id, placeholder = "Pick a d
   const [open, setOpen] = useState(false);
   const parsed = parseDay(value);
   const today = parseDay(todayStr());
-  // Month currently on display — selected month, else today.
   const [view, setView] = useState(() =>
     parsed ? { y: parsed.y, m: parsed.m } : { y: today.y, m: today.m }
   );
   const wrapRef = useRef(null);
   const fieldRef = useRef(null);
 
-  // When the value changes from outside (quick chips, draft restore),
-  // follow it with the displayed month.
   useEffect(() => {
     if (parsed) setView({ y: parsed.y, m: parsed.m });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
-  // Close on Escape and hand focus back to the field.
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => {

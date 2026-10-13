@@ -4,10 +4,6 @@ import API from "../api/axios";
 const TOKEN_KEY = "token";
 const USER_KEY = "user";
 
-// Backend stores spec-UPPERCASE roles (CUSTOMER/COOK/ADMIN, §17) while the
-// whole frontend compares lowercase ("customer"/"cook"/"admin"). Normalize
-// once at the auth boundary so every screen, guard and redirect keeps working
-// regardless of what case the API (or an old localStorage entry) returns.
 export const normalizeRole = (role) => {
   if (typeof role !== "string") return role;
   const lower = role.toLowerCase();
@@ -25,8 +21,6 @@ const normalizeUser = (user) => {
 
 const loadStored = () => {
   try {
-    // Persistent session first, then session-only ("Keep me signed in"
-    // unchecked stores the token in sessionStorage instead).
     const token = localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
     const rawUser =
       localStorage.getItem(USER_KEY) || sessionStorage.getItem(USER_KEY);
@@ -41,11 +35,13 @@ const loadStored = () => {
 
 const persist = (token, user, persistent = true) => {
   const store = persistent ? localStorage : sessionStorage;
+  const other = persistent ? sessionStorage : localStorage;
   try {
+    other.removeItem(TOKEN_KEY);
+    other.removeItem(USER_KEY);
     if (token) store.setItem(TOKEN_KEY, token);
     if (user) store.setItem(USER_KEY, JSON.stringify(user));
   } catch {
-    // storage unavailable — session still works for this visit
   }
 };
 
@@ -56,52 +52,111 @@ const clearStored = () => {
     sessionStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(USER_KEY);
   } catch {
-    // ignore
   }
 };
 
 const stored = loadStored();
 
-// NOTE: thunks re-throw the original axios error (instead of
-// rejectWithValue) so existing call sites keep reading
-// `err.response?.data?.message` unchanged via `.unwrap()`.
+const preserveAuthError = (err) => ({
+  response: {
+    status: err?.response?.status,
+    data: err?.response?.data,
+  },
+  message: err?.message,
+  code: err?.code,
+});
+
 export const loginUser = createAsyncThunk(
   "auth/login",
-  async ({ email, password, rememberMe = true }) => {
-    const response = await API.post("/auth/login", { email, password });
-    const { token, user } = response.data;
-    const normalized = normalizeUser(user);
-    persist(token, normalized, rememberMe !== false);
-    return { token, user: normalized };
+  async ({ email, password, rememberMe = true }, { rejectWithValue }) => {
+    try {
+      const cleanEmail = String(email || "").trim().toLowerCase();
+      if (!cleanEmail || !password) {
+        const err = new Error("Email and password are required");
+        err.response = { status: 400, data: { message: "Email and password are required" } };
+        throw err;
+      }
+      const response = await API.post("/auth/login", {
+        email: cleanEmail,
+        password,
+        rememberMe: rememberMe !== false,
+      });
+      const { token, user } = response.data;
+      const normalized = normalizeUser(user);
+      persist(token, normalized, rememberMe !== false);
+      return { token, user: normalized };
+    } catch (err) {
+      return rejectWithValue(preserveAuthError(err));
+    }
   }
 );
 
-export const registerUser = createAsyncThunk("auth/register", async (data) => {
-  const response = await API.post("/auth/register", data);
-  const { token, user } = response.data;
-  const normalized = normalizeUser(user);
-  persist(token, normalized);
-  return { token, user: normalized };
-});
-
-export const googleLoginUser = createAsyncThunk(
-  "auth/googleLogin",
-  async ({ idToken, role }) => {
-    const response = await API.post("/auth/google", { idToken, role });
+export const registerUser = createAsyncThunk("auth/register", async (data, { rejectWithValue }) => {
+  const payload = {
+    ...data,
+    email: String(data?.email || "").trim().toLowerCase(),
+    name: String(data?.name || "").trim(),
+    phone: String(data?.phone || data?.mobile || "").trim(),
+    role: String(data?.role || "customer").toUpperCase(),
+  };
+  try {
+    const response = await API.post("/auth/register", payload);
     const { token, user } = response.data;
     const normalized = normalizeUser(user);
     persist(token, normalized);
     return { token, user: normalized };
+  } catch (err) {
+    return rejectWithValue(preserveAuthError(err));
+  }
+});
+
+export const googleLoginUser = createAsyncThunk(
+  "auth/googleLogin",
+  async ({ idToken, role, referralCode }, { rejectWithValue }) => {
+    try {
+      const response = await API.post("/auth/google", { idToken, role, ...(referralCode ? { referralCode } : {}) });
+      const { token, user } = response.data;
+      const normalized = normalizeUser(user);
+      persist(token, normalized);
+      return { token, user: normalized };
+    } catch (err) {
+      return rejectWithValue(preserveAuthError(err));
+    }
   }
 );
+
+export const logoutUser = createAsyncThunk("auth/logout", async (_, { dispatch }) => {
+  try {
+    await API.post("/auth/logout");
+  } catch {
+  }
+  dispatch(logout());
+  return true;
+});
+
+export const fetchCurrentUser = createAsyncThunk("auth/me", async (_, { rejectWithValue }) => {
+  try {
+    const response = await API.get("/auth/me");
+    const normalized = normalizeUser(response.data);
+    try {
+      const store = localStorage.getItem(TOKEN_KEY) ? localStorage : sessionStorage;
+      store.setItem(USER_KEY, JSON.stringify(normalized));
+    } catch {
+    }
+    return { user: normalized };
+  } catch (err) {
+    if (err?.response?.status === 401 || err?.response?.status === 403) {
+      clearStored();
+    }
+    return rejectWithValue(err?.response?.data?.message || "Session expired");
+  }
+});
 
 const authSlice = createSlice({
   name: "auth",
   initialState: {
     user: stored.user,
     token: stored.token,
-    // Synchronously initialised from localStorage (the old context did the
-    // same read in an effect). No async boot step, so no stuck loaders.
     loading: false,
     error: null,
   },
@@ -116,11 +171,9 @@ const authSlice = createSlice({
       if (!state.user) return;
       state.user = normalizeUser({ ...state.user, ...action.payload });
       try {
-        // Write back to whichever store holds this session.
         const store = localStorage.getItem(TOKEN_KEY) ? localStorage : sessionStorage;
         store.setItem(USER_KEY, JSON.stringify(state.user));
       } catch {
-        // ignore
       }
     },
     clearAuthError(state) {
@@ -140,7 +193,11 @@ const authSlice = createSlice({
     };
     const onRejected = (state, action) => {
       state.loading = false;
-      state.error = action.error?.message || "Authentication failed";
+      state.error =
+        action.payload?.response?.data?.message ||
+        action.payload?.message ||
+        action.error?.message ||
+        "Authentication failed";
     };
     builder
       .addCase(loginUser.pending, onPending)
@@ -151,7 +208,20 @@ const authSlice = createSlice({
       .addCase(registerUser.rejected, onRejected)
       .addCase(googleLoginUser.pending, onPending)
       .addCase(googleLoginUser.fulfilled, onFulfilled)
-      .addCase(googleLoginUser.rejected, onRejected);
+      .addCase(googleLoginUser.rejected, onRejected)
+      .addCase(fetchCurrentUser.fulfilled, (state, action) => {
+        state.loading = false;
+        state.user = action.payload.user;
+        state.error = null;
+      })
+      .addCase(fetchCurrentUser.rejected, (state, action) => {
+        state.loading = false;
+        if (action.payload === "Session expired" || /blocked by an administrator|no longer exists|not valid/i.test(String(action.payload))) {
+          state.user = null;
+          state.token = null;
+        }
+        state.error = null;
+      });
   },
 });
 

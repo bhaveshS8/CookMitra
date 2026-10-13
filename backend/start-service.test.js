@@ -1,7 +1,3 @@
-// Standalone regression test for the cook OTP service-start (no DB).
-// Run:  node backend/start-service.test.js  — exits non-zero on failure.
-//
-// Drives the REAL startService controller with in-memory fakes.
 
 const Booking = require("./models/Booking");
 const Notification = require("./models/Notification");
@@ -42,7 +38,6 @@ const resetBooking = (overrides = {}) => {
   };
 };
 
-// Respects the cook-ownership filter like MongoDB would.
 Booking.findOne = async (filter) => {
   if (!bookingDoc || String(filter._id) !== "booking1") return null;
   if (filter.cook && String(filter.cook) !== String(bookingDoc.cook)) return null;
@@ -75,7 +70,6 @@ const call = (userId, role, body) => {
 };
 
 (async () => {
-  // 1) Happy path: correct OTP starts the clock.
   resetBooking();
   notificationLog.length = 0;
   const before = Date.now();
@@ -97,38 +91,32 @@ const call = (userId, role, body) => {
     notificationLog.map((n) => n.type).join(",")
   );
 
-  // 2) Wrong OTP -> 400, clock untouched.
   resetBooking();
   notificationLog.length = 0;
   r = await call("cook1", "cook", { otp: "0000" });
   check("wrong OTP refused with 400", r.status === 400, "s=" + r.status);
   check("clock untouched", !bookingDoc.serviceStartedAt, "");
 
-  // 3) Requested (unaccepted) booking cannot start -> 400.
   resetBooking({ status: "requested" });
   r = await call("cook1", "cook", { otp: "4321" });
   check("requested refused with 400", r.status === 400, "s=" + r.status);
 
-  // 3b) Accepted but UNPAID booking cannot start the clock -> 400.
   resetBooking({ status: "accepted", payment: { status: "pending", paidAmount: 0 } });
   notificationLog.length = 0;
   r = await call("cook1", "cook", { otp: "4321" });
   check("accepted-unpaid refused with 400", r.status === 400, "s=" + r.status);
   check("clock untouched on unpaid", !bookingDoc.serviceStartedAt, "");
 
-  // 4) Already started -> idempotent 200, no duplicate history.
   resetBooking({ serviceStartedAt: new Date(), serviceEndsAt: new Date(Date.now() + 3600000), status: "in_progress" });
   const histLen = bookingDoc.statusHistory.length;
   r = await call("cook1", "cook", { otp: "4321" });
   check("re-start idempotent", r.status === 200 && r.payload.serviceStarted === true, "s=" + r.status);
   check("no duplicate history", bookingDoc.statusHistory.length === histLen, "");
 
-  // 5) Another cook's booking -> 404.
   resetBooking();
   r = await call("cook9", "cook", { otp: "4321" });
   check("foreign booking 404", r.status === 404, "s=" + r.status);
 
-  // 6) Unknown booking -> 404.
   resetBooking();
   bookingDoc = null;
   r = await call("cook1", "cook", { otp: "4321" });

@@ -1,15 +1,7 @@
-// Password-reset delivery hook.
-//
-// There is no email provider wired in this codebase yet, so this module tries
-// SMTP when explicitly configured (SMTP_HOST/PORT/USER/PASS/FROM) and reports
-// whether the token actually left the server. Callers decide what to do when
-// delivery is unavailable:
-// - non-production: return the raw token in the API response (dev testing);
-// - production without SMTP: generic message only (configure SMTP to go live).
-// When SMTP_* is configured but nodemailer isn't installed, delivery is
-// skipped with a clear log line — install nodemailer + set the vars to enable.
 
 const canDeliver = () => Boolean(process.env.SMTP_HOST && process.env.SMTP_USER);
+
+const { resolveFrontendBaseUrl, isLocalhost } = require("./frontendBase");
 
 const sendResetEmail = async ({ to, name, token }) => {
   if (!canDeliver()) return { delivered: false, reason: "smtp-not-configured" };
@@ -22,8 +14,13 @@ const sendResetEmail = async ({ to, name, token }) => {
     );
     return { delivered: false, reason: "nodemailer-missing" };
   }
-  const appBase =
-    process.env.CLIENT_URL || process.env.FRONTEND_BASE_URL || "http://localhost:3000";
+  const appBase = resolveFrontendBaseUrl() || "http://localhost:3000";
+  if (process.env.NODE_ENV === "production" && isLocalhost(appBase)) {
+    console.error(
+      "CONFIG ERROR: reset-email link would point at localhost in production — set FRONTEND_BASE_URL=https://<your-live-domain> (FRONTEND_URL/CLIENT_URL also honored) and restart/redeploy. Refusing to send a broken link."
+    );
+    return { delivered: false, reason: "reset-base-not-configured" };
+  }
   const resetUrl = `${String(appBase).replace(/\/$/, "")}/reset-password?token=${token}`;
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,

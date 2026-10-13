@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
-import { logout } from "../store/authSlice";
+import { logoutUser } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
 import API from "../api/axios";
 import {
@@ -18,8 +18,6 @@ import cookMitraLogo from "../assets/logo.png";
 import { resolveFileUrl } from "./CookDocUploads";
 import LocationPicker from "./LocationPicker";
 
-// Avatar showing the cook's uploaded profile photo when available,
-// falling back to the name initial (also when the URL is stale/broken).
 const NavAvatar = ({ name, photo }) => {
   const [imgOk, setImgOk] = useState(true);
   useEffect(() => setImgOk(true), [photo]);
@@ -41,8 +39,6 @@ const Navbar = () => {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  // Interval handle for the unread-notifications poll (cleared on unmount and
-  // while the tab is hidden).
   const pollRef = useRef(null);
   const [scrolled, setScrolled] = useState(false);
 
@@ -52,9 +48,6 @@ const Navbar = () => {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-  // Cook profile photo lives on CookProfile (not the auth user), so the
-  // navbar loads it separately and refreshes on the "cook-photo-updated"
-  // event fired by the profile editors after a successful save.
   const [cookPhoto, setCookPhoto] = useState("");
 
   useEffect(() => {
@@ -80,9 +73,8 @@ const Navbar = () => {
     };
   }, [user]);
 
-  // Unread badge for cook + customer inboxes.
   useEffect(() => {
-    if (!user || !["customer", "cook"].includes(user.role)) {
+    if (!user || !["customer", "cook", "admin"].includes(user.role)) {
       setUnreadCount(0);
       return;
     }
@@ -94,17 +86,14 @@ const Navbar = () => {
           setUnreadCount(data.filter((n) => !n.read).length);
         }
       } catch {
-        // badge is best-effort; page shows the full error state
       }
     };
     fetchUnread();
-    // Calmed for scale: 30s -> 60s + hidden-tab pause. The badge is
-    // best-effort; the Notifications page is the source of truth.
     const startPoll = () => {
       stopPoll();
       pollRef.current = setInterval(() => {
         if (!document.hidden) fetchUnread();
-      }, 60000);
+      }, 300000);
     };
     const stopPoll = () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -117,17 +106,24 @@ const Navbar = () => {
         startPoll();
       }
     };
+    const onFocus = () => {
+      if (!document.hidden) fetchUnread();
+    };
     startPoll();
     document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("notifications-updated", fetchUnread);
     return () => {
       cancelled = true;
       stopPoll();
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("notifications-updated", fetchUnread);
     };
   }, [user]);
 
   const handleLogout = () => {
-    dispatch(logout());
+    dispatch(logoutUser());
     showToast("Logged out successfully", "info");
     setMobileMenuOpen(false);
     navigate("/login");
@@ -138,19 +134,23 @@ const Navbar = () => {
   const isAdmin = user?.role === "admin";
   const isCook = user?.role === "cook";
   const hideCustomerPages = isAdmin || isCook;
-  // Avatar / user chip links to the role's own profile page.
   const profilePath =
     user?.role === "customer"
       ? "/dashboard/profile"
       : user?.role === "cook"
         ? "/dashboard/cook-profile"
         : "/admin";
+  const brandPath =
+    user?.role === "admin"
+      ? "/admin"
+      : user?.role === "cook"
+        ? "/dashboard/cook-bookings"
+        : "/";
 
   return (
     <nav className={`navbar ${scrolled ? "is-scrolled" : ""}`}>
       <div className="navbar-inner">
-        {/* Brand Logo */}
-        <Link to="/" className="navbar-brand" onClick={closeMobile}>
+        <Link to={brandPath} className="navbar-brand" onClick={closeMobile}>
           <img
             src={cookMitraLogo}
             alt="Cook Mitra logo"
@@ -161,7 +161,6 @@ const Navbar = () => {
           </span>
         </Link>
 
-        {/* Desktop Navigation */}
         <div className="navbar-nav">
           <LocationPicker />
           {!hideCustomerPages && (
@@ -246,7 +245,7 @@ const Navbar = () => {
                 </NavLink>
               )}
 
-              {(user.role === "customer" || user.role === "cook") && (
+              {(user.role === "customer" || user.role === "cook" || user.role === "admin") && (
                 <NavLink
                   to="/dashboard/notifications"
                   title="Notifications"
@@ -266,7 +265,6 @@ const Navbar = () => {
 
               <div className="nav-divider"></div>
 
-              {/* User Profile Pill — clicking goes to the profile page */}
               <Link
                 to={profilePath}
                 className="navbar-user-chip navbar-profile-link"
@@ -301,7 +299,6 @@ const Navbar = () => {
           )}
         </div>
 
-        {/* Mobile actions: avatar + bell + menu toggle (small screens only) */}
         <div className="navbar-mobile-actions">
           {user && (
             <Link
@@ -314,7 +311,7 @@ const Navbar = () => {
               <NavAvatar name={user.name} photo={cookPhoto} />
             </Link>
           )}
-          {user && (user.role === "customer" || user.role === "cook") && (
+          {user && (user.role === "customer" || user.role === "cook" || user.role === "admin") && (
             <NavLink
               to="/dashboard/notifications"
               title="Notifications"
@@ -344,10 +341,9 @@ const Navbar = () => {
         </div>
       </div>
 
-      {/* Mobile Dropdown Drawer */}
       {mobileMenuOpen && (
         <div className="mobile-menu open">
-          <LocationPicker onNavigate={closeMobile} />
+          <LocationPicker />
           {!hideCustomerPages && (
             <>
               <NavLink
@@ -433,24 +429,6 @@ const Navbar = () => {
                 >
                   <ShieldAlert size={18} />
                   Admin
-                </NavLink>
-              )}
-
-              {(user.role === "customer" || user.role === "cook") && (
-                <NavLink
-                  to="/dashboard/notifications"
-                  className={({ isActive }) =>
-                    isActive ? "nav-link active" : "nav-link"
-                  }
-                  onClick={closeMobile}
-                >
-                  <Bell size={18} />
-                  Notifications
-                  {unreadCount > 0 && (
-                    <span className="nav-pill-badge">
-                      {unreadCount > 99 ? "99+" : unreadCount}
-                    </span>
-                  )}
                 </NavLink>
               )}
 

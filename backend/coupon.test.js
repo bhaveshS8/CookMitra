@@ -1,6 +1,3 @@
-// coupon.test.js — regression suite for coupon routes wiring, admin-only
-// guards, discount math, normalization and usage protection (stubbed, no DB).
-// Run:  node coupon.test.js  — exits non-zero on any failure.
 const { Types } = require("mongoose");
 
 const Coupon = require("./models/Coupon");
@@ -38,7 +35,6 @@ const makeCoupon = (overrides = {}) => ({
   ...overrides,
 });
 
-// Thenable + chainable query stub: controllers call .select().sort() before await.
 const Q = (doc) => ({
   select: () => Q(doc),
   sort: () => Q(doc),
@@ -57,7 +53,6 @@ const stubFindOne = (doc) => () => Q(doc);
       if (!r) continue;
       byPath[r.path] = byPath[r.path] || {};
       for (const m of Object.keys(r.methods)) {
-        // Keep handler references (identity) + first layer's name (auth check).
         byPath[r.path][m] = r.stack.map((h) => ({ fn: h.handle, isAuth: h.name === "auth" }));
       }
     }
@@ -71,24 +66,27 @@ const stubFindOne = (doc) => () => Q(doc);
     check("active route is public (single handler = listActiveCoupons)",
       handlerList("/active", "get").length === 1 && lastIs("/active", "get", couponCtrl.listActiveCoupons),
       JSON.stringify(handlerList("/active", "get").map((h) => h.is)));
-    check("validate route is auth + customer authorize + validateCoupon",
-      firstIsAuth("/validate", "post") && handlerList("/validate", "post").length === 3 && lastIs("/validate", "post", couponCtrl.validateCoupon),
+    check("validate route is auth + customer authorize + validators + validateCoupon",
+      firstIsAuth("/validate", "post") && handlerList("/validate", "post").length > 3 && lastIs("/validate", "post", couponCtrl.validateCoupon),
       JSON.stringify(handlerList("/validate", "post").length));
     for (const [m, fn] of [["get", couponCtrl.listCoupons], ["post", couponCtrl.createCoupon]]) {
-      check(`admin ${m.toUpperCase()} / has auth + admin + ${fn === couponCtrl.listCoupons ? "list" : "create"}`,
-        firstIsAuth("/", m) && handlerList("/", m).length === 3 && lastIs("/", m, fn),
+      const wantLen = m === "get" ? 3 : ">3";
+      const lenOk = m === "get"
+        ? handlerList("/", m).length === 3
+        : handlerList("/", m).length > 3;
+      check(`admin ${m.toUpperCase()} / has auth + admin + ${fn === couponCtrl.listCoupons ? "list" : "create"} (len ${wantLen})`,
+        firstIsAuth("/", m) && lenOk && lastIs("/", m, fn),
         JSON.stringify(handlerList("/", m).length));
     }
-    check("admin PATCH /:id is auth + admin + updateCoupon",
-      firstIsAuth("/:id", "patch") && handlerList("/:id", "patch").length === 3 && lastIs("/:id", "patch", couponCtrl.updateCoupon),
+    check("admin PATCH /:id is auth + admin + validators + updateCoupon",
+      firstIsAuth("/:id", "patch") && handlerList("/:id", "patch").length > 3 && lastIs("/:id", "patch", couponCtrl.updateCoupon),
       JSON.stringify(handlerList("/:id", "patch").length));
-    check("admin DELETE /:id is auth + admin + deleteCoupon",
-      firstIsAuth("/:id", "delete") && handlerList("/:id", "delete").length === 3 && lastIs("/:id", "delete", couponCtrl.deleteCoupon),
+    check("admin DELETE /:id is auth + admin + id check + deleteCoupon",
+      firstIsAuth("/:id", "delete") && handlerList("/:id", "delete").length > 3 && lastIs("/:id", "delete", couponCtrl.deleteCoupon),
       JSON.stringify(handlerList("/:id", "delete").length));
 
     console.log("\n═══ COUPON VALIDATE (no mutation) ═══");
     {
-      // 20% of ₹1000 → ₹200 off, ₹800 payable.
       const oF = Coupon.findOne;
       Coupon.findOne = stubFindOne(makeCoupon());
       const r = makeRes();
@@ -101,7 +99,6 @@ const stubFindOne = (doc) => () => Q(doc);
       finally { Coupon.findOne = oF; }
     }
     {
-      // maxDiscount cap: 20% of ₹3000 = ₹600 → capped at ₹500.
       const oF = Coupon.findOne;
       Coupon.findOne = stubFindOne(makeCoupon());
       const r = makeRes();
@@ -112,7 +109,6 @@ const stubFindOne = (doc) => () => Q(doc);
       finally { Coupon.findOne = oF; }
     }
     {
-      // Unknown code → 400.
       const oF = Coupon.findOne;
       Coupon.findOne = stubFindOne(null);
       const r = makeRes();
@@ -123,7 +119,6 @@ const stubFindOne = (doc) => () => Q(doc);
       finally { Coupon.findOne = oF; }
     }
     {
-      // Per-user limit exhausted → rejected.
       const uid = "000000000000000000000009";
       const oF = Coupon.findOne;
       Coupon.findOne = stubFindOne(makeCoupon({ usedBy: [new Types.ObjectId(uid)], perUserLimit: 1 }));
@@ -137,7 +132,6 @@ const stubFindOne = (doc) => () => Q(doc);
 
     console.log("\n═══ COUPON ADMIN CRUD ═══");
     {
-      // Create normalizes code (uppercase + trim) and stamps createdBy.
       const oC = Coupon.create;
       Coupon.create = async (d) => ({ _id: new Types.ObjectId(), ...d });
       const r = makeRes();
@@ -149,7 +143,6 @@ const stubFindOne = (doc) => () => Q(doc);
       finally { Coupon.create = oC; }
     }
     {
-      // Duplicate code (Mongo 11000) → friendly 409.
       const oC = Coupon.create;
       Coupon.create = async () => { const err = new Error("dup"); err.code = 11000; throw err; };
       const r = makeRes();
@@ -162,7 +155,6 @@ const stubFindOne = (doc) => () => Q(doc);
 
     console.log("\n═══ COUPON UPDATE / DELETE ═══");
     {
-      // Update strips usage/history fields and normalizes a new code.
       const oP = Coupon.findByIdAndUpdate;
       let stripped = null;
       Coupon.findByIdAndUpdate = async (id, editable) => { stripped = editable; return makeCoupon({ code: "FESTIVEAL", percent: 15 }); };
@@ -189,7 +181,6 @@ const stubFindOne = (doc) => () => Q(doc);
       finally { Coupon.findByIdAndUpdate = oP; }
     }
     {
-      // Delete: used coupons must be refused, unused ones removed.
       const oF = Coupon.findById;
       Coupon.findById = async () => makeCoupon({ usedCount: 3 });
       let r = makeRes();
