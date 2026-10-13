@@ -112,9 +112,9 @@ export const registerUser = createAsyncThunk("auth/register", async (data, { rej
 
 export const googleLoginUser = createAsyncThunk(
   "auth/googleLogin",
-  async ({ idToken, role, referralCode }, { rejectWithValue }) => {
+  async ({ idToken, role }, { rejectWithValue }) => {
     try {
-      const response = await API.post("/auth/google", { idToken, role, ...(referralCode ? { referralCode } : {}) });
+      const response = await API.post("/auth/google", { idToken, role });
       const { token, user } = response.data;
       const normalized = normalizeUser(user);
       persist(token, normalized);

@@ -99,4 +99,4 @@ const cookDocUpload = multer({
   limits: { fileSize: 2 * 1024 * 1024, files: 3, fields: 5 },
 });
 
-module.exports = { cookDocUpload, cookDocUploadDir: uploadDir, validateUploadedContent };
+module.exports = { cookDocUpload, validateUploadedContent };

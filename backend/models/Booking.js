@@ -133,6 +133,18 @@ const bookingSchema = new mongoose.Schema(
     ],
     couponReleased: { type: Boolean, default: false },
     cancelledBy: { type: String, default: "" },
+    // Cook-initiated cancellation with automatic replacement. Present while
+    // a released booking waits for a replacement cook: the cancelling cook
+    // is excluded from re-accepting (see ignoredBy), and a replacement
+    // accept clears the marker. Payment, schedule, coupon and customer data
+    // are preserved untouched on the same booking document.
+    cookCancel: {
+      cook: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      reasonCode: { type: String, default: "", trim: true, maxlength: 60 },
+      note: { type: String, default: "", trim: true, maxlength: 500 },
+      cancelledAt: { type: Date },
+      priorStatus: { type: String, default: "", trim: true },
+    },
     cancellationInfo: {
       cancelledBy: { type: String, default: "", trim: true },
       cancelledAt: { type: Date },

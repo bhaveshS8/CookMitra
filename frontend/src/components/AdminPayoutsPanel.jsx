@@ -116,6 +116,8 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
   const [refFor, setRefFor] = useState(null);
   const [reference, setReference] = useState("");
   const [transferConfirmed, setTransferConfirmed] = useState(false);
+  const [overrideConfirmed, setOverrideConfirmed] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [pendingApprove, setPendingApprove] = useState(null);
   const [pendingReject, setPendingReject] = useState(null);
@@ -130,6 +132,8 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
     setRefFor(bookingId);
     setReference("");
     setTransferConfirmed(false);
+    setOverrideConfirmed(false);
+    setOverrideReason("");
   };
 
   const settle = async (booking, detailsLabel) => {
@@ -142,13 +146,29 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
       showToast("Tick the transfer confirmation first — it records what you actually paid", "error");
       return;
     }
+    // Legacy auto-completes carry no OTP trail, so the server blocks them
+    // unless the admin explicitly asserts out-of-band verification here.
+    const needsOverride = booking.payoutEligible === false && booking.payoutOverrideAllowed === true;
+    if (needsOverride && !overrideConfirmed) {
+      showToast("Tick the verification override first — it records that you verified this legacy service out-of-band", "error");
+      return;
+    }
+    if (needsOverride && overrideReason.trim().length < 10) {
+      showToast("Describe how the service was verified (min 10 characters) — the note is kept on the payout record", "error");
+      return;
+    }
     setSaving(true);
     try {
-      await API.patch(`/payouts/${bookingId}/settle`, { reference: reference.trim() });
+      await API.patch(`/payouts/${bookingId}/settle`, {
+        reference: reference.trim(),
+        ...(needsOverride ? { verificationOverride: true, overrideReason: overrideReason.trim() } : {}),
+      });
       showToast(`Payout recorded${detailsLabel ? ` (${detailsLabel})` : ""} — the cook has been notified.`, "success");
       setRefFor(null);
       setReference("");
       setTransferConfirmed(false);
+      setOverrideConfirmed(false);
+      setOverrideReason("");
       refetch();
     } catch (err) {
       if (err.response?.status === 409) {
@@ -156,6 +176,8 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
         setRefFor(null);
         setReference("");
         setTransferConfirmed(false);
+        setOverrideConfirmed(false);
+        setOverrideReason("");
         refetch();
       } else {
         showToast(err.response?.data?.message || "Could not record payout", "error");
@@ -378,6 +400,7 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
                       <p style={{ marginTop: "0.35rem", fontSize: "0.82rem", color: "#b45309" }} role="note">
                         <AlertCircle size={13} style={{ display: "inline", verticalAlign: "-2px" }} />{" "}
                         Cannot pay yet: {blockers.length ? blockers.join(" · ") : "blocked by payout rules"}.
+                        {b.payoutOverrideAllowed === true && " You may still pay after verifying the service out-of-band (override below)."}
                       </p>
                     )}
                   </div>
@@ -411,11 +434,31 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
                           />
                           <span>I confirm the transfer of {formatCurrency(b.cookPayout)} was completed externally to these details.</span>
                         </label>
+                        {b.payoutEligible === false && b.payoutOverrideAllowed === true && (
+                          <>
+                            <label style={{ display: "flex", gap: "0.35rem", alignItems: "flex-start", fontSize: "0.78rem", color: "var(--slate-700)", maxWidth: "16rem", textAlign: "left", cursor: "pointer" }}>
+                              <input
+                                type="checkbox"
+                                checked={overrideConfirmed}
+                                onChange={(e) => setOverrideConfirmed(e.target.checked)}
+                                style={{ marginTop: "0.15rem" }}
+                              />
+                              <span>Verification override: I verified out-of-band that this legacy service was actually delivered (no OTP trail exists).</span>
+                            </label>
+                            <input
+                              className="form-control"
+                              style={{ padding: "0.3rem 0.5rem", fontSize: "0.85rem", width: "11rem" }}
+                              placeholder="How was it verified? (min 10 chars)"
+                              value={overrideReason}
+                              onChange={(e) => setOverrideReason(e.target.value)}
+                            />
+                          </>
+                        )}
                         <div style={{ display: "flex", gap: "0.4rem" }}>
-                          <button className="btn btn-outline btn-sm" disabled={saving} onClick={() => { setRefFor(null); setReference(""); setTransferConfirmed(false); }}>
+                          <button className="btn btn-outline btn-sm" disabled={saving} onClick={() => { setRefFor(null); setReference(""); setTransferConfirmed(false); setOverrideConfirmed(false); setOverrideReason(""); }}>
                             Cancel
                           </button>
-                          <button className="btn btn-primary btn-sm" disabled={saving || !transferConfirmed || !reference.trim()} onClick={() => settle(b, dest)} title={!transferConfirmed ? "Tick the transfer confirmation first" : "Record payout"}>
+                          <button className="btn btn-primary btn-sm" disabled={saving || !transferConfirmed || !reference.trim() || ((b.payoutEligible === false && b.payoutOverrideAllowed === true) && (!overrideConfirmed || overrideReason.trim().length < 10))} onClick={() => settle(b, dest)} title={!transferConfirmed ? "Tick the transfer confirmation first" : "Record payout"}>
                             <CheckCircle2 size={14} /> Confirm paid
                           </button>
                         </div>
@@ -425,11 +468,11 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
                         <button
                           className="btn btn-primary btn-sm"
                           style={{ marginTop: "0.5rem" }}
-                          disabled={blocked}
-                          title={blocked ? `Blocked: ${(blockers[0] || "see note")}` : "Record an external transfer as paid"}
+                          disabled={blocked && b.payoutOverrideAllowed !== true}
+                          title={blocked && b.payoutOverrideAllowed !== true ? `Blocked: ${(blockers[0] || "see note")}` : "Record an external transfer as paid"}
                           onClick={() => openSettle(b._id)}
                         >
-                          <Banknote size={14} /> Mark paid
+                          <Banknote size={14} /> {blocked ? "Verify & mark paid" : "Mark paid"}
                         </button>
                         <button
                           className="btn btn-danger-outline btn-sm"

@@ -31,9 +31,6 @@ const EXPECTED = [
   { coll: "bookings", name: "uniq_refund_reference_key", key: { "payment.refundReferenceKey": 1 }, unique: true, partial: P("payment.refundReferenceKey") },
   { coll: "bookings", name: "uniq_booking_clientKey", key: { clientKey: 1 }, unique: true, partial: P("clientKey") },
   { coll: "bookings", name: "uniq_payment_razorpayPaymentId", key: { "payment.razorpayPaymentId": 1 }, unique: true, partial: P("payment.razorpayPaymentId") },
-  { coll: "cookincentives", name: "uniq_cookincentive_idem", key: { idempotencyKey: 1 }, unique: true, partial: P("idempotencyKey") },
-  { coll: "cookleads", name: "uniq_cook_lead_phone", key: { cook: 1, normalizedPhone: 1 }, unique: true, partial: null },
-  { coll: "cookreferrals", name: "uniq_referral_referred", key: { referredCook: 1 }, unique: true, partial: null },
 ];
 
 // Order-insensitive deep equality (server may return keys in any order).

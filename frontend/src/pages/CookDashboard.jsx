@@ -10,7 +10,7 @@ import CookProfileForm from "../components/CookProfileForm";
 import CookAvailabilityToggle from "../components/CookAvailabilityToggle";
 import { resolveFileUrl } from "../components/CookDocUploads";
 import BookingRequestModal from "../components/BookingRequestModal";
-import ConfirmDialog from "../components/ConfirmDialog";
+import CookCancelModal from "../components/CookCancelModal";
 import CookScheduleEditor from "../components/CookScheduleEditor";
 import CookPayoutPanel from "../components/CookPayoutPanel";
 import { Check, XCircle, BellRing, ArrowRight, Star, MapPin, Navigation, CalendarDays, CalendarCheck, CalendarClock, Inbox, History, UserRound, Users, Soup, Wallet, ChefHat, AlertCircle, ShieldCheck } from "lucide-react";
@@ -38,7 +38,6 @@ const CookDashboard = () => {
   const navigate = useNavigate();
   const today = useLocalDay();
   const [view, setView] = useState("today");
-  const [cancellingId, setCancellingId] = useState(null);
   const [pendingCancelId, setPendingCancelId] = useState(null);
   const [actingOn, setActingOn] = useState(null);
   const [requestModalBooking, setRequestModalBooking] = useState(null);
@@ -181,20 +180,9 @@ const CookDashboard = () => {
     }
   };
 
-  const handleCancel = async () => {
-    const bookingId = pendingCancelId;
-    if (cancellingId || !bookingId) return;
+  const handleCancel = () => {
     setPendingCancelId(null);
-    setCancellingId(bookingId);
-    try {
-      const res = await API.patch(`/bookings/${bookingId}/cancel`);
-      showToast(res.data?.deleted ? "Booking cancelled and removed (no payment was made)." : "Booking cancelled successfully", "info");
-      refetchBookings();
-    } catch (err) {
-      showToast(err.response?.data?.message || "Failed to cancel booking", "error");
-    } finally {
-      setCancellingId(null);
-    }
+    refetchBookings();
   };
 
   const handleRequestAction = async (booking, action) => {
@@ -712,9 +700,8 @@ const CookDashboard = () => {
                         <button
                           className="btn btn-danger-outline btn-sm"
                           onClick={() => setPendingCancelId(booking._id)}
-                          disabled={cancellingId === booking._id}
                         >
-                          <XCircle size={16} /> {cancellingId === booking._id ? "Cancelling…" : "Cancel Booking"}
+                          <XCircle size={16} /> Cancel Booking
                         </button>
                       )}
                     </div>
@@ -724,9 +711,8 @@ const CookDashboard = () => {
                       <button
                         className="btn btn-danger-outline btn-sm"
                         onClick={() => setPendingCancelId(booking._id)}
-                        disabled={cancellingId === booking._id}
                       >
-                        <XCircle size={16} /> {cancellingId === booking._id ? "Cancelling…" : "Cancel Booking"}
+                        <XCircle size={16} /> Cancel Booking
                       </button>
                     </div>
                   )}
@@ -888,16 +874,13 @@ const CookDashboard = () => {
           popNextPendingRequest(actedId);
         }}
       />
-      <ConfirmDialog
-        open={!!pendingCancelId}
-        title="Cancel this booking session?"
-        message="The customer will be notified and the slot will be released. This cannot be undone."
-        confirmLabel="Yes, cancel it"
-        tone="danger"
-        busy={!!cancellingId}
-        onCancel={() => setPendingCancelId(null)}
-        onConfirm={handleCancel}
-      />
+      {!!pendingCancelId && (
+        <CookCancelModal
+          bookingId={pendingCancelId}
+          onClose={() => setPendingCancelId(null)}
+          onCancelled={handleCancel}
+        />
+      )}
     </div>
   );
 };

@@ -6,33 +6,9 @@ const validate = require("../middleware/validate");
 const { auth, authorize } = require("../middleware/auth");
 const c = require("../controllers/adminCookEarningsController");
 
-router.get("/leads", auth, authorize("admin"), c.listAllLeads);
-router.post("/leads/:id/verify", auth, authorize("admin"), c.verifyLead);
-router.post(
-  "/leads/:id/reject",
-  auth,
-  authorize("admin"),
-  [body("reason").optional().isString()],
-  validate,
-  c.rejectLead
-);
-router.post("/leads/:id/duplicate", auth, authorize("admin"), c.markLeadDuplicate);
-
-router.get("/incentives", auth, authorize("admin"), c.listIncentives);
-router.post("/incentives/:id/approve", auth, authorize("admin"), c.approveIncentive);
-router.post(
-  "/incentives/:id/reject",
-  auth,
-  authorize("admin"),
-  [body("reason").optional().isString()],
-  validate,
-  c.rejectIncentive
-);
-router.post("/incentives/:id/hold", auth, authorize("admin"), c.holdIncentive);
-
-router.get("/referrals", auth, authorize("admin"), c.listReferrals);
-router.post("/referrals/:id/approve", auth, authorize("admin"), c.approveReferral);
-
+// Weekly payout cycles only. Lead, incentive, and referral programs were
+// removed in full (models, handlers, and UI deleted); the old
+// /api/admin/cook-incentives mount is gone — everything lives here.
 router.get("/payouts", auth, authorize("admin"), c.listCookPayouts);
 router.post("/payouts/build", auth, authorize("admin"), c.buildCookPayout);
 router.post("/payouts/:id/approve", auth, authorize("admin"), c.approveCookPayout);

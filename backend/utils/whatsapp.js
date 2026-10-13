@@ -195,12 +195,20 @@ const buildCancelledMessage = ({ booking, cancelledBy, refundNote }) => {
       : cancelledBy === "admin"
         ? "Our support team cancelled this booking."
         : "This booking was cancelled.";
+  // Cook cancellations always enter automatic replacement search (same
+  // booking, existing finding-cook flow) — say so on WhatsApp too, matching
+  // the in-app notification.
+  const replacementNote =
+    cancelledBy === "cook"
+      ? "We are finding you a replacement cook — no action needed; we will notify you as soon as one accepts."
+      : null;
   return [
     "*Cook Mitra: Booking cancelled*",
     `Service: ${serviceLabel(booking)}`,
     `Date: ${dateLabel(booking)}${booking?.startTime ? ` | ${slotRange(booking.startTime, booking.endTime)}` : ""}`,
     booking?._id ? `Booking ID: ${booking._id}` : null,
     who,
+    replacementNote,
     refundNote || null,
   ]
     .filter(Boolean)

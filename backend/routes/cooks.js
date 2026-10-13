@@ -14,7 +14,6 @@ const {
   updateApprovalStatus,
   getAvailableSlots,
   uploadCookDocs,
-  adminUploadCookDocs,
   toggleAvailability,
 } = require("../controllers/cookController");
 
@@ -69,25 +68,6 @@ router.post(
   uploadCookDocs
 );
 router.get("/admin-overview/:id", auth, authorize("admin"), getCookAdminOverview);
-router.post(
-  "/:id/upload-docs",
-  auth,
-  authorize("admin"),
-  (req, res, next) => {
-    cookDocUpload.fields([
-      { name: "aadhar", maxCount: 1 },
-      { name: "pan", maxCount: 1 },
-      { name: "photo", maxCount: 1 },
-    ])(req, res, (err) => {
-      if (err) {
-        return res.status(400).json({ message: uploadErrorMessage(err) });
-      }
-      next();
-    });
-  },
-  validateUploadedContent,
-  adminUploadCookDocs
-);
 router.get("/:id", getCook);
 
 router.post(

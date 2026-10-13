@@ -1,7 +1,12 @@
 
+const VERIFICATION_BLOCKERS = new Set([
+  "Service was never started (no OTP verification)",
+  "Cook arrival was never recorded",
+]);
+
 const payoutEligibility = (booking) => {
   const reasons = [];
-  if (!booking) return { eligible: false, reasons: ["Booking not found"] };
+  if (!booking) return { eligible: false, reasons: ["Booking not found"], verificationOnly: false };
   const pay = booking.payment || {};
   const payout = booking.payout || {};
   if (pay.status !== "paid") reasons.push("Payment is not captured");
@@ -17,7 +22,13 @@ const payoutEligibility = (booking) => {
   if (payout.status && payout.status !== "pending") reasons.push(`Payout is ${payout.status}, not pending`);
   const rs = pay.refundStatus || "none";
   if (!["none", "rejected"].includes(rs)) reasons.push(`Customer refund is ${rs} — resolve it first`);
-  return { eligible: reasons.length === 0, reasons };
+  // verificationOnly: every blocker is an attendance-proof gap (legacy
+  // auto-completed services the platform itself finished without an OTP
+  // trail). Money blockers (unpaid/test/refund/settled/amounts) are never
+  // overridable — see settlePayout.
+  const verificationOnly =
+    reasons.length > 0 && reasons.every((r) => VERIFICATION_BLOCKERS.has(r));
+  return { eligible: reasons.length === 0, reasons, verificationOnly };
 };
 
 const refundedTotal = (booking) => {

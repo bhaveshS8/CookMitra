@@ -228,44 +228,6 @@ exports.register = async (req, res, next) => {
 
     await sendWelcomeNotification(user);
 
-    if (String(role).toUpperCase() === "COOK") {
-      const refCode = String(req.body.referralCode || req.body.ref || "").trim().toUpperCase();
-      if (refCode) {
-        try {
-          const CookProfile = require("../models/CookProfile");
-          const CookReferral = require("../models/CookReferral");
-          const ownerProfile = await CookProfile.findOne({ referralCode: refCode }).populate("user", "email");
-          const ownerId = ownerProfile?.user?._id || ownerProfile?.user;
-          if (
-            ownerProfile &&
-            ownerId &&
-            String(ownerId) !== String(user._id) &&
-            String(ownerProfile?.user?.email || "").toLowerCase() !== String(email).toLowerCase()
-          ) {
-            const already = await CookReferral.findOne({ referredCook: user._id }).select("_id");
-            if (!already) {
-              await CookReferral.create({
-                referrer: ownerId,
-                referredCook: user._id,
-                referralCode: refCode,
-              });
-              try {
-                const Notification = require("../models/Notification");
-                await Notification.create({
-                  user: ownerId,
-                  type: "referral_registered",
-                  message: `${user.name} joined Cook Mitra with your referral — ₹250 unlocks after their 10th verified booking.`,
-                  link: "/cook/earnings",
-                });
-              } catch {
-              }
-            }
-          }
-        } catch {
-        }
-      }
-    }
-
     setSessionCookie(res, token, true);
     res.status(201).json({
       token,
@@ -418,27 +380,6 @@ exports.googleAuth = async (req, res, next) => {
 
     if (isNewGoogleUser) {
       await sendWelcomeNotification(user);
-      if (String(user.role).toUpperCase() === "COOK") {
-        const refCode = String(req.body.referralCode || req.body.ref || "").trim().toUpperCase();
-        if (refCode) {
-          try {
-            const CookProfile = require("../models/CookProfile");
-            const CookReferral = require("../models/CookReferral");
-            const ownerProfile = await CookProfile.findOne({ referralCode: refCode }).populate("user", "email");
-            const ownerId = ownerProfile?.user?._id || ownerProfile?.user;
-            if (
-              ownerProfile && ownerId && String(ownerId) !== String(user._id) &&
-              String(ownerProfile?.user?.email || "").toLowerCase() !== String(user.email || "").toLowerCase()
-            ) {
-              const already = await CookReferral.findOne({ referredCook: user._id }).select("_id");
-              if (!already) {
-                await CookReferral.create({ referrer: ownerId, referredCook: user._id, referralCode: refCode });
-              }
-            }
-          } catch {
-          }
-        }
-      }
     }
 
     const token = generateToken(user);

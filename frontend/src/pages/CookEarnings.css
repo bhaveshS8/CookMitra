@@ -5,7 +5,6 @@
 .ce-h2 { font-size: 1.1rem; margin: 1.5rem 0 0.6rem; }
 .ce-grid { display: grid; gap: 0.75rem; }
 .ce-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.ce-slabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .ce-card { background: var(--card, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 12px; padding: 0.85rem 1rem; min-width: 0; max-width: 100%; box-sizing: border-box; overflow-wrap: anywhere; }
 .ce-label { display: block; font-size: 0.78rem; color: var(--slate-500, #64748b); margin-bottom: 0.2rem; }
 .ce-card strong { font-size: 1.02rem; }
@@ -20,14 +19,11 @@
 .ce-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin-bottom: 0.5rem; }
 .ce-form input, .ce-form select, .ce-form textarea { width: 100%; max-width: 100%; box-sizing: border-box; border: 1px solid var(--border, #e2e8f0); border-radius: 8px; padding: 0.5rem 0.6rem; font-size: 0.9rem; }
 .ce-btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
-.ce-slab { text-align: center; font-size: 0.85rem; }
 @media (max-width: 768px) {
   .ce-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .ce-slabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ce-form-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 480px) {
   .ce-overview { grid-template-columns: minmax(0, 1fr); }
-  .ce-slabs { grid-template-columns: minmax(0, 1fr); }
   .ce-head h1 { font-size: 1.25rem; }
 }

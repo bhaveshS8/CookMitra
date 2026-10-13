@@ -43,12 +43,16 @@ exports.getPayoutQueue = async (req, res, next) => {
     const byUser = new Map(profiles.map((p) => [String(p.user), p.payoutDetails || null]));
     const enriched = (bookings || []).map((b) => {
       const plain = b.toObject ? b.toObject() : b;
-      const { eligible, reasons } = payoutEligibility(b);
+      const { eligible, reasons, verificationOnly } = payoutEligibility(b);
       return {
         ...plain,
         cookPayoutDetails: byUser.get(String(b.cook?._id || b.cook)) || null,
         payoutEligible: eligible,
         payoutBlockers: eligible ? [] : reasons,
+        // Lets the admin UI offer an audited override for rows blocked
+        // ONLY by attendance-proof gaps (legacy auto-completes). Money
+        // blockers are never overridable.
+        payoutOverrideAllowed: !eligible && verificationOnly === true,
       };
     });
     return sendList(res, enriched, pg, () => Booking.countDocuments(pendingFilter()));
@@ -93,9 +97,24 @@ exports.settlePayout = async (req, res, next) => {
     if (existing.payout?.status === "not_applicable") {
       return res.status(400).json({ message: "This booking has no cook payout" });
     }
-    const { eligible, reasons } = payoutEligibility(existing);
+    const { eligible, reasons, verificationOnly } = payoutEligibility(existing);
+    // Audited override for legacy auto-completed services: the platform
+    // itself finished these without an OTP trail, so no attendance proof
+    // can ever appear and the row would otherwise sit unpayable forever.
+    // The admin must explicitly assert verification out-of-band with a
+    // written reason; the assertion is stored in the status history and
+    // the ledger. Money blockers (unpaid/test/refund/settled/amounts)
+    // can never be overridden.
+    let overrideReason = null;
     if (!eligible) {
-      return res.status(400).json({ message: reasons[0], reasons, code: "PAYOUT_NOT_ELIGIBLE" });
+      const wantsOverride = req.body?.verificationOverride === true;
+      if (!wantsOverride || verificationOnly !== true) {
+        return res.status(400).json({ message: reasons[0], reasons, code: "PAYOUT_NOT_ELIGIBLE" });
+      }
+      overrideReason = String(req.body?.overrideReason || "").trim().slice(0, 500);
+      if (overrideReason.length < 10) {
+        return res.status(400).json({ message: "Describe how the service was verified (min 10 characters) — the note is kept on the payout record", code: "OVERRIDE_REASON_REQUIRED" });
+      }
     }
     const refKey = normalizePayoutReference(reference);
     const dup = await Booking.findOne({
@@ -143,7 +162,7 @@ exports.settlePayout = async (req, res, next) => {
           $push: {
             statusHistory: {
               status: existing.status,
-              note: `Cook payout ₹${existing.cookPayout} settled (ref: ${reference}) by admin`,
+              note: `Cook payout ₹${existing.cookPayout} settled (ref: ${reference}) by admin${overrideReason ? ` — verification override: ${overrideReason}` : ""}`,
             },
           },
         },
@@ -170,7 +189,7 @@ exports.settlePayout = async (req, res, next) => {
       actor: `admin:${req.user.id}`,
       source: "admin",
       payoutReference: reference,
-      reason: `Cook share settled to ${recipient?.upiId || recipient?.accountLast4 || "recorded destination"}`,
+      reason: `Cook share settled to ${recipient?.upiId || recipient?.accountLast4 || "recorded destination"}${overrideReason ? ` (attendance unverified — admin override: ${overrideReason})` : ""}`,
     });
 
     try {

@@ -22,7 +22,6 @@ const GoogleSignInButton = ({
   text = "signin_with",
   onError,
   next = null,
-  referralCode = "",
 }) => {
   const dispatch = useDispatch();
   const showToast = useShowToast();
@@ -106,7 +105,7 @@ const GoogleSignInButton = ({
     }
     setLoading(true);
     try {
-      const { user } = await dispatch(googleLoginUser({ idToken, role, referralCode })).unwrap();
+      const { user } = await dispatch(googleLoginUser({ idToken, role })).unwrap();
       showToast(`Welcome${user?.name ? `, ${user.name}` : ""}!`, "success");
       if (user?.role === "cook") {
         track(AnalyticsEvents.COOK_SIGNUP_COMPLETE, { method: "google" });

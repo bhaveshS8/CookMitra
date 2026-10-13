@@ -38,22 +38,40 @@ const CATEGORY_LABEL = {
   address: "Address",
   no_show: "No-show",
   safety: "Safety",
+  quality: "Quality",
+  hygiene: "Hygiene",
   other: "Other",
+  cook_did_not_arrive: "Cook did not arrive",
+  major_service_deviation: "Service deviation",
+  service_quality_issue: "Service quality",
+  unprofessional_behavior: "Unprofessional behaviour",
 };
+
+const SOURCE_TABS = [
+  { key: "all", label: "Everyone" },
+  { key: "cook", label: "From cooks" },
+  { key: "customer", label: "From customers" },
+];
 
 const AdminComplaints = () => {
   const { data: complaints, loading, error, refetch } = useFetch("/complaints");
   const showToast = useShowToast();
   const [filter, setFilter] = useState("all");
+  const [source, setSource] = useState("all");
   const [notes, setNotes] = useState({});
   const [savingId, setSavingId] = useState(null);
 
   const list = complaints || [];
+  const sourced = source === "all" ? list : list.filter((c) => c.filedBy === source);
   const counts = STATUS_TABS.reduce((acc, t) => {
-    acc[t.key] = t.key === "all" ? list.length : list.filter((c) => c.status === t.key).length;
+    acc[t.key] = t.key === "all" ? sourced.length : sourced.filter((c) => c.status === t.key).length;
     return acc;
   }, {});
-  const visible = filter === "all" ? list : list.filter((c) => c.status === filter);
+  const sourceCounts = SOURCE_TABS.reduce((acc, t) => {
+    acc[t.key] = t.key === "all" ? list.length : list.filter((c) => c.filedBy === t.key).length;
+    return acc;
+  }, {});
+  const visible = filter === "all" ? sourced : sourced.filter((c) => c.status === filter);
 
   const setStatus = async (id, status) => {
     setSavingId(id);
@@ -87,14 +105,26 @@ const AdminComplaints = () => {
           <span className="badge badge-festive" style={{ marginBottom: "0.5rem" }}>
             <ShieldAlert size={14} /> Moderation
           </span>
-          <h1>Cook Complaints ({list.length})</h1>
+          <h1>Complaints ({sourced.length})</h1>
           <p style={{ color: "var(--slate-600)", margin: 0 }}>
-            Issues cooks reported about customers — newest first.
+            Issues cooks and customers reported — newest first.
           </p>
         </div>
         <button className="btn btn-outline btn-sm" onClick={() => refetch()} disabled={loading}>
           <RefreshCw size={15} /> {loading ? "Refreshing..." : "Refresh"}
         </button>
+      </div>
+
+      <div className="tabs-navigation-bar" style={{ marginBottom: "0.75rem" }}>
+        {SOURCE_TABS.map((t) => (
+          <button
+            key={t.key}
+            className={`tab-btn ${source === t.key ? "active" : ""}`}
+            onClick={() => setSource(t.key)}
+          >
+            {t.label} <span className="tab-count-pill">{sourceCounts[t.key] ?? 0}</span>
+          </button>
+        ))}
       </div>
 
       <div className="tabs-navigation-bar" style={{ marginBottom: "1.25rem" }}>
@@ -118,20 +148,24 @@ const AdminComplaints = () => {
             {filter === "all" ? <Inbox size={28} /> : <Search size={28} />}
           </div>
           <h3>{filter === "all" ? "No complaints" : `No ${filter.replace("_", " ")} complaints`}</h3>
-          <p>Cooks file complaints from a booking page when something goes wrong with a customer.</p>
+          <p>Cooks and customers file complaints from a booking page when something goes wrong.</p>
         </div>
       )}
 
       <div className="bookings-list-modern">
-        {visible.map((c) => (
+        {visible.map((c) => {
+          const fromCustomer = c.filedBy === "customer";
+          const filer = fromCustomer ? c.customer?.name || "Customer" : c.cook?.name || "Cook";
+          const other = fromCustomer ? c.cook?.name || "Cook" : c.customer?.name || "Customer";
+          return (
           <div key={c._id} className="booking-item-card">
             <div className="booking-item-top">
               <div className="booking-party-info">
                 <h3 style={{ margin: 0 }}>
-                  {c.cook?.name || "Cook"} <span style={{ fontWeight: 400 }}>→ {c.customer?.name || "Customer"}</span>
+                  {filer} <span style={{ fontWeight: 400 }}>→ {other}</span>
                 </h3>
                 <span style={{ fontSize: "0.8rem", color: "var(--slate-500)" }}>
-                  {c.createdAt ? timeAgo(c.createdAt) : ""} • {CATEGORY_LABEL[c.category] || c.category}
+                  Filed by {fromCustomer ? "customer" : "cook"} • {c.createdAt ? timeAgo(c.createdAt) : ""} • {CATEGORY_LABEL[c.category] || c.category}
                   {c.booking ? ` • ${c.booking.serviceType?.replace(/_/g, " ")} on ${formatDate(c.booking.date)}` : " • no booking attached"}
                 </span>
               </div>
@@ -165,7 +199,7 @@ const AdminComplaints = () => {
                 <textarea
                   className="form-control"
                   rows={2}
-                  placeholder="Internal note for the cook (optional)…"
+                  placeholder={`Internal note for the ${fromCustomer ? "customer" : "cook"} (optional)…`}
                   value={notes[c._id] || ""}
                   onChange={(e) => setNotes((prev) => ({ ...prev, [c._id]: e.target.value }))}
                   disabled={savingId === c._id}
@@ -204,13 +238,14 @@ const AdminComplaints = () => {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {visible.length > 0 && (
         <p style={{ fontSize: "0.78rem", color: "var(--slate-400)", marginTop: "1rem", display: "flex", alignItems: "center", gap: "0.35rem" }}>
           {["open", "in_review"].includes(filter) || filter === "all" ? (
-            <><AlertCircle size={13} /> Resolving or rejecting notifies the cook automatically.</>
+            <><AlertCircle size={13} /> Resolving or rejecting notifies the person who filed it automatically.</>
           ) : (
             <><MessageCircle size={13} /> Closed complaints are kept for the record.</>
           )}

@@ -65,7 +65,6 @@ const sessionStartDate = (booking) => {
   if (!booking?.date || !booking?.startTime) return null;
   return istEventInstant(booking.date, booking.startTime);
 };
-exports.sessionStartDate = sessionStartDate;
 exports.sessionEndDate = sessionEndDate;
 
 const CANCEL_LOCK_MS = 30 * 60 * 1000;
@@ -80,19 +79,6 @@ const MAX_CUSTOMER_RESCHEDULES = 2;
 const RESCHEDULE_DAY_START_MIN = 8 * 60;
 const RESCHEDULE_DAY_END_MIN = 20 * 60;
 const rescheduleLocked = (booking, now = Date.now()) => cancelLocked(booking, now);
-const RESCHEDULE_REASONS = [
-  "Change of plans",
-  "Personal reason",
-  "Wrong date/time selected",
-  "Cook unavailable",
-  "Family/event schedule changed",
-  "Other",
-];
-const normalizeRescheduleReason = (raw) => {
-  const s = String(raw ?? "").trim().slice(0, 200);
-  if (!s) return "";
-  return s;
-};
 
 
 const {
@@ -109,6 +95,7 @@ const dispatchJobs = require("../services/bookingDispatchJobs");
 const {
   acceptBookingForCook,
   rejectBookingForCook,
+  confirmReplacementIfPaid,
 } = require("../services/bookingAcceptService");
 
 const OTP_FIELDS = ["serviceOtp", "serviceOtpGeneratedAt", "serviceOtpAttempts", "serviceOtpLockedUntil"];
@@ -1323,17 +1310,10 @@ exports.releaseCouponUsage = releaseCouponUsage;
 exports.REQUEST_WINDOW_MS = REQUEST_WINDOW_MS;
 exports.PAYMENT_WINDOW_MS = PAYMENT_WINDOW_MS;
 exports.EXPIRED_DELETE_GRACE_MS = EXPIRED_DELETE_GRACE_MS;
-try {
-  exports.sweepExpiredBookings =
-    require("../services/bookingTransitions").sweepExpiredBookings;
-} catch {
-}
 exports.isNoShowPastHours = isNoShowPastHours;
 exports.markHoursCompleteIfNeeded = markHoursCompleteIfNeeded;
 exports.cancelLocked = cancelLocked;
 exports.rescheduleLocked = rescheduleLocked;
-exports.RESCHEDULE_REASONS = RESCHEDULE_REASONS;
-exports.normalizeRescheduleReason = normalizeRescheduleReason;
 
 exports.getMyBookings = async (req, res, next) => {  try {
     // Expired bookings stay visible for this long, then the background
@@ -2099,19 +2079,35 @@ exports.acceptBooking = async (req, res, next) => {
       });
     }
 
+    // Replacement confirm (admin assigned a cook to a cook-cancelled,
+    // already-paid booking): confirm immediately so the customer is not
+    // asked to pay again. Claim failures keep today's accepted behavior.
+    let replacementConfirmed = false;
+    try {
+      const rep = await confirmReplacementIfPaid(booking);
+      booking = rep.booking;
+      replacementConfirmed = rep.confirmed === true;
+    } catch {
+    }
+
     try {
       await Notification.create({
         user: booking.customer,
         type: "booking_accepted",
         booking: booking._id,
-        message:
-          "Your booking request has been accepted! Complete payment within 5 minutes to confirm your slot.",
+        message: replacementConfirmed
+          ? "A replacement cook has accepted your booking — it is confirmed, no further payment needed."
+          : "Your booking request has been accepted! Complete payment within 5 minutes to confirm your slot.",
       });
     } catch {
     }
-    notifyWhatsApp("accepted", booking, {
-      notifyCook: String(req.user.role).toUpperCase() === "ADMIN",
-    });
+    if (replacementConfirmed) {
+      notifyWhatsApp("confirmed", booking);
+    } else {
+      notifyWhatsApp("accepted", booking, {
+        notifyCook: String(req.user.role).toUpperCase() === "ADMIN",
+      });
+    }
 
     if (String(req.user.role).toUpperCase() === "ADMIN") {
       try {
@@ -2526,6 +2522,219 @@ exports.deleteBooking = async (req, res, next) => {
   }
 };
 
+// Cook-initiated cancellation with automatic replacement.
+//
+// Instead of terminally cancelling, the assigned cook releases the booking
+// back into the finding-cook pool on the SAME document: cook -> null,
+// status -> requested, fresh request window (existing REQUEST_WINDOW_MS),
+// cancelling cook added to ignoredBy (the existing accept path rejects
+// ignored cooks, and stale WhatsApp context checks visibility the same
+// way), plus a cookCancel audit marker. Payment, schedule, coupon and
+// customer data are preserved untouched.
+//
+// Replacement search then reuses the existing durable dispatch outbox,
+// WhatsApp fan-out, atomic accept claim and waiting-window expiry — no
+// parallel state machine. If no replacement accepts in time, the existing
+// timeout finalizes the booking and queues the applicable refund.
+const cookCancelWithReplacement = async (req, res, next, ctx) => {
+  const { booking: loaded, policy } = ctx || {};
+  let booking = loaded;
+  try {
+    const { COOK_CANCELLATION_REASONS } = require("../utils/cancellationPolicy");
+    const reasonCode = String(req.body?.reason || "").trim().toUpperCase().slice(0, 60);
+    if (!reasonCode || !COOK_CANCELLATION_REASONS.includes(reasonCode)) {
+      return res.status(400).json({ message: "Please choose a valid cancellation reason." });
+    }
+    const note = String(req.body?.reasonNote || req.body?.note || "").trim().slice(0, 500);
+    if (reasonCode === "OTHER" && !note) {
+      return res.status(400).json({ message: "Please describe your reason for cancelling." });
+    }
+
+    const cookId = String(req.user.id);
+    const priorStatus = booking.status;
+    const now = new Date();
+    const windowMs = Number(REQUEST_WINDOW_MS) > 0 ? Number(REQUEST_WINDOW_MS) : 5 * 60 * 1000;
+
+    let released = false;
+    if (dbReady()) {
+      try {
+        const claim = await Booking.updateOne(
+          {
+            _id: booking._id,
+            status: { $in: ["requested", "accepted", "confirmed"] },
+            cook: req.user.id,
+            $or: [{ serviceStartedAt: { $exists: false } }, { serviceStartedAt: null }],
+          },
+          {
+            $set: {
+              cook: null,
+              status: "requested",
+              requestExpiresAt: new Date(Date.now() + windowMs),
+              paymentExpiresAt: null,
+              cookCancel: {
+                cook: req.user.id,
+                reasonCode,
+                note: note || "",
+                cancelledAt: now,
+                priorStatus,
+              },
+            },
+            $addToSet: { ignoredBy: req.user.id },
+            $push: {
+              statusHistory: {
+                status: "requested",
+                note: `Cook cancelled (${reasonCode}) — searching for a replacement cook`,
+              },
+            },
+          }
+        );
+        if ((claim.modifiedCount ?? claim.nModified ?? 0) === 1) {
+          released = true;
+        }
+      } catch {
+        released = false;
+      }
+      if (released) {
+        try {
+          const fresh = await Booking.findById(req.params.id);
+          if (fresh) booking = fresh;
+        } catch {
+        }
+      } else {
+        let latest = null;
+        try {
+          latest = await Booking.findById(req.params.id);
+        } catch {
+          latest = null;
+        }
+        if (!latest) {
+          return res.status(404).json({ message: "Booking not found" });
+        }
+        // (Idempotent repeats are answered at the top of cancelBooking, so
+        // any claim loss here means a genuinely concurrent transition.)
+        if (["cancelled", "completed", "rejected", "expired", "unattended"].includes(latest.status)) {
+          return res.status(400).json({ message: "Booking cannot be cancelled" });
+        }
+        if (latest.serviceStartedAt || latest.status === "in_progress") {
+          return res.status(400).json({ message: "Service has already started — this booking can no longer be cancelled. Please contact support." });
+        }
+        return res.status(409).json({
+          message: "This booking was just updated — please refresh to see its current status.",
+        });
+      }
+    }
+    if (!released) {
+      booking.cook = null;
+      booking.status = "requested";
+      booking.requestExpiresAt = new Date(Date.now() + windowMs);
+      booking.paymentExpiresAt = null;
+      booking.cookCancel = {
+        cook: req.user.id,
+        reasonCode,
+        note: note || "",
+        cancelledAt: now,
+        priorStatus,
+      };
+      try {
+        const ignored = Array.isArray(booking.ignoredBy) ? booking.ignoredBy.map(String) : [];
+        if (!ignored.includes(cookId)) {
+          booking.ignoredBy = [...(booking.ignoredBy || []), req.user.id];
+        }
+      } catch {
+      }
+      booking.statusHistory.push({
+        status: "requested",
+        note: `Cook cancelled (${reasonCode}) — searching for a replacement cook`,
+      });
+      try {
+        if (typeof booking.save === "function") await booking.save();
+      } catch {
+      }
+    }
+
+    // Audit (same conventions as terminal cancel): cook-cancel event with
+    // the prior state, plus the cook's cancellation counter for review.
+    try {
+      const CancellationAudit = require("../models/CancellationAudit");
+      await CancellationAudit.create({
+        actor: req.user.id,
+        actorRole: "COOK",
+        bookingId: booking._id,
+        event: "COOK_CANCELLED",
+        previousStatus: priorStatus,
+        newStatus: "requested",
+        amount: policy?.bookingAmount ?? Number(booking.amount) ?? 0,
+        reason: `${reasonCode}${note ? `: ${note}` : ""} — replacement search started`,
+        metadata: { category: "COOK_CANCELLED", replacement: true },
+      });
+    } catch {
+    }
+    try {
+      await CookProfile.updateOne({ user: req.user.id }, { $inc: { cancelledByCookCount: 1 } });
+    } catch {
+    }
+
+    // Notify: customer learns a replacement is being found; the cancelling
+    // cook gets confirmation that the booking left their plate.
+    const whenLabel = (() => {
+      try {
+        return new Date(booking.date).toLocaleDateString("en-IN", {
+          weekday: "short", day: "numeric", month: "short",
+        });
+      } catch {
+        return "";
+      }
+    })();
+    try {
+      await Notification.create({
+        user: booking.customer,
+        type: "booking_cancelled",
+        booking: booking._id,
+        message: `Your cook had to cancel${whenLabel ? ` (${whenLabel}, ${booking.startTime || ""})` : ""} — we are finding you a replacement cook now. No action needed; we will notify you as soon as one accepts.`,
+      });
+    } catch {
+    }
+    try {
+      await Notification.create({
+        user: req.user.id,
+        type: "booking_cancelled",
+        booking: booking._id,
+        message: `Cancellation recorded (${reasonCode}). The booking is no longer assigned to you — a replacement cook is being searched.`,
+      });
+    } catch {
+    }
+    try {
+      notifyWhatsApp("cancelled", booking, {
+        cancelledBy: "cook",
+        refundNote: undefined,
+      });
+    } catch {
+    }
+
+    // Restart the finding-cook machinery: revive/reset the durable dispatch
+    // job (a plain enqueue would NOT revive a terminal job row), kick the
+    // worker, and emit a refresh trigger so live cook dashboards re-pull
+    // their (individually authorized) request pools. The payload carries
+    // only the booking id — never customer PII to untargeted clients.
+    try {
+      await dispatchJobs.resetDispatchJobForReplacement(booking._id);
+      dispatchJobs.kickWorker();
+    } catch {
+    }
+    try {
+      realtime.emit("booking_request", { bookingId: String(booking._id), replacement: true });
+    } catch {
+    }
+
+    return res.json({
+      ...(stripServiceOtp(booking).toObject ? stripServiceOtp(booking).toObject() : stripServiceOtp(booking)),
+      replacement: true,
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 exports.cancelBooking = async (req, res, next) => {
   try {
     let booking = await Booking.findById(req.params.id);
@@ -2537,6 +2746,21 @@ exports.cancelBooking = async (req, res, next) => {
     const isCook = booking.cook != null && booking.cook.toString() === req.user.id;
     const isAdmin = String(req.user.role).toUpperCase() === "ADMIN";
     if (!isCustomer && !isCook && !isAdmin) {
+      // Idempotent repeat: the cook who opened a replacement search
+      // re-submits after their assignment was already released. Confirm the
+      // current state instead of a misleading auth error, without
+      // duplicating audits, dispatch or refunds.
+      if (
+        booking.status === "requested" &&
+        booking.cook == null &&
+        String(booking.cookCancel?.cook || "") === String(req.user.id)
+      ) {
+        return res.json({
+          ...(stripServiceOtp(booking).toObject ? stripServiceOtp(booking).toObject() : stripServiceOtp(booking)),
+          replacement: true,
+          duplicate: true,
+        });
+      }
       return res.status(403).json({ message: "Not authorized" });
     }
 
@@ -2606,6 +2830,15 @@ exports.cancelBooking = async (req, res, next) => {
     });
     if (!policy.allowed) {
       return res.status(400).json({ message: policy.message || "This booking cannot be cancelled." });
+    }
+
+    // Cook-initiated cancellation with automatic replacement: the assigned
+    // cook releases the booking back into the finding-cook pool (same
+    // booking, fresh window, existing dispatch/accept/expiry machinery)
+    // instead of terminally cancelling it. Customer and admin
+    // cancellations continue on the terminal path below.
+    if (!isAdmin && isCook) {
+      return cookCancelWithReplacement(req, res, next, { booking, policy });
     }
     let cancelClaimed = false;
     if (dbReady()) {

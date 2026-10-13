@@ -94,6 +94,22 @@
   font-weight: 600;
   color: #065f46;
 }
+.info-alert-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 0.7rem 0.95rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #1d4ed8;
+  margin: 0.6rem 0;
+}
+.info-alert-banner > svg { flex-shrink: 0; margin-top: 1px; }
 
 .empty-state-card {
   display: flex;
