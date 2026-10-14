@@ -1,0 +1,270 @@
+// security-audit.test.js — regression tests for the P0/P1 audit fixes.
+// Run:  node backend/security-audit.test.js  — exits non-zero on any failure.
+process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
+process.env.NODE_ENV = process.env.NODE_ENV || "test";
+
+const Booking = require("./models/Booking");
+const Coupon = require("./models/Coupon");
+const CookProfile = require("./models/CookProfile");
+const Notification = require("./models/Notification");
+const bookingCtrl = require("./controllers/bookingController");
+const reviewCtrl = require("./controllers/reviewController");
+const {
+  parseTimeStrict,
+  isOnGrid,
+  parseDayStrict,
+  istDayString,
+} = require("./utils/time");
+
+let failures = 0, passes = 0;
+const check = (n, ok, d) => {
+  console.log(`${ok ? "PASS" : "FAIL"}  ${n}${d ? "  -> " + d : ""}`);
+  ok ? passes++ : failures++;
+};
+const makeRes = () => {
+  const r = { statusCode: 200, body: null };
+  r.status = (c) => { r.statusCode = c; return r; };
+  r.json = (p) => { r.body = p; return r; };
+  return r;
+};
+const next = (err) => { if (err) throw err || new Error("next()"); };
+const cookReq = (over = {}) => ({ params: { id: "b1" }, body: {}, user: { id: "cook1", role: "COOK" }, ...over });
+const custReq = (over = {}) => ({ params: { id: "b1" }, body: {}, user: { id: "cust1", role: "CUSTOMER" }, ...over });
+
+const doc = (over = {}) => ({
+  _id: "b1",
+  customer: "cust1",
+  cook: "cook1",
+  status: "confirmed",
+  statusHistory: [],
+  payment: { status: "paid", testMode: false },
+  ...over,
+  save: async function () { return this; },
+  toObject: function () { const { save, toObject, ...rest } = this; return { ...rest }; },
+});
+
+async function main() {
+  console.log("═══ time utils ═══");
+  check("strict HH:MM rejects prefix junk", parseTimeStrict("10:00abc") === null);
+  check("strict HH:MM rejects bad hour", parseTimeStrict("24:00") === null);
+  check("strict HH:MM rejects bad minute", parseTimeStrict("10:99") === null);
+  check("strict HH:MM accepts 09:30", parseTimeStrict("09:30") === 570);
+  check("grid enforces 30-min", isOnGrid(615) === false && isOnGrid(630) === true);
+  check("calendar rejects Feb 30", parseDayStrict("2026-02-30") === null);
+  check("calendar accepts leap-adjacent", parseDayStrict("2026-02-28") instanceof Date);
+  check("IST day string shape", /^\d{4}-\d{2}-\d{2}$/.test(istDayString()));
+
+  console.log("\n═══ completeBooking ═══");
+  {
+    const d = doc({ status: "confirmed", payment: { status: "pending" }, serviceStartedAt: new Date() });
+    Booking.findOne = async () => d;
+    const r = makeRes();
+    await bookingCtrl.completeBooking(cookReq(), r, next);
+    check("unpaid complete blocked", r.statusCode === 400, `s=${r.statusCode}`);
+  }
+  {
+    const d = doc({ status: "confirmed", payment: { status: "paid" } });
+    delete d.serviceStartedAt;
+    d.hoursCompleted = false;
+    Booking.findOne = async () => d;
+    const r = makeRes();
+    await bookingCtrl.completeBooking(cookReq(), r, next);
+    check("instant complete blocked", r.statusCode === 400, `s=${r.statusCode}`);
+  }
+  {
+    const d = doc({ status: "completed", payment: { status: "paid" }, serviceStartedAt: new Date() });
+    Booking.findOne = async () => d;
+    const r = makeRes();
+    await bookingCtrl.completeBooking(cookReq(), r, next);
+    check("completed idempotent", r.statusCode === 200 && r.body?.alreadyCompleted === true, `s=${r.statusCode}`);
+  }
+  {
+    const d = doc({ status: "in_progress", payment: { status: "paid" }, serviceStartedAt: new Date() });
+    Booking.findOne = async () => d;
+    Notification.create = async () => ({});
+    const User = require("./models/User");
+    const oF = User.findById;
+    User.findById = () => ({ select: async () => ({ name: "C" }) });
+    const r = makeRes();
+    await bookingCtrl.completeBooking(cookReq(), r, next);
+    User.findById = oF;
+    check("started service completes", r.statusCode === 200 && d.status === "completed", `s=${r.statusCode}`);
+  }
+
+  console.log("\n═══ cancelBooking ═══");
+  {
+    const d = doc({ status: "cancelled" });
+    Booking.findById = async () => d;
+    const r = makeRes();
+    await bookingCtrl.cancelBooking({ params: { id: "b1" }, user: { id: "cust1", role: "CUSTOMER" } }, r, next);
+    check("cancelled idempotent", r.statusCode === 200 && r.body?.alreadyCancelled === true, `s=${r.statusCode}`);
+  }
+  {
+    const future = new Date(Date.now() + 48 * 3600 * 1000);
+    const d = doc({
+      status: "in_progress",
+      payment: { status: "paid" },
+      serviceStartedAt: new Date(),
+      date: future,
+      startTime: "10:00",
+    });
+    Booking.findById = async () => d;
+    const r = makeRes();
+    await bookingCtrl.cancelBooking({ params: { id: "b1" }, user: { id: "cust1", role: "CUSTOMER" } }, r, next);
+    check("started service cancel blocked", r.statusCode === 400, `s=${r.statusCode}`);
+  }
+  {
+    const future = new Date(Date.now() + 48 * 3600 * 1000);
+    const d = doc({ status: "accepted", payment: { status: "pending" }, date: future, startTime: "10:00" });
+    Booking.findById = async () => d;
+    Notification.create = async () => ({});
+    const CancellationAudit = require("./models/CancellationAudit");
+    const oAC = CancellationAudit.create;
+    CancellationAudit.create = async () => ({});
+    let incArg = null;
+    CookProfile.updateOne = async (f, u) => { incArg = u; return {}; };
+    const r = makeRes();
+    await bookingCtrl.cancelBooking({ params: { id: "b1" }, body: { reason: "ILLNESS" }, user: { id: "cook1", role: "COOK" } }, r, next);
+    CancellationAudit.create = oAC;
+    check("cook cancel releases to replacement + bumps count", r.statusCode === 200 && r.body?.replacement === true && r.body?.status === "requested" && incArg?.$inc?.cancelledByCookCount === 1, `s=${r.statusCode}`);
+  }
+
+  console.log("\n═══ rescheduleBooking (customer/admin, no money moves) ═══");
+  {
+    // feature (customer + admin, instant move). Security-relevant behaviour
+    const chainable = (v) => ({
+      select: () => chainable(v),
+      lean: () => chainable(v),
+      then: (resolve, reject) => Promise.resolve(v).then(resolve, reject),
+    });
+    const oFind = Booking.find;
+    const oOne = CookProfile.findOne;
+    const oNotif = Notification.create;
+    try {
+      const target = (() => {
+        const d = new Date(Date.now() + 5 * 24 * 3600 * 1000);
+        const p = (n) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+      })();
+      const futureDoc = (over = {}) =>
+        doc({
+          status: "confirmed",
+          date: new Date(Date.now() + 48 * 3600 * 1000),
+          startTime: "10:00",
+          endTime: "12:00",
+          durationHours: 2,
+          rescheduleCount: 0,
+          ...over,
+        });
+      Booking.find = () => chainable([]);
+      CookProfile.findOne = () => chainable({ availabilityStatus: "available", approvalStatus: "approved" });
+      Notification.create = async () => ({});
+
+      {
+        const d = futureDoc();
+        Booking.findById = async () => d;
+        const r = makeRes();
+        await bookingCtrl.rescheduleBooking(
+          { params: { id: "b1" }, body: { date: target, startTime: "14:00" }, user: { id: "cust2", role: "CUSTOMER" } },
+          r,
+          next
+        );
+        check("stranger customer cannot reschedule", r.statusCode === 403, `s=${r.statusCode}`);
+        check(
+          "stranger attempt never mutates the booking",
+          d.startTime === "10:00" && !d.rescheduleCount && d.statusHistory.length === 0,
+          JSON.stringify({ s: d.startTime, n: d.rescheduleCount, h: d.statusHistory.length })
+        );
+      }
+      {
+        const d = futureDoc();
+        Booking.findById = async () => d;
+        const r = makeRes();
+        await bookingCtrl.rescheduleBooking(
+          { params: { id: "b1" }, body: { date: target, startTime: "14:00" }, user: { id: "cook1", role: "COOK" } },
+          r,
+          next
+        );
+        check("cook cannot reschedule in v1", r.statusCode === 403, `s=${r.statusCode}`);
+      }
+      {
+        Booking.findById = async () => null;
+        const r = makeRes();
+        await bookingCtrl.rescheduleBooking(
+          { params: { id: "gone" }, body: { date: target, startTime: "14:00" }, user: { id: "cust1", role: "CUSTOMER" } },
+          r,
+          next
+        );
+        check("missing booking -> 404 (tombstone gone)", r.statusCode === 404, `s=${r.statusCode}`);
+      }
+      {
+        const d = futureDoc({ serviceOtp: "9876", couponCode: "WELCOME50" });
+        const money = JSON.stringify(d.payment);
+        Booking.findById = async () => d;
+        const r = makeRes();
+        await bookingCtrl.rescheduleBooking(
+          { params: { id: "b1" }, body: { date: target, startTime: "14:00" }, user: { id: "cust1", role: "CUSTOMER" } },
+          r,
+          next
+        );
+        check("owner reschedule succeeds", r.statusCode === 200, `s=${r.statusCode} ${r.body?.message || ""}`);
+        check("paid move changes no money fields", JSON.stringify(d.payment) === money && !d.payment.refundStatus, JSON.stringify(d.payment));
+        check("coupon not released by a move", d.couponReleased !== true, String(d.couponReleased));
+        check("OTP stripped from the move response", !("serviceOtp" in (r.body || {})), Object.keys(r.body || {}).join(","));
+      }
+    } finally {
+      Booking.find = oFind;
+      CookProfile.findOne = oOne;
+      Notification.create = oNotif;
+    }
+  }
+
+  console.log("\n═══ payBooking zero-amount ═══");
+  {
+    const future = new Date(Date.now() + 48 * 3600 * 1000);
+    const d = doc({
+      status: "accepted",
+      amount: 0,
+      couponCode: "",
+      payment: { status: "pending" },
+      date: future,
+      startTime: "10:00",
+      endTime: "11:00",
+      paymentExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      requestExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    });
+    Booking.findOne = async (q) => {
+      if (q && q._id && q.status) return null; // atomic claim unused here
+      return d;
+    };
+    const r = makeRes();
+    await bookingCtrl.payBooking({ params: { id: "b1" }, body: {}, user: { id: "cust1", role: "CUSTOMER" } }, r, next);
+    check("zero without coupon rejected", r.statusCode === 400, `s=${r.statusCode}`);
+  }
+
+  console.log("\n═══ markCookArrived (manual arrival disabled) ═══");
+  {
+    let saved = false;
+    const d = doc({ status: "accepted", payment: { status: "pending" }, cookArrived: false });
+    d.save = async function () { saved = true; return this; };
+    const r = makeRes();
+    await bookingCtrl.markCookArrived({ params: { id: "b1" }, user: { id: "cook1", role: "COOK" } }, r, next);
+    check("manual arrival refused with 410", r.statusCode === 410, `s=${r.statusCode}`);
+    check("manual arrival writes nothing", saved === false && d.cookArrived === false, `saved=${saved} arrived=${d.cookArrived}`);
+  }
+
+  console.log("\n═══ createReview ═══");
+  {
+    const Review = require("./models/Review");
+    Booking.findById = async () => doc({ status: "confirmed", payment: { status: "pending" }, hoursCompleted: true });
+    const r = makeRes();
+    await reviewCtrl.createReview({ body: { booking: "b1", rating: 5, comment: "x" }, user: { id: "cust1", role: "CUSTOMER" } }, r, next);
+    check("unpaid review rejected", r.statusCode === 400, `s=${r.statusCode}`);
+    Review.findOne = async () => null;
+  }
+
+  console.log(`\n${passes} passed, ${failures} failed`);
+  process.exit(failures ? 1 : 0);
+}
+
+main().catch((e) => { console.error("FATAL", e); process.exit(1); });
