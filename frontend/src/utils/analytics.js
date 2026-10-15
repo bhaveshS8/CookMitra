@@ -89,6 +89,7 @@ const VISIT_SESSION_KEY = "cm-visit-sent";
 const VISIT_SID_KEY = "cm-visit-sid";
 const VISITOR_KEY = "cm-vid";
 const VISIT_CITY_TIMEOUT_MS = 2500;
+const VISIT_GPS_TIMEOUT_MS = 8000;
 
 const getVisitorId = () => {
   try {
@@ -125,7 +126,7 @@ export const trackSiteVisit = (path = "/") => {
     if (!vid) return;
     const sid = getVisitSid();
     if (!sid) return;
-    const send = (loc) => {
+    const send = (loc, source) => {
       import("../api/axios")
         .then(({ default: API }) =>
           API.post("/stats/public/visit", {
@@ -136,28 +137,80 @@ export const trackSiteVisit = (path = "/") => {
             area: loc?.area || "",
             state: loc?.state || "",
             country: loc?.country || "",
+            source: source === "gps" ? "gps" : "ip",
           })
         )
         .catch(() => {
         });
     };
-    let settled = false;
-    const done = (loc) => {
-      if (settled) return;
-      settled = true;
-      send(loc);
-    };
-    const timer = setTimeout(() => done(null), VISIT_CITY_TIMEOUT_MS);
-    import("./geolocation")
-      .then(({ fetchIpLocation }) => fetchIpLocation())
-      .then((loc) => {
-        clearTimeout(timer);
-        done(loc);
-      })
-      .catch(() => {
-        clearTimeout(timer);
-        done(null);
+    // Precise path: only when the browser ALREADY permits geolocation
+    // (e.g. granted earlier in a booking flow). A "prompt" result resolves
+    // null immediately — analytics must never pop a permission dialog.
+    // Only reverse-geocoded area/city labels leave the device; raw
+    // coordinates are never sent anywhere.
+    const tryPermittedGps = () =>
+      new Promise((resolve) => {
+        try {
+          if (!navigator.geolocation || !navigator.permissions?.query) return resolve(null);
+          navigator.permissions
+            .query({ name: "geolocation" })
+            .then((st) => {
+              if (!st || st.state !== "granted") return resolve(null);
+              const timer = setTimeout(() => resolve(null), VISIT_GPS_TIMEOUT_MS);
+              navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                  clearTimeout(timer);
+                  resolve(pos);
+                },
+                () => {
+                  clearTimeout(timer);
+                  resolve(null);
+                },
+                { enableHighAccuracy: true, timeout: VISIT_GPS_TIMEOUT_MS, maximumAge: 600000 }
+              );
+            })
+            .catch(() => resolve(null));
+        } catch {
+          resolve(null);
+        }
       });
+    const sendIpFallback = () => {
+      let settled = false;
+      const done = (loc) => {
+        if (settled) return;
+        settled = true;
+        send(loc, "ip");
+      };
+      const timer = setTimeout(() => done(null), VISIT_CITY_TIMEOUT_MS);
+      import("./geolocation")
+        .then(({ fetchIpLocation }) => fetchIpLocation())
+        .then((loc) => {
+          clearTimeout(timer);
+          done(loc);
+        })
+        .catch(() => {
+          clearTimeout(timer);
+          done(null);
+        });
+    };
+    tryPermittedGps()
+      .then(async (pos) => {
+        if (!pos || !Number.isFinite(pos.coords?.latitude) || !Number.isFinite(pos.coords?.longitude)) {
+          sendIpFallback();
+          return;
+        }
+        try {
+          const { reverseGeocode } = await import("./geolocation");
+          const g = await reverseGeocode(pos.coords.latitude, pos.coords.longitude, { timeoutMs: 5000 });
+          if (g && (g.city || g.area)) {
+            send({ city: g.city, area: g.area, state: g.state, country: "" }, "gps");
+            return;
+          }
+        } catch {
+        }
+        sendIpFallback();
+      })
+      .catch(sendIpFallback);
   } catch {
   }
 };

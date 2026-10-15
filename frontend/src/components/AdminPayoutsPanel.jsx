@@ -3,14 +3,19 @@ import API from "../api/axios";
 import { useShowToast } from "../store/hooks";
 import { formatCurrency, formatDate, formatTimeRange12 } from "../utils/constants";
 import ConfirmDialog from "./ConfirmDialog";
+import "./AdminRefunds.css";
 import {
   Banknote,
   CheckCircle2,
+  Check,
   Clock3,
   AlertCircle,
   Copy,
   RefreshCw,
   XCircle,
+  Wallet,
+  SlidersHorizontal,
+  ChevronDown,
 } from "lucide-react";
 
 const PAGE_LIMIT = 25;
@@ -100,6 +105,108 @@ const Pager = ({ page, totalPages, total, onPage, label }) => {
       <button type="button" className="btn btn-outline btn-sm" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>
         Next →
       </button>
+    </div>
+  );
+};
+
+const REFUND_STATUS_OPTIONS = [
+  { value: "", label: "Actionable (default)" },
+  { value: "pending", label: "Pending" },
+  { value: "processing", label: "Processing" },
+  { value: "failed", label: "Failed" },
+  { value: "manual", label: "Manual" },
+  { value: "processed", label: "Processed (history)" },
+  { value: "rejected", label: "Rejected (history)" },
+  { value: "all", label: "All statuses" },
+];
+
+// Custom styled replacement for the native status <select> (whose popup
+// list is OS-rendered and cannot be styled). Button + popup menu with full
+// keyboard support: Enter/Space/ArrowDown opens, arrows move, Enter picks.
+const RefundStatusFilter = ({ value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const [focusIdx, setFocusIdx] = useState(0);
+  const wrapRef = useRef(null);
+  const current = REFUND_STATUS_OPTIONS.find((o) => o.value === value) || REFUND_STATUS_OPTIONS[0];
+
+  useEffect(() => {
+    if (!open) return;
+    setFocusIdx(Math.max(0, REFUND_STATUS_OPTIONS.findIndex((o) => o.value === value)));
+    const onDocClick = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, value]);
+
+  const pick = (v) => {
+    onChange(v);
+    setOpen(false);
+  };
+
+  const onBtnKey = (e) => {
+    if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      setOpen(true);
+    }
+  };
+  const onMenuKey = (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusIdx((i) => (i + 1) % REFUND_STATUS_OPTIONS.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusIdx((i) => (i - 1 + REFUND_STATUS_OPTIONS.length) % REFUND_STATUS_OPTIONS.length);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      pick(REFUND_STATUS_OPTIONS[focusIdx].value);
+    }
+  };
+
+  return (
+    <div className={`rf-dd${value ? " is-active" : ""}${open ? " is-open" : ""}`} ref={wrapRef}>
+      <button
+        type="button"
+        className="rf-dd-btn"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Filter refunds by status"
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={onBtnKey}
+      >
+        <SlidersHorizontal size={14} aria-hidden="true" />
+        <span className="rf-dd-label">Status</span>
+        <span className="rf-dd-value">{current.label}</span>
+        <ChevronDown size={14} aria-hidden="true" className="rf-dd-chev" />
+      </button>
+      {open && (
+        <ul className="rf-dd-menu" role="listbox" aria-label="Refund statuses" onKeyDown={onMenuKey}>
+          {REFUND_STATUS_OPTIONS.map((o, i) => (
+            <li key={o.value || "default"}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={o.value === value}
+                className={`rf-dd-item${o.value === value ? " is-selected" : ""}${i === focusIdx ? " is-focused" : ""}`}
+                onClick={() => pick(o.value)}
+                onMouseEnter={() => setFocusIdx(i)}
+              >
+                <span className="rf-dd-check" aria-hidden="true">
+                  {o.value === value && <Check size={13} />}
+                </span>
+                {o.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 };
@@ -312,28 +419,23 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
 
   return (
     <div className="admin-section">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", gap: "0.6rem", flexWrap: "wrap" }}>
-        <h2 style={{ fontSize: "1.15rem", fontWeight: 800, margin: 0 }}>{isRefunds ? "Refunds" : "Cook Payouts"}</h2>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+      <div className={isRefunds ? "rf-head" : undefined} style={isRefunds ? undefined : { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", gap: "0.6rem", flexWrap: "wrap" }}>
+        {isRefunds ? (
+          <div className="rf-title">
+            <span className="rf-title-ico" aria-hidden="true">
+              <Wallet size={20} />
+            </span>
+            <div>
+              <h2>Refunds</h2>
+              <p className="rf-sub">Review customer refund requests and record manual settlements.</p>
+            </div>
+          </div>
+        ) : (
+          <h2 style={{ fontSize: "1.15rem", fontWeight: 800, margin: 0 }}>Cook Payouts</h2>
+        )}
+        <div className={isRefunds ? "rf-toolbar" : undefined} style={isRefunds ? undefined : { display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
           {isRefunds && (
-            <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.82rem", color: "var(--slate-600)" }}>
-              Status
-              <select
-                className="form-control"
-                style={{ padding: "0.3rem 0.5rem", fontSize: "0.85rem", width: "auto" }}
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="">Actionable (default)</option>
-                <option value="pending">Pending</option>
-                <option value="processing">Processing</option>
-                <option value="failed">Failed</option>
-                <option value="manual">Manual</option>
-                <option value="processed">Processed (history)</option>
-                <option value="rejected">Rejected (history)</option>
-                <option value="all">All statuses</option>
-              </select>
-            </label>
+            <RefundStatusFilter value={statusFilter} onChange={setStatusFilter} />
           )}
           <button className="btn btn-outline btn-sm" onClick={() => { isRefunds ? refetchRefunds() : refetch(); }}>
             <RefreshCw size={15} /> Refresh
@@ -348,7 +450,7 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
               <AlertCircle size={16} /> {refundsError}
             </div>
           )}
-          {refundsLoading && <p style={{ color: "var(--slate-500)" }}>Loading refund requests…</p>}
+          {refundsLoading && <p className="rf-loading">Loading refund requests…</p>}
         </>
       ) : (
         <>
@@ -504,145 +606,114 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
       )}
       {isRefunds && (
       <>
-      <h3 style={{ margin: "1.75rem 0 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-        <Clock3 size={17} style={{ color: "#d97706" }} /> Refunds awaiting decision
-      </h3>
+      <section className="rf-section" aria-label="Refunds awaiting decision">
+      <div className="rf-section-head">
+        <span className="rf-section-ico" aria-hidden="true"><Clock3 size={16} /></span>
+        <h3>Refunds awaiting decision</h3>
+        {pendingRefunds?.length > 0 && <span className="rf-count">{pendingRefunds.length}</span>}
+      </div>
       {!pendingRefunds?.length ? (
-        <p style={{ color: "var(--slate-500)", fontSize: "0.9rem" }}>Nothing awaiting a decision on this page.</p>
+        <p className="rf-empty-note"><CheckCircle2 size={15} /> Nothing awaiting a decision on this page.</p>
       ) : (
         <div className="bookings-list-modern">
           {pendingRefunds.map((b) => (
-            <article key={b._id} className="booking-item-card">
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
-                <div>
-                  <strong>{b.customer?.name || "Customer"}</strong>
-                  <span style={{ color: "var(--slate-500)", fontSize: "0.85rem" }}>
-                    {" "}· {formatCurrency(b.payment?.refundAmount || b.amount)} refund ·{" "}
+            <article key={b._id} className="booking-item-card rf-card rf-card--amber">
+              <div className="rf-top">
+                <span className="rf-avatar" aria-hidden="true">
+                  {(b.customer?.name || "C")[0].toUpperCase()}
+                </span>
+                <div className="rf-id">
+                  <div className="rf-name-row">
+                    <strong>{b.customer?.name || "Customer"}</strong>
+                    <span className="rf-amount">{formatCurrency(b.payment?.refundAmount || b.amount)} refund</span>
+                  </div>
+                  <p className="rf-meta">
                     {b.status ? String(b.status).replace(/_/g, " ") : "booking"} ·{" "}
                     {b.date ? formatDate(b.date) : ""}
                     {b.startTime ? ` · ${formatTimeRange12(b.startTime, b.endTime, "-")}` : ""}
-                  </span>
-                  <div style={{ fontSize: "0.8rem", color: "var(--slate-500)", marginTop: "0.2rem" }}>
-                    Payment id: <code>{b.payment?.razorpayPaymentId || "—"}</code>
-                  </div>
-                  {b.payment?.refundReason ? (
-                    <div style={{ fontSize: "0.82rem", color: "var(--slate-700)", marginTop: "0.25rem" }}>
-                      <strong>Reason:</strong> {b.payment.refundReason}
-                      {b.payment?.refundCustomerNote ? ` — “${b.payment.refundCustomerNote}”` : ""}
-                    </div>
-                  ) : null}
-                  {b.payment?.refundRequestedAt ? (
-                    <div style={{ fontSize: "0.78rem", color: "var(--slate-500)" }}>
-                      Requested {new Date(b.payment.refundRequestedAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}
-                      {b.payment?.refundRequestedBy ? ` · by ${b.payment.refundRequestedBy}` : ""}
-                    </div>
-                  ) : null}
+                  </p>
                 </div>
-                <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    disabled={saving}
-                    onClick={() => setPendingApprove(b)}
-                  >
-                    <CheckCircle2 size={14} /> Approve
-                  </button>
-                  <button
-                    className="btn btn-danger-outline btn-sm"
-                    disabled={saving}
-                    onClick={() => setPendingReject({ kind: "refund", id: b._id })}
-                  >
-                    <XCircle size={14} /> Reject
-                  </button>
+              </div>
+              <div className="rf-payline">
+                Payment id: <code>{b.payment?.razorpayPaymentId || "—"}</code>
+              </div>
+              {b.payment?.refundReason ? (
+                <div className="rf-note">
+                  <strong>Reason:</strong> {b.payment.refundReason}
+                  {b.payment?.refundCustomerNote ? ` — “${b.payment.refundCustomerNote}”` : ""}
                 </div>
+              ) : null}
+              {b.payment?.refundRequestedAt ? (
+                <div className="rf-requested">
+                  Requested {new Date(b.payment.refundRequestedAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}
+                  {b.payment?.refundRequestedBy ? ` · by ${b.payment.refundRequestedBy}` : ""}
+                </div>
+              ) : null}
+              <div className="rf-actions">
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={saving}
+                  onClick={() => setPendingApprove(b)}
+                >
+                  <CheckCircle2 size={14} /> Approve
+                </button>
+                <button
+                  className="btn btn-danger-outline btn-sm"
+                  disabled={saving}
+                  onClick={() => setPendingReject({ kind: "refund", id: b._id })}
+                >
+                  <XCircle size={14} /> Reject
+                </button>
               </div>
             </article>
           ))}
         </div>
       )}
-      <h3 style={{ margin: "1.75rem 0 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-        <AlertCircle size={17} style={{ color: "#b45309" }} /> Refunds stuck mid-approval
-      </h3>
+      </section>
+      <section className="rf-section" aria-label="Refunds stuck mid-approval">
+      <div className="rf-section-head">
+        <span className="rf-section-ico rf-ico-rose" aria-hidden="true"><AlertCircle size={16} /></span>
+        <h3>Refunds stuck mid-approval</h3>
+        {processingRefunds?.length > 0 && <span className="rf-count">{processingRefunds.length}</span>}
+      </div>
       {!processingRefunds?.length ? (
-        <p style={{ color: "var(--slate-500)", fontSize: "0.9rem" }}>None — every approval finished cleanly.</p>
+        <p className="rf-empty-note"><CheckCircle2 size={15} /> None — every approval finished cleanly.</p>
       ) : (
         <div className="bookings-list-modern">
           {processingRefunds.map((b) => (
-            <article key={b._id} className="booking-item-card">
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
-                <div>
-                  <strong>{b.customer?.name || "Customer"}</strong>
-                  <span style={{ color: "var(--slate-500)", fontSize: "0.85rem" }}>
-                    {" "}· {formatCurrency(b.payment?.refundAmount || b.amount)} refund · approval interrupted
-                  </span>
-                  <div style={{ fontSize: "0.8rem", color: "var(--slate-500)", marginTop: "0.2rem" }}>
-                    Payment id: <code>{b.payment?.razorpayPaymentId || "—"}</code>
+            <article key={b._id} className="booking-item-card rf-card rf-card--rose">
+              <div className="rf-top">
+                <span className="rf-avatar" aria-hidden="true">
+                  {(b.customer?.name || "C")[0].toUpperCase()}
+                </span>
+                <div className="rf-id">
+                  <div className="rf-name-row">
+                    <strong>{b.customer?.name || "Customer"}</strong>
+                    <span className="rf-amount">{formatCurrency(b.payment?.refundAmount || b.amount)} refund</span>
                   </div>
-                  <p style={{ margin: "0.35rem 0 0", fontSize: "0.82rem", color: "#b45309" }}>
-                    Verify with the gateway before anything else — recording a manual settlement without
-                    checking could refund the customer twice.
-                  </p>
-                </div>
-                <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    disabled={saving}
-                    onClick={() => reconcileRefund(b._id)}
-                  >
-                    <RefreshCw size={14} /> Verify with gateway
-                  </button>
-                  {refFor === `refund-${b._id}` ? (
-                    <div style={{ display: "flex", gap: "0.4rem" }}>
-                      <input
-                        className="form-control"
-                        style={{ padding: "0.3rem 0.5rem", fontSize: "0.85rem", width: "11rem" }}
-                        placeholder="Transfer ref"
-                        value={reference}
-                        autoFocus
-                        onChange={(e) => setReference(e.target.value)}
-                      />
-                      <button className="btn btn-primary btn-sm" disabled={saving} onClick={() => markRefundSettled(b._id)}>
-                        <CheckCircle2 size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      className="btn btn-outline btn-sm"
-                      onClick={() => { setRefFor(`refund-${b._id}`); setReference(""); }}
-                    >
-                      <Clock3 size={14} /> Mark settled
-                    </button>
-                  )}
+                  <p className="rf-meta">approval interrupted</p>
                 </div>
               </div>
-            </article>
-          ))}
-        </div>
-      )}
-      <h3 style={{ margin: "1.75rem 0 0.75rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-        <AlertCircle size={17} style={{ color: "#d97706" }} /> Refunds needing manual action
-      </h3>
-      {!followupRefunds?.length ? (
-        <p style={{ color: "var(--slate-500)", fontSize: "0.9rem" }}>Nothing pending on this page — all shown refunds processed.</p>
-      ) : (
-        <div className="bookings-list-modern">
-          {followupRefunds.map((b) => (
-            <article key={b._id} className="booking-item-card">
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
-                <div>
-                  <strong>{b.customer?.name || "Customer"}</strong>
-                  <span style={{ color: "var(--slate-500)", fontSize: "0.85rem" }}>
-                    {" "}· {formatCurrency(b.payment?.refundAmount || b.amount)} refund ·{" "}
-                    {b.payment?.refundStatus === "failed" ? "gateway refund failed" : "needs manual transfer"}
-                  </span>
-                  <div style={{ fontSize: "0.8rem", color: "var(--slate-500)", marginTop: "0.2rem" }}>
-                    Payment id: <code>{b.payment?.razorpayPaymentId || "—"}</code>
-                  </div>
-                </div>
+              <div className="rf-payline">
+                Payment id: <code>{b.payment?.razorpayPaymentId || "—"}</code>
+              </div>
+              <p className="rf-warn">
+                <AlertCircle size={14} />
+                <span>Verify with the gateway before anything else — recording a manual settlement without
+                checking could refund the customer twice.</span>
+              </p>
+              <div className="rf-actions">
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={saving}
+                  onClick={() => reconcileRefund(b._id)}
+                >
+                  <RefreshCw size={14} /> Verify with gateway
+                </button>
                 {refFor === `refund-${b._id}` ? (
-                  <div style={{ display: "flex", gap: "0.4rem" }}>
+                  <div className="rf-settle-inline">
                     <input
                       className="form-control"
-                      style={{ padding: "0.3rem 0.5rem", fontSize: "0.85rem", width: "11rem" }}
                       placeholder="Transfer ref"
                       value={reference}
                       autoFocus
@@ -665,6 +736,64 @@ const AdminPayoutsPanel = ({ view = "payouts" }) => {
           ))}
         </div>
       )}
+      </section>
+      <section className="rf-section" aria-label="Refunds needing manual action">
+      <div className="rf-section-head">
+        <span className="rf-section-ico rf-ico-blue" aria-hidden="true"><Banknote size={16} /></span>
+        <h3>Refunds needing manual action</h3>
+        {followupRefunds?.length > 0 && <span className="rf-count">{followupRefunds.length}</span>}
+      </div>
+      {!followupRefunds?.length ? (
+        <p className="rf-empty-note"><CheckCircle2 size={15} /> Nothing pending on this page — all shown refunds processed.</p>
+      ) : (
+        <div className="bookings-list-modern">
+          {followupRefunds.map((b) => (
+            <article key={b._id} className="booking-item-card rf-card rf-card--blue">
+              <div className="rf-top">
+                <span className="rf-avatar" aria-hidden="true">
+                  {(b.customer?.name || "C")[0].toUpperCase()}
+                </span>
+                <div className="rf-id">
+                  <div className="rf-name-row">
+                    <strong>{b.customer?.name || "Customer"}</strong>
+                    <span className="rf-amount">{formatCurrency(b.payment?.refundAmount || b.amount)} refund</span>
+                  </div>
+                  <p className="rf-meta">
+                    {b.payment?.refundStatus === "failed" ? "gateway refund failed" : "needs manual transfer"}
+                  </p>
+                </div>
+              </div>
+              <div className="rf-payline">
+                Payment id: <code>{b.payment?.razorpayPaymentId || "—"}</code>
+              </div>
+              <div className="rf-actions">
+                {refFor === `refund-${b._id}` ? (
+                  <div className="rf-settle-inline">
+                    <input
+                      className="form-control"
+                      placeholder="Transfer ref"
+                      value={reference}
+                      autoFocus
+                      onChange={(e) => setReference(e.target.value)}
+                    />
+                    <button className="btn btn-primary btn-sm" disabled={saving} onClick={() => markRefundSettled(b._id)}>
+                      <CheckCircle2 size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="btn btn-outline btn-sm"
+                    onClick={() => { setRefFor(`refund-${b._id}`); setReference(""); }}
+                  >
+                    <Clock3 size={14} /> Mark settled
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+      </section>
       <Pager page={refundsPage} totalPages={refundsPages} total={refundsTotal} onPage={gotoRefundsPage} label="refund rows" />
       </>
       )}

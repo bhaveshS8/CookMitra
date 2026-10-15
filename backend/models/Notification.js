@@ -84,4 +84,14 @@ const notificationSchema = new mongoose.Schema(
 
 notificationSchema.index({ user: 1, read: 1 });
 
+// Auto-expiry: notifications older than the retention window are removed by
+// MongoDB's TTL monitor (~every 60s), read or unread — the bell stays about
+// recent items. Same convention as VisitSession/DailyVisitor TTLs.
+const retentionDays = (() => {
+  const n = Number(process.env.NOTIFICATION_TTL_DAYS);
+  if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  return 7;
+})();
+notificationSchema.index({ createdAt: 1 }, { expireAfterSeconds: retentionDays * 24 * 60 * 60 });
+
 module.exports = mongoose.model("Notification", notificationSchema);

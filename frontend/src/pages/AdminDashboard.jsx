@@ -12,6 +12,7 @@ import CouponManagement from "../components/CouponManagement";
 import VisitStats from "../components/VisitStats";
 import AnalyticsPanel from "../components/AnalyticsPanel";
 import AdminPayoutsPanel from "../components/AdminPayoutsPanel";
+import AdminWeeklyPayouts from "../components/AdminWeeklyPayouts";
 import ConfirmDialog from "../components/ConfirmDialog";
 import {
   ShieldAlert,
@@ -115,6 +116,18 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("book
           <Banknote size={17} /> Cook Payouts
         </button>
         <button
+          className={`tab-btn ${activeTab === "pending-payouts" ? "active" : ""}`}
+          onClick={() => setActiveTab("pending-payouts")}
+        >
+          <Clock3 size={17} /> Pending Payouts
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "completed-payments" ? "active" : ""}`}
+          onClick={() => setActiveTab("completed-payments")}
+        >
+          <CheckCircle2 size={17} /> Completed Payments
+        </button>
+        <button
           className={`tab-btn ${activeTab === "refunds" ? "active" : ""}`}
           onClick={() => setActiveTab("refunds")}
         >
@@ -134,6 +147,8 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("book
       {activeTab === "admins" && <AdminManagement />}
       {activeTab === "coupons" && <CouponManagement />}
       {activeTab === "payouts" && <AdminPayoutsPanel view="payouts" />}
+      {activeTab === "pending-payouts" && <AdminWeeklyPayouts mode="pending" />}
+      {activeTab === "completed-payments" && <AdminWeeklyPayouts mode="completed" />}
       {activeTab === "refunds" && <AdminPayoutsPanel view="refunds" />}
       {activeTab === "visits" && <VisitStats />}
       {activeTab === "analytics" && <AnalyticsPanel />}
@@ -447,11 +462,23 @@ const BookingManagement = () => {
         d.bookingId ? "This request expired — the slot was released." : null
       );
     };
+    const onReplacementNeeded = (e) => {
+      const d = e?.detail || {};
+      const ref = d.bookingId ? String(d.bookingId).slice(-6) : "";
+      showToast(
+        `Replacement cook needed${ref ? ` — booking #${ref}` : ""}. Open the request to assign an eligible cook.`,
+        "warning",
+        9000
+      );
+      refetch();
+    };
     window.addEventListener("realtime-booking-request", onRequest);
+    window.addEventListener("realtime-booking-replacement-needed", onReplacementNeeded);
     window.addEventListener("realtime-booking-assigned", onAssigned);
     window.addEventListener("realtime-booking-expired", onExpired);
     return () => {
       window.removeEventListener("realtime-booking-request", onRequest);
+      window.removeEventListener("realtime-booking-replacement-needed", onReplacementNeeded);
       window.removeEventListener("realtime-booking-assigned", onAssigned);
       window.removeEventListener("realtime-booking-expired", onExpired);
     };

@@ -15,6 +15,10 @@ const {
   buildServiceCompletedMessage,
   bookingUrl,
 } = require("./whatsapp");
+const {
+  buildCookCancelledMessage,
+  buildCookAcceptedMessage,
+} = require("./whatsappMessages");
 const { slotRange } = require("./time");
 
 const API_VERSION = process.env.WHATSAPP_API_VERSION || "v22.0";
@@ -315,7 +319,8 @@ const sendBookingWhatsApp = async (event, booking, opts = {}) => {
       case "accepted":
         customerMessage = buildAcceptedMessage({ cookName, cookPhone, booking });
         if (opts.notifyCook) {
-          cookMessage = buildAcceptedMessage({ booking, customerName, forCook: true });
+          // Cook copy is Marathi; customer copy keeps existing language.
+          cookMessage = buildCookAcceptedMessage({ booking, customerName });
         }
         break;
       case "rejected":
@@ -347,7 +352,8 @@ const sendBookingWhatsApp = async (event, booking, opts = {}) => {
         break;
       }
       case "cancelled":
-        cookMessage = buildCancelledMessage({ booking, cancelledBy: opts.cancelledBy, refundNote: opts.refundNote });
+        // Customer copy keeps the existing language; cook copy is Marathi.
+        cookMessage = buildCookCancelledMessage({ booking, cancelledBy: opts.cancelledBy });
         customerMessage = buildCancelledMessage({ booking, cancelledBy: opts.cancelledBy, refundNote: opts.refundNote });
         break;
       case "rescheduled":

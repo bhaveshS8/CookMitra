@@ -12,7 +12,7 @@
     "dev": "nodemon server.js",
     "seed": "node seeds/seed.js",
     "seed:coupons": "node seeds/seed.js --coupons-only",
-    "test": "node check-tests-present.js && node staging-preflight.test.js && node slot-engine.test.js && node admin-accept.test.js && node login.test.js && node forgot-password.test.js && node coupon.test.js && node coupon-lifecycle.test.js && node location.test.js && node woman-presence.test.js && node log-scrub.test.js && node master-suite.test.js && node reschedule.test.js && node reschedule-cook.test.js && node auto-complete-notify.test.js && node launch-pricing.test.js && node cook-earnings.test.js && node cook-earnings-regression.test.js && node payout-index-check.test.js && node cancellation-refund.test.js && node cook-cancel-replacement.test.js && node start-service.test.js && node visit-stats.test.js && node payout-settle.test.js && node review-rating.test.js && node rate-limit-store.test.js && node security-audit.test.js && node payment-adversarial.test.js && node pay-whatsapp.test.js && node whatsapp-api.test.js && node whatsapp-inbound.test.js && node whatsapp-channel.test.js && node whatsapp-dispatch-jobs.test.js && node state-claim.test.js && node refund-request.test.js && node complaint-filing.test.js && node refund-hardening.test.js && node finance-audit.test.js && node p0-hardening.test.js && node analytics-accuracy.test.js && node refund-deep-audit.test.js"
+    "test": "node check-tests-present.js && node staging-preflight.test.js && node slot-engine.test.js && node admin-accept.test.js && node admin-assign-jobsheet.test.js && node admin-delete-guard.test.js && node login.test.js && node forgot-password.test.js && node coupon.test.js && node coupon-lifecycle.test.js && node location.test.js && node woman-presence.test.js && node log-scrub.test.js && node master-suite.test.js && node reschedule.test.js && node reschedule-cook.test.js && node auto-complete-notify.test.js && node launch-pricing.test.js && node cook-earnings.test.js && node cook-earnings-regression.test.js && node payout-index-check.test.js && node cancellation-refund.test.js && node cook-cancel-replacement.test.js && node cook-cancel-admin-notify.test.js && node replacement-dispatch-reset.test.js && node start-service.test.js && node visit-stats.test.js && node payout-settle.test.js && node payout-weekly-guards.test.js && node weekly-payout.test.js && node notification-expiry.test.js && node review-rating.test.js && node rate-limit-store.test.js && node security-audit.test.js && node payment-adversarial.test.js && node pay-whatsapp.test.js && node whatsapp-api.test.js && node whatsapp-inbound.test.js && node whatsapp-channel.test.js && node whatsapp-dispatch-jobs.test.js && node whatsapp-marathi-cook.test.js && node state-claim.test.js && node refund-request.test.js && node complaint-filing.test.js && node refund-hardening.test.js && node finance-audit.test.js && node p0-hardening.test.js && node analytics-accuracy.test.js && node refund-deep-audit.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -32,6 +32,7 @@
     "razorpay": "^2.9.8"
   },
   "devDependencies": {
+    "mongodb-memory-server": "^11.3.0",
     "nodemon": "^3.1.4"
   }
 }

@@ -24,6 +24,11 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
   const acceptBtnRef = useRef(null);
   const [nowMs, setNowMs] = useState(Date.now());
   const needsCookPick = Boolean(onBehalf && !booking?.cook);
+  // Replacement bookings (cook cancelled, search reopened on the same
+  // booking): show the cancellation context and never ask for payment again.
+  const isReplacement = Boolean(booking?.cookCancel?.cook);
+  const isPaidReplacement = Boolean(isReplacement && String(booking?.payment?.status || "").toLowerCase() === "paid");
+  const paidAmount = booking?.payment?.paidAmount ?? booking?.amount;
   const [assignCookId, setAssignCookId] = useState("");
   const [assignCooks, setAssignCooks] = useState([]);
   const [assignLoading, setAssignLoading] = useState(false);
@@ -172,7 +177,9 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
       showToast(
         action === "accept"
           ? onBehalf
-            ? "Accepted on behalf of the cook — the customer has 5 minutes to pay."
+            ? isPaidReplacement
+              ? "Replacement cook assigned — payment already collected, no recharge."
+              : "Accepted on behalf of the cook — the customer has 5 minutes to pay."
             : "Booking accepted — the customer has 5 minutes to pay."
           : onBehalf
           ? "Request declined on behalf of the cook."
@@ -228,9 +235,11 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
             <CalendarCheck size={22} />
           </span>
           <div className="brm-head-text">
-            <h3 id="booking-request-title">{onBehalf ? "New customer request" : "New booking request"}</h3>
+            <h3 id="booking-request-title">{isReplacement ? "Cook cancelled — assign a replacement" : onBehalf ? "New customer request" : "New booking request"}</h3>
             <p>
-              {onBehalf
+              {isReplacement
+                ? `${booking?.customer?.name || "A customer"}'s paid booking needs a new cook — pick an eligible cook below to assign immediately.`
+                : onBehalf
                 ? `${booking?.customer?.name || "A customer"} wants to book ${booking?.cook?.name || "a cook"} — accepting books it on the cook's behalf.`
                 : `${booking?.customer?.name || "A customer"} wants to book you — respond before the timer runs out or the request expires.`}
             </p>
@@ -281,6 +290,18 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
           {booking?.notes && <p className="brm-note">Note: {booking.notes}</p>}
         </div>
 
+        {isReplacement && (
+          <div className="brm-replacement" role="note" aria-label="Replacement context">
+            <p className="brm-replacement-title">Replacement needed — assigned cook cancelled</p>
+            <p className="brm-replacement-text">
+              Same booking, same customer.{" "}
+              {isPaidReplacement
+                ? `Payment of ${paidAmount != null ? `₹${paidAmount}` : "the fee"} already collected — assigning a cook will not recharge the customer.`
+                : "Payment will be collected after a cook accepts."}
+            </p>
+          </div>
+        )}
+
         {error && !takenOver && (
           <div className="error-alert-banner" style={{ marginBottom: "0.75rem" }}>
             <AlertCircle size={16} /> {error}
@@ -311,9 +332,10 @@ const BookingRequestModal = ({ open, booking, onClose, onAction, onBehalf }) => 
               {assignCooks.map((c) => {
                 const id = String(c?.user?._id || (typeof c?.user === "string" ? c.user : null) || c?._id || "");
                 const name = c?.user?.name || c?.name || "Verified cook";
+                const phone = c?.user?.phone || c?.phone || "";
                 return (
                   <option key={id} value={id}>
-                    {name}{c?.serviceArea ? ` · ${c.serviceArea}` : ""}
+                    {name}{c?.serviceArea ? ` · ${c.serviceArea}` : ""}{phone ? ` · ${phone}` : ""}
                   </option>
                 );
               })}

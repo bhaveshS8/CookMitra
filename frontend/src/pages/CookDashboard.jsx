@@ -6,13 +6,10 @@ import { useSelector } from "react-redux";
 import { useShowToast } from "../store/hooks";
 import { formatDate, playAlarmSound, localTomorrowStr, mapsNavigateUrl, formatTimeRange12, dayTagLabel, getLocalDateStr, isCancelLocked, isUnpaidCancelled } from "../utils/constants";
 import { useLocalDay } from "../hooks/useLocalDay";
-import CookProfileForm from "../components/CookProfileForm";
 import CookAvailabilityToggle from "../components/CookAvailabilityToggle";
 import { resolveFileUrl } from "../components/CookDocUploads";
 import BookingRequestModal from "../components/BookingRequestModal";
 import CookCancelModal from "../components/CookCancelModal";
-import CookScheduleEditor from "../components/CookScheduleEditor";
-import CookPayoutPanel from "../components/CookPayoutPanel";
 import { Check, XCircle, BellRing, ArrowRight, Star, MapPin, Navigation, CalendarDays, CalendarCheck, CalendarClock, Inbox, History, UserRound, Users, Soup, Wallet, ChefHat, AlertCircle, ShieldCheck } from "lucide-react";
 
 const customerLocationLabel = (booking) => {
@@ -31,7 +28,7 @@ const CookDashboard = () => {
   const { data: scheduledToday, refetch: refetchToday } = useFetch("/bookings/cook/schedule?day=today");
   const { data: scheduledTomorrow, refetch: refetchTomorrow } = useFetch("/bookings/cook/schedule?day=tomorrow");
   const { data: cookProfile, loading: loadingProfile, refetch: refetchCookProfile } = useFetch("/cooks/me");
-  const { data: myReviews, loading: loadingReviews } = useFetch("/reviews/cook-me");
+  const { data: myReviews } = useFetch("/reviews/cook-me");
   const { data: myComplaints } = useFetch("/complaints/my");
   const showToast = useShowToast();
   const user = useSelector((s) => s.auth.user);
@@ -426,9 +423,9 @@ const CookDashboard = () => {
               onChanged={() => refetchCookProfile()}
             />
             <div className="cook-hero-btn-row">
-              <button type="button" className="cook-glass-btn" onClick={() => setView("profile")}>
+              <Link className="cook-glass-btn" to="/dashboard/cook-profile">
                 <UserRound size={15} /> Profile
-              </button>
+              </Link>
               <Link className="cook-glass-btn" to="/dashboard/cook-reviews">
                 <Star size={15} /> Reviews
               </Link>
@@ -481,7 +478,7 @@ const CookDashboard = () => {
               ? "Your application needs attention — please update your profile."
               : "Your profile is under review — you'll be bookable once approved."}
           </span>
-          <button onClick={() => setView("profile")} className="cook-link-btn">
+          <button onClick={() => navigate("/dashboard/cook-profile")} className="cook-link-btn">
             {cookProfile ? "Review profile →" : "Create profile →"}
           </button>
         </div>
@@ -519,18 +516,12 @@ const CookDashboard = () => {
           <AlertCircle size={15} /> My reports{" "}
           <span className="cook-tab-count">{(myComplaints || []).length}</span>
         </button>
-        <button
-          className={`cook-tab ${view === "profile" ? "active" : ""}`}
-          onClick={() => setView("profile")}
-        >
-          <UserRound size={15} /> Profile
-        </button>
         <Link className="cook-tab" to="/cook/earnings">
           <Wallet size={15} /> Earnings
         </Link>
       </div>
 
-      {view !== "profile" && view !== "reports" && (
+      {view !== "reports" && (
         <div>
 
           {loadingBookings && <p className="cook-loading-text">Loading bookings...</p>}
@@ -618,7 +609,7 @@ const CookDashboard = () => {
                     </div>
                     {(booking.address || booking.addressDetails?.society || booking.location?.lat != null) && (
                       <div className="cb-meta-item cb-meta-where">
-                        <div>
+                        <div className="cb-where-body">
                           <span className="cb-meta-label">Customer location</span>
                           <span className="cb-meta-value cb-where-text">
                             <MapPin size={14} className="cb-where-icon" aria-hidden="true" />
@@ -847,17 +838,6 @@ const CookDashboard = () => {
         </div>
       )}
 
-      {view === "profile" && (
-        <div>
-          <CookProfileManager onSaved={() => refetchCookProfile()} />
-          {cookProfile && (
-            <CookScheduleEditor profile={cookProfile} onSaved={() => refetchCookProfile()} />
-          )}
-          {cookProfile && <CookPayoutPanel />}
-          <RecentReviewsPreview reviews={myReviews} loading={loadingReviews} />
-        </div>
-      )}
-
       <BookingRequestModal
         open={!!requestModalBooking}
         onClose={() => {
@@ -881,66 +861,6 @@ const CookDashboard = () => {
           onCancelled={handleCancel}
         />
       )}
-    </div>
-  );
-};
-
-const RecentReviewsPreview = ({ reviews, loading }) => {
-  const list = (reviews || []).slice(0, 3);
-  const total = (reviews || []).length;
-  if (loading) return <p className="cook-loading-text">Loading reviews...</p>;
-  if (!list.length) return null;
-  return (
-    <div className="cook-card cook-spaced-top">
-      <div className="cook-recent-head">
-        <h3>Recent reviews ({total})</h3>
-        {total > 3 && (
-          <Link to="/dashboard/cook-reviews" className="cook-link-btn">
-            See all reviews →
-          </Link>
-        )}
-      </div>
-      <div className="cook-recent-list">
-        {list.map((rev) => (
-          <div key={rev._id} className="cook-recent-row">
-            <span className="cook-avatar">
-              {rev.customer?.name?.[0]?.toUpperCase() || "C"}
-            </span>
-            <div className="cook-review-who">
-              <div className="cook-recent-row-head">
-                <strong>{rev.customer?.name || "Customer"}</strong>
-                <span className="cook-stars">
-                  {[1, 2, 3, 4, 5].map((s) => (
-                    <Star
-                      key={s}
-                      size={13}
-                      fill={s <= Number(rev.rating || 0) ? "#f59e0b" : "none"}
-                      color={s <= Number(rev.rating || 0) ? "#f59e0b" : "#cbd5e1"}
-                    />
-                  ))}
-                </span>
-              </div>
-              {rev.comment ? (
-                <p className="cook-recent-comment">"{rev.comment}"</p>
-              ) : (
-                <p className="cook-recent-nocomment">Rated {rev.rating}/5 with no written feedback.</p>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const CookProfileManager = ({ onSaved }) => {
-  return (
-    <div className="cook-profile-wrap">
-      <CookProfileForm
-        createTitle="Create Your Cook Profile"
-        manageTitle="Edit Your Cook Profile"
-        onSaved={onSaved}
-      />
     </div>
   );
 };

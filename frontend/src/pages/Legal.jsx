@@ -113,7 +113,10 @@ export const PrivacyPolicy = () => (
       <li>
         <strong>Anonymous site analytics:</strong> we count visits using an anonymous
         browser identifier stored in localStorage (not a cookie) and an approximate
-        city derived from your network IP via a third-party lookup. Raw IP addresses
+        city derived from your network IP via a third-party lookup. If you have
+        already allowed location access (for example while booking), we may use
+        your device position to record a more precise area — suburb/city labels
+        only; exact coordinates are never sent to or stored on our servers. Raw IP addresses
         are never sent to or stored on our servers, and city data is approximate —
         never exact.
       </li>

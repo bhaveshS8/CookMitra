@@ -260,7 +260,7 @@ describe("CookBooking location consistency", () => {
     expect(bookingPosts[0].location).toEqual({ lat: 18.5, lng: 73.8 });
   });
 
-  test("search pick with coordinates attaches the pin", async () => {
+  test("saved pick with coordinates attaches the pin", async () => {
     setupApi([
       {
         address: "A-402, Sunshine Society, Hadapsar",
@@ -272,13 +272,9 @@ describe("CookBooking location consistency", () => {
     await renderPage(null);
     await goToStep3();
     await act(async () => {
-      setInput(container.querySelector("#od-place-search"), "sunshine");
-      await sleep(450);
+      setSelect(container.querySelector("#od-saved-select"), "0");
     });
-    expect(container.querySelector(".place-search-list")).not.toBeNull();
-    await act(async () => {
-      click(container.querySelector(".place-search-opt"));
-    });
+    expect(container.querySelector("#od-saved-select").value).toBe("0");
     await act(async () => {
       setInput(container.querySelector('input[name="customDishes"]'), "Dal, Rice");
     });

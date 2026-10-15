@@ -172,11 +172,42 @@ const resetDispatchJobForReplacement = async (bookingId) => {
     if (res && res.__timeout) return null;
     if ((res.modifiedCount ?? res.nModified ?? 0) === 1) {
       clog(bookingId, null, "reset-for-replacement", "pending");
-      return true;
+    } else {
+      // No resettable row (actively leased, or never created): fall back to the
+      // durable upsert path so a missing job still gets created.
+      await enqueueBookingRequestJob(bookingId);
     }
-    // No resettable row (actively leased, or never created): fall back to the
-    // durable upsert path so a missing job still gets created.
-    await enqueueBookingRequestJob(bookingId);
+    // New replacement round: reopen per-recipient request outcomes so cooks
+    // notified in the previous round are re-notified. Without this, every
+    // previously-notified cook is skipped as "already-sent" and the
+    // replacement broadcast silently sends nothing (job then completes
+    // with sent=0). The cancelling cook stays excluded via
+    // booking.ignoredBy, which the fan-out checks before sending.
+    // Stale `sending` entries are reopened too — the in-flight reconciler
+    // would otherwise defer the new round on a dead round's ambiguity.
+    let reopened = 0;
+    try {
+      const Booking = require("../models/Booking");
+      const r = await Promise.race([
+        Booking.updateOne(
+          { _id: bookingId },
+          {
+            $set: {
+              "whatsappDispatch.$[e].status": "pending",
+              "whatsappDispatch.$[e].attempts": 0,
+              "whatsappDispatch.$[e].error": "",
+              "whatsappDispatch.$[e].messageId": "",
+            },
+          },
+          { arrayFilters: [{ "e.kind": "request" }] }
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(null), 1500)),
+      ]);
+      reopened = Number(r?.modifiedCount ?? r?.nModified ?? 0);
+    } catch {
+      reopened = 0;
+    }
+    clog(bookingId, null, "reset-for-replacement", "recipients-reopened", `bookings=${reopened}`);
     return true;
   } catch (err) {
     clog(bookingId, null, "reset-for-replacement", "database_error", sanitize(err?.message, 120));

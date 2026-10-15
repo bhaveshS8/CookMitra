@@ -99,4 +99,70 @@ const cookDocUpload = multer({
   limits: { fileSize: 2 * 1024 * 1024, files: 3, fields: 5 },
 });
 
-module.exports = { cookDocUpload, validateUploadedContent };
+// Weekly payout settlement receipts: proof-of-transfer photos only
+// (images, no PDFs), 5MB max, single file. Stored under the same
+// auth-gated upload dir with a `payout_` prefix so the signed-URL document
+// flow (see utils/docTokens) treats receipts as private, admin-only
+// documents — never publicly reachable.
+const RECEIPT_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
+const RECEIPT_EXT = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
+
+const payoutReceiptStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const rand = require("crypto").randomBytes(4).toString("hex");
+    cb(null, `payout_${req.user?.id || "anon"}_${Date.now()}_${rand}${ext}`);
+  },
+});
+
+const receiptFileFilter = (req, file, cb) => {
+  const ext = path.extname(file.originalname || "").toLowerCase();
+  if (RECEIPT_MIME.has(file.mimetype) && RECEIPT_EXT.has(ext)) return cb(null, true);
+  const err = new Error("Receipt must be a JPG, PNG or WEBP photo");
+  err.statusCode = 400;
+  err.code = "INVALID_RECEIPT_TYPE";
+  cb(err);
+};
+
+const payoutReceiptUpload = multer({
+  storage: payoutReceiptStorage,
+  fileFilter: receiptFileFilter,
+  limits: { fileSize: RECEIPT_MAX_BYTES, files: 1, fields: 10 },
+});
+
+// Map multer's own errors (e.g. LIMIT_FILE_SIZE, which carries no
+// statusCode) to 400s so oversized receipts never surface as 500s.
+const payoutReceiptErrorMapper = (err, req, res, next) => {
+  if (!err) return next();
+  if (err.code === "LIMIT_FILE_SIZE") {
+    if (req.file?.path) unlinkQuiet(req.file.path);
+    return res.status(400).json({
+      message: "Receipt photo is too large — it must be 5MB or less",
+      code: "RECEIPT_TOO_LARGE",
+    });
+  }
+  if (err.code === "LIMIT_UNEXPECTED_FILE" || err.code === "LIMIT_FILE_COUNT") {
+    return res.status(400).json({
+      message: "Upload exactly one receipt photo",
+      code: "RECEIPT_COUNT_INVALID",
+    });
+  }
+  if (err.statusCode === 400 || /multer/i.test(err.name || "")) {
+    if (req.file?.path) unlinkQuiet(req.file.path);
+    return res.status(400).json({
+      message: err.message || "Receipt upload failed",
+      ...(err.code ? { code: err.code } : {}),
+    });
+  }
+  return next(err);
+};
+
+module.exports = {
+  cookDocUpload,
+  validateUploadedContent,
+  payoutReceiptUpload,
+  payoutReceiptErrorMapper,
+  RECEIPT_MAX_BYTES,
+};

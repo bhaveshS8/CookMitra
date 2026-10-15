@@ -7,6 +7,15 @@ const resolveStreamUrl = (token) => {
   if (configured) {
     try {
       const base = configured.replace(/\/+$/, "");
+      // Same localhost-bake guard as api/axios.js: a bundle baked with a
+      // local API URL but served remotely must use same-origin /api,
+      // otherwise the stream silently points at the viewer's localhost.
+      const bakedHost = new URL(configured, window.location.origin).hostname;
+      const servedHost = window.location.hostname;
+      const bakedLocal = bakedHost === "localhost" || bakedHost === "127.0.0.1" || bakedHost === "[::1]";
+      const servedLocal =
+        servedHost === "localhost" || servedHost === "127.0.0.1" || servedHost === "::1" || servedHost === "";
+      if (bakedLocal && !servedLocal) return `/api${suffix}`;
       if (/\/api$/.test(base)) return `${base.replace(/\/api$/, "")}/api${suffix}`;
       return `${base}/api${suffix}`;
     } catch {
@@ -45,6 +54,15 @@ export const useRealtime = () => {
         }
       });
 
+      eventSource.addEventListener("booking_replacement_needed", (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          window.dispatchEvent(new CustomEvent("realtime-booking-replacement-needed", { detail: data }));
+          window.dispatchEvent(new CustomEvent("notifications-updated"));
+        } catch {
+        }
+      });
+
       eventSource.addEventListener("booking_ignored", (e) => {
         try {
           const data = JSON.parse(e.data);
@@ -72,5 +90,8 @@ export const useRealtime = () => {
         eventSource.close();
       }
     };
+  // Deps intentionally use stable identity fields (not `user`): any user-object
+  // change (e.g. profile/address updates) must not tear down the SSE stream.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?._id, user?.id, token]);
 };

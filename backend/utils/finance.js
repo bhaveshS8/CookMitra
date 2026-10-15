@@ -20,6 +20,14 @@ const payoutEligibility = (booking) => {
   if (payout.status === "settled") reasons.push("Payout already settled");
   if (payout.status === "not_applicable") reasons.push("Payout declined — no cook share due");
   if (payout.status && payout.status !== "pending") reasons.push(`Payout is ${payout.status}, not pending`);
+  // Weekly-cycle rail (CookPayout + payoutInfo): a booking claimed into a
+  // weekly cycle or paid through one must never be settled again through
+  // the legacy per-booking rail — that would pay the cook twice for the
+  // same service. Bookings without a payoutInfo snapshot predate the
+  // weekly feature and stay on the legacy rail.
+  const cycleStatus = booking.payoutInfo?.payoutStatus;
+  if (cycleStatus === "paid") reasons.push("Payout already settled via weekly payout");
+  else if (cycleStatus && cycleStatus !== "eligible") reasons.push(`Payout is ${cycleStatus} in a weekly cycle — settle it there`);
   const rs = pay.refundStatus || "none";
   if (!["none", "rejected"].includes(rs)) reasons.push(`Customer refund is ${rs} — resolve it first`);
   // verificationOnly: every blocker is an attendance-proof gap (legacy
@@ -59,6 +67,12 @@ const refundApprovalCheck = (booking, { clawback = false } = {}) => {
   if (amount > cap) reasons.push(`Refund of ₹${amount} exceeds the refundable ₹${cap}`);
   if (booking.payout?.status === "settled" && !clawback) {
     reasons.push("Cook payout already settled — approve only with an explicit clawback decision");
+  }
+  // Weekly-cycle settlement pays the cook out-of-band exactly like the
+  // legacy rail: refunding it without a clawback decision double-spends
+  // (cook keeps the payout AND the customer is refunded).
+  if (booking.payoutInfo?.payoutStatus === "paid" && !clawback) {
+    reasons.push("Cook payout already settled via weekly payout — approve only with an explicit clawback decision");
   }
   return { ok: reasons.length === 0, reasons, amount: Math.min(amount, cap) };
 };

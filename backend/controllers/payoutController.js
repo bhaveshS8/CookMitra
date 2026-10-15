@@ -97,6 +97,16 @@ exports.settlePayout = async (req, res, next) => {
     if (existing.payout?.status === "not_applicable") {
       return res.status(400).json({ message: "This booking has no cook payout" });
     }
+    // Weekly-cycle rail guard: bookings claimed into (or paid through) a
+    // weekly CookPayout cycle must never be settled individually — the
+    // cycle settlement is the sole payment path for them.
+    const cycleStatus = existing.payoutInfo?.payoutStatus;
+    if (cycleStatus === "paid") {
+      return res.status(409).json({ message: "This booking was already paid through a weekly payout — settling it again would pay the cook twice", code: "PAYOUT_ALREADY_SETTLED_WEEKLY" });
+    }
+    if (cycleStatus && cycleStatus !== "eligible") {
+      return res.status(409).json({ message: `This booking is ${cycleStatus} in a weekly payout cycle — settle it there, not individually`, code: "PAYOUT_IN_WEEKLY_CYCLE" });
+    }
     const { eligible, reasons, verificationOnly } = payoutEligibility(existing);
     // Audited override for legacy auto-completed services: the platform
     // itself finished these without an OTP trail, so no attendance proof
@@ -146,8 +156,21 @@ exports.settlePayout = async (req, res, next) => {
       booking = await Booking.findOneAndUpdate(
         {
           _id: existing._id,
-          ...PAYOUT_PENDING_OR_MISSING,
           "payment.refundStatus": { $in: ["none", "rejected"] },
+          // Atomic guards: the legacy pending state AND freedom from the
+          // weekly-cycle rail. A booking claimed into a weekly cycle after
+          // our read must not match here — the update loses the race
+          // instead of double-paying. ($and because both guards contain
+          // an $or and would otherwise overwrite each other.)
+          $and: [
+            { ...PAYOUT_PENDING_OR_MISSING },
+            {
+              $or: [
+                { "payoutInfo.payoutStatus": { $exists: false } },
+                { "payoutInfo.payoutStatus": "eligible" },
+              ],
+            },
+          ],
         },
         {
           $set: {
@@ -177,6 +200,9 @@ exports.settlePayout = async (req, res, next) => {
     if (!booking) {
       const fresh = await Booking.findById(req.params.id);
       if (fresh?.payout?.status === "settled") return res.json(fresh);
+      if (fresh?.payoutInfo?.payoutStatus && fresh.payoutInfo.payoutStatus !== "eligible") {
+        return res.status(409).json({ message: `This booking is ${fresh.payoutInfo.payoutStatus} in a weekly payout cycle — settle it there, not individually`, code: "PAYOUT_IN_WEEKLY_CYCLE" });
+      }
       return res.status(409).json({ message: "Payout is already being processed — please refresh.", code: "PAYOUT_ALREADY_PROCESSED" });
     }
     await recordLedger({

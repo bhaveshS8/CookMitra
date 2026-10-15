@@ -38,13 +38,20 @@ exports.buildCookPayout = async (req, res, next) => {
       return res.status(400).json({ message: "Valid cookId is required" });
     }
     // IST business-week boundaries (matching the cook earnings overview),
-    // never server-local midnight.
-    const weekStart = req.body?.weekStart ? new Date(req.body.weekStart) : weekMondayIST(new Date());
-    const weekEnd = req.body?.weekEnd
+    // never server-local midnight. The stored weekStart is always the
+    // Monday 00:00 IST instant so weekly tabs group cycles deterministically
+    // no matter which weekday the caller passed.
+    let weekStart = req.body?.weekStart ? new Date(req.body.weekStart) : weekMondayIST(new Date());
+    let weekEnd = req.body?.weekEnd
       ? new Date(req.body.weekEnd)
       : new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
     if (Number.isNaN(weekStart.getTime()) || Number.isNaN(weekEnd.getTime())) {
       return res.status(400).json({ message: "Valid weekStart/weekEnd dates are required" });
+    }
+    try {
+      const { parseWeekStartIST } = require("../utils/weeklyPayouts");
+      weekStart = parseWeekStartIST(weekStart) || weekStart;
+    } catch {
     }
     const idem = `cycle:${cookId}:${weekStart.toISOString().slice(0, 10)}:${weekEnd.toISOString().slice(0, 10)}`;
     const existing = await CookPayout.findOne({ idempotencyKey: idem });
@@ -247,6 +254,16 @@ const transitionCycle = async ({ id, adminId, to, allowedFrom, extra = {}, event
   if (to === "paid") {
     set.paidAt = now;
     set.paymentDate = now;
+    // The pre-receipt /pay endpoint never recorded amounts: persist the
+    // full payable + settler so weekly tabs and audits reconcile exactly
+    // like receipt-based settlements. Totals are immutable since build.
+    set.settledBy = adminId;
+    try {
+      const pre = await CookPayout.findById(id).select("totalPayable settledAmount").lean();
+      const full = round2(pre?.totalPayable ?? 0);
+      if (full > 0 && !(Number(pre?.settledAmount) > 0)) set.settledAmount = full;
+    } catch {
+    }
   }
   const bookingStatus = to === "paid" ? "paid" : to === "approved" ? "approved" : to === "held" ? "held" : undefined;
   // Booking-level guards: "paid" is terminal and must never be downgraded
@@ -489,13 +506,19 @@ exports.recordPayoutReference = async (req, res, next) => {
     }
     let updated = null;
     try {
+      // Backfill settledAmount for ambiguous cycles paid before the field
+      // existed: a paid cycle is fully paid by definition.
+      const current = await CookPayout.findById(req.params.id).select("totalPayable settledAmount").lean();
+      const backfill = current && !(Number(current.settledAmount) > 0) && Number(current.totalPayable) > 0
+        ? { settledAmount: round2(current.totalPayable) }
+        : {};
       updated = await CookPayout.findOneAndUpdate(
         {
           _id: req.params.id,
           status: "paid",
           $or: [{ paymentReference: "" }, { paymentReference: { $exists: false } }],
         },
-        { $set: { paymentReference: reference } },
+        { $set: { paymentReference: reference, ...backfill } },
         { new: true }
       );
     } catch (e) {

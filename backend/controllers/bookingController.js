@@ -2156,6 +2156,16 @@ exports.acceptBooking = async (req, res, next) => {
     } catch {
     }
 
+    // The newly assigned cook needs the Marathi job sheet with the customer
+    // location — including for admin manual assignment, which assigns inline
+    // here rather than through the accept service. The dispatch service
+    // holds the message until payment is done and skips already-notified
+    // cooks, so this is safe to emit on every fresh assignment.
+    try {
+      require("../services/whatsappDispatch").notifyWhatsAppEvent("booking.accepted", booking);
+    } catch {
+    }
+
     const obj = stripServiceOtp(booking);
     res.json({ success: true, ...obj, customerWhatsappUrl, cookPhone: cookPhoneForCustomer });
   } catch (error) {
@@ -2642,6 +2652,22 @@ const cookCancelWithReplacement = async (req, res, next, ctx) => {
         }
       } catch {
       }
+      // Offline mirror of the replacement-round recipient reopen in
+      // resetDispatchJobForReplacement: stale per-cook outcomes must not
+      // suppress the new round's broadcast.
+      try {
+        if (Array.isArray(booking.whatsappDispatch)) {
+          for (const e of booking.whatsappDispatch) {
+            if (e && e.kind === "request") {
+              e.status = "pending";
+              e.attempts = 0;
+              e.error = "";
+              e.messageId = "";
+            }
+          }
+        }
+      } catch {
+      }
       booking.statusHistory.push({
         status: "requested",
         note: `Cook cancelled (${reasonCode}) — searching for a replacement cook`,
@@ -2723,6 +2749,17 @@ const cookCancelWithReplacement = async (req, res, next, ctx) => {
     }
     try {
       realtime.emit("booking_request", { bookingId: String(booking._id), replacement: true });
+    } catch {
+    }
+    // Targeted admin alert: replacement needed. Booking ID + minimal
+    // metadata only — details load through authorized APIs. Scoped to
+    // admins (the broadcast above still drives cook popups); placed after
+    // successful release so idempotent repeats never re-emit. Never WhatsApp.
+    try {
+      realtime.emit("booking_replacement_needed", {
+        bookingId: String(booking._id),
+        cancelledAt: now.toISOString(),
+      }, { targetRoles: ["ADMIN"] });
     } catch {
     }
 

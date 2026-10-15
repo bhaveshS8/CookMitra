@@ -4,7 +4,29 @@ const router = express.Router();
 const { body } = require("express-validator");
 const validate = require("../middleware/validate");
 const { auth, authorize } = require("../middleware/auth");
+const {
+  payoutReceiptUpload,
+  payoutReceiptErrorMapper,
+  validateUploadedContent,
+} = require("../middleware/upload");
 const c = require("../controllers/adminCookEarningsController");
+const w = require("../controllers/adminWeeklyPayoutController");
+
+// Weekly payout management (admin): Monday–Sunday earning weeks in the
+// business timezone, settled with mandatory receipt evidence.
+router.get("/weekly/pending", auth, authorize("admin"), w.getWeeklyPending);
+router.get("/weekly/completed", auth, authorize("admin"), w.getWeeklyCompleted);
+router.post(
+  "/payouts/:id/settle-weekly",
+  auth,
+  authorize("admin"),
+  (req, res, next) =>
+    payoutReceiptUpload.single("receipt")(req, res, (err) =>
+      err ? payoutReceiptErrorMapper(err, req, res, next) : next()
+    ),
+  validateUploadedContent,
+  w.settleWeeklyPayout
+);
 
 // Weekly payout cycles only. Lead, incentive, and referral programs were
 // removed in full (models, handlers, and UI deleted); the old

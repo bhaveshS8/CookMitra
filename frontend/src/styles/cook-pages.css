@@ -1121,12 +1121,11 @@
   }
   .booking-item-card.cook-booking-card.cb-card { padding: 1rem 1.1rem; border-radius: 18px; }
   .cb-meta-item .cook-addr-directions.cb-directions {
-    display: flex;
+    display: inline-flex;
     width: fit-content;
     max-width: 100%;
-    margin-top: 0.6rem;
-    margin-left: auto;
-    padding-left: 1.75rem;
+    align-self: flex-start;
+    margin: 0.65rem 0 0.2rem;
   }
 }
 @media (min-width: 1024px) {
@@ -1138,12 +1137,11 @@
   }
   .booking-item-card.cook-booking-card.cb-card { padding: 1.1rem 1.25rem; }
   .cb-meta-item .cook-addr-directions.cb-directions {
-    display: flex;
+    display: inline-flex;
     width: fit-content;
     max-width: 100%;
-    margin-top: 0.6rem;
-    margin-left: auto;
-    padding-left: 1.75rem;
+    align-self: flex-start;
+    margin: 0.65rem 0 0.2rem;
   }
 }
 @media (min-width: 1280px) {
@@ -1284,7 +1282,16 @@
   padding: 0.65rem 0.75rem;
 }
 .cb-meta-item.cb-meta-where .cb-meta-label { color: #b45309; }
+.cb-meta-item.cb-meta-where .cb-where-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .cb-meta-item.cb-meta-where .cb-where-text {
+  margin: 0.15rem 0 0;
   font-size: 0.92rem;
   font-weight: 800;
   color: var(--slate-900, #0f172a);
@@ -1305,8 +1312,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  align-self: flex-start;
   gap: 0.45rem;
-  margin-top: 0.55rem;
+  margin: 0.65rem 0 0.2rem;
   min-height: 44px;
   padding: 0.55rem 1.15rem;
   font-size: 0.88rem;
@@ -1416,7 +1424,7 @@
   .cb-badges { width: 100%; justify-content: flex-start; }
   .cb-meta { grid-template-columns: 1fr; padding: 0.55rem 0.6rem; gap: 0.5rem; }
   .cb-meta-item.cb-meta-where { padding: 0.6rem 0.65rem; }
-  .cb-meta-item .cook-addr-directions.cb-directions { width: 100%; min-height: 46px; font-size: 0.9rem; }
+  .cb-meta-item .cook-addr-directions.cb-directions { width: 100%; align-self: stretch; margin: 0.65rem 0 0.25rem; min-height: 46px; font-size: 0.9rem; }
   .cb-actions .btn { width: 100%; justify-content: center; min-height: 44px; }
 }
 @media (min-width: 481px) and (max-width: 640px) {
@@ -1427,7 +1435,7 @@
   .cb-top { flex-wrap: wrap; gap: 0.6rem; padding-bottom: 0.7rem; }
   .cb-badges { width: 100%; justify-content: flex-start; }
   .cb-meta { grid-template-columns: 1fr; padding: 0.6rem 0.65rem; }
-  .cb-meta-item .cook-addr-directions.cb-directions { width: 100%; min-height: 44px; }
+  .cb-meta-item .cook-addr-directions.cb-directions { width: 100%; align-self: stretch; margin: 0.65rem 0 0.25rem; min-height: 44px; }
   .cb-actions .btn { width: 100%; justify-content: center; min-height: 44px; }
   .cb-name-row h3 { white-space: normal; }
 }

@@ -16,6 +16,8 @@ const CRITICAL = [
   "cancellation-refund.test.js",
   "cook-cancel-replacement.test.js",
   "payout-settle.test.js",
+  "weekly-payout.test.js",
+  "payout-weekly-guards.test.js",
 ];
 
 let failed = false;

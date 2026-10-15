@@ -293,7 +293,7 @@ const errOf = async (fn) => {
       check("T1 customer name mapped", msg.includes("👤 ग्राहक: Aditi Rao"), "name");
       check("T1 time and duration separate (12-hour clock)", msg.includes("🕐 वेळ: 10:00 AM ते 12:00 PM") && msg.includes("⏱️ कालावधी: 2 तास"), "slot");
       check("T1 address/guests/notes mapped", msg.includes("Flat 7, Sunshine Society, Pune") && msg.includes("👥 व्यक्ती: 4") && msg.includes("less spicy"), "fields");
-      check("T1 no extra booking info", !msg.includes("594") && !msg.includes("cook_for_me") && !msg.includes("माझ्यासाठी") && !msg.includes("मानधन") && !msg.includes("कालबाह्य") && !/Booking ID|requestExpires|Expiry/i.test(msg), "allowlist");
+      check("T1 required ref + service lines, still no leaks", msg.includes("📋 बुकिंग क्रमांक:") && msg.includes("🍽️ सेवा:") && !msg.includes("594") && !msg.includes("cook_for_me") && !msg.includes("मानधन") && !msg.includes("maps/dir") && !msg.includes("http"), "allowlist");
       check("T1 serviceType Marathi mapping intact", marathi.serviceTypeMarathi("cook_for_me") === "माझ्यासाठी स्वयंपाक", marathi.serviceTypeMarathi("cook_for_me"));
       check("T1 all serviceType labels Marathi", ["cook_with_me", "teach_me", "preparation_help"].every((s) => /[\u0900-\u097F]/.test(marathi.serviceTypeMarathi(s))), "labels");
       check("T1 button titles Marathi", marathi.ACCEPT_BUTTON_TITLE.includes("स्वीकारा") && marathi.REJECT_BUTTON_TITLE.includes("नकार"), "titles");
@@ -503,7 +503,7 @@ const errOf = async (fn) => {
       sentPayloads.length = 0;
       const r1 = await dispatch.sendCookScheduledMessage(b, { customerName: "Aditi Rao" });
       const body = (sentPayloads.find((p) => p.type === "text")?.text?.body) || "";
-      check("T13 scheduled sent to cook", r1?.ok === true && body.includes("नमस्कार") && body.includes("google.com/maps/dir"), body.slice(0, 80));
+      check("T13 scheduled sent to cook", r1?.ok === true && body.includes("नमस्कार") && body.includes("google.com/maps/search"), body.slice(0, 80));
       check("T13 scheduled drops service/payout/url blocks", !body.includes("🍽️ सेवा:") && !body.includes("मानधन") && !body.includes("बुकिंग तपशील"), "trimmed");
       sentPayloads.length = 0;
       const r2 = await dispatch.sendCookScheduledMessage(b, { customerName: "Aditi Rao" });

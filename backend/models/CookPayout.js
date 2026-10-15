@@ -21,6 +21,19 @@ const cookPayoutSchema = new mongoose.Schema(
     },
     paymentDate: { type: Date },
     paymentReference: { type: String, default: "", trim: true },
+    // Weekly settlement evidence (admin workflow): the transfer happens
+    // out-of-band and the admin records the method + external reference
+    // together with a mandatory receipt/proof photo. The earning week
+    // (weekStart/weekEnd) is immutable — settling later never moves a
+    // payment to another week.
+    paymentMethod: {
+      type: String,
+      enum: ["", "upi", "bank_transfer", "other"],
+      default: "",
+    },
+    receiptUrl: { type: String, default: "", trim: true },
+    settledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    settledAmount: { type: Number, default: 0 },
     holdReason: { type: String, default: "", trim: true, maxlength: 300 },
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     approvedAt: { type: Date },
@@ -32,6 +45,8 @@ const cookPayoutSchema = new mongoose.Schema(
 
 cookPayoutSchema.index({ payoutRef: 1 }, { unique: true, name: "uniq_cookpayout_ref" });
 cookPayoutSchema.index({ cook: 1, weekStart: 1 }, { name: "idx_cookpayout_cook_week" });
+cookPayoutSchema.index({ status: 1, weekStart: -1 }, { name: "idx_cookpayout_status_week" });
+cookPayoutSchema.index({ weekStart: -1 }, { name: "idx_cookpayout_week" });
 cookPayoutSchema.index({ cook: 1, status: 1 });
 cookPayoutSchema.index({ status: 1, createdAt: -1 });
 cookPayoutSchema.index({ createdAt: -1 });

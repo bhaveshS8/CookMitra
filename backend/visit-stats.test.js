@@ -99,6 +99,12 @@ const testHelpers = () => {
   check("emoji city dropped to empty", normalizeVisitInput({ vid: VID, sid: SID, path: "/", city: "🔥Pune" }).city === "");
   check("object city dropped to empty", normalizeVisitInput({ vid: VID, sid: SID, path: "/", city: { $gt: "" } }).city === "");
   check("unicode letters kept", normalizeVisitInput({ vid: VID, sid: SID, path: "/", city: "Pune" }).city === "Pune");
+  check("source gps kept", normalizeVisitInput({ vid: VID, sid: SID, path: "/", city: "Pune", source: "gps" }).source === "gps");
+  check("source GPS uppercased folds to gps", normalizeVisitInput({ vid: VID, sid: SID, path: "/", city: "Pune", source: "GPS" }).source === "gps");
+  check("source missing defaults to ip", normalizeVisitInput({ vid: VID, sid: SID, path: "/", city: "Pune" }).source === "ip");
+  check("source ip kept", normalizeVisitInput({ vid: VID, sid: SID, path: "/", city: "Pune", source: "ip" }).source === "ip");
+  check("bogus source folds to ip", normalizeVisitInput({ vid: VID, sid: SID, path: "/", city: "Pune", source: "device" }).source === "ip");
+  check("object source folds to ip", normalizeVisitInput({ vid: VID, sid: SID, path: "/", city: "Pune", source: { $gt: "" } }).source === "ip");
 };
 
 const tick = () => new Promise((r) => setImmediate(r));
@@ -306,6 +312,15 @@ const testRoutes = async () => {
   check("no script/control payload stored", !cities.some((c) => /[<>]/.test(c)), cities.join("|"));
   check("overlong state capped at 80", [...fakes.CityStat.docs.values()].every((d) => d.state.length <= 80));
 
+  r = await postVisit({ vid: "GpsAb1-_aa", sid: "gs1ab-_aa1", path: "/", city: "GpsTown", area: "GpsArea", state: "GpsState", country: "India", source: "gps" }, UA);
+  check("gps ping counts with source", r.body?.ok === true, `s=${r.statusCode}`);
+  const gpsDoc = [...fakes.CityStat.docs.values()].find((d) => d.city === "GpsTown");
+  check("gps visit increments gpsVisits", gpsDoc && gpsDoc.visits === 1 && gpsDoc.gpsVisits === 1, JSON.stringify(gpsDoc));
+  r = await postVisit({ vid: "GpsAb2-_aa", sid: "gs2ab-_aa2", path: "/", city: "GpsTown", area: "GpsArea", state: "GpsState", country: "India", source: "ip" }, UA);
+  check("ip ping on gps area keeps gps count", gpsDoc.visits === 2 && gpsDoc.gpsVisits === 1, `v=${gpsDoc.visits} g=${gpsDoc.gpsVisits}`);
+  r = await postVisit({ vid: "GpsAb3-_aa", sid: "gs3ab-_aa3", path: "/", city: "GpsTown", area: "GpsArea", state: "GpsState", country: "India", source: "gps-device" }, UA);
+  check("bogus source counts as ip (no gps credit)", gpsDoc.visits === 3 && gpsDoc.gpsVisits === 1, `v=${gpsDoc.visits} g=${gpsDoc.gpsVisits}`);
+
   fakes.CityStat.failures.add("updateOne");
   r = await postVisit({ vid: "Fail01-_aa1", sid: "fs1ab-_aa11", path: "/", city: "Pune", state: "", country: "" }, UA).catch((e) => ({ statusCode: 500, body: { message: e.message } }));
   check("city-write failure surfaces 500", r.statusCode === 500, `s=${r.statusCode}`);
@@ -364,6 +379,7 @@ const testGetAndAuth = async () => {
   check("INVARIANT top pages <= total visits", topSum <= tot.visits, `${topSum}<=${tot.visits}`);
   const citySum = (r.body.topCities || []).reduce((a, x) => a + x.visits, 0);
   check("INVARIANT top cities <= total visits", citySum <= tot.visits, `${citySum}<=${tot.visits}`);
+  check("top cities carry gpsVisits (0 for legacy rows)", (r.body.topCities || []).every((x) => typeof x.gpsVisits === "number"), JSON.stringify(r.body.topCities));
   check("meta documents IST + uniques definition", r.body.meta?.timezone === "Asia/Kolkata" && /visitor-day/.test(r.body.meta?.uniquesDefinition || ""));
 
   fakes.DailyStat.docs.clear(); fakes.PageStat.docs.clear(); fakes.CityStat.docs.clear();
@@ -433,6 +449,8 @@ const testFrontendStatics = () => {
   const an = read("utils/analytics.js");
   check("no dangerouslySetInnerHTML in visit rendering", !/dangerouslySetInnerHTML/.test(vs + vc));
   check("ping sends sid (server dedup key)", /sid/.test(an) && /cm-visit-sid/.test(an));
+  check("ping sends source provenance (gps/ip)", /source/.test(an));
+  check("gps precision labelled in locations UI", /GPS-precise|GPS-verified/.test(vs));
   check("unique metric labelled visitor-days", /Unique visitor-day/.test(vs));
   check("cities described as approximate", /approximate/i.test(vs));
   check("useFetch cancels stale requests", /AbortController/.test(uf) && /signal/.test(uf));
