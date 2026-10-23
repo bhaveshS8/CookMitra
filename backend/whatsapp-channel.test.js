@@ -291,8 +291,8 @@ const errOf = async (fn) => {
       const msg = marathi.buildBookingRequestMessage({ booking: b, customerName: "Aditi Rao" });
       check("T1 template has required header", msg.startsWith("🍳 नवीन Cook Mitra बुकिंग विनंती"), msg.slice(0, 40));
       check("T1 customer name mapped", msg.includes("👤 ग्राहक: Aditi Rao"), "name");
-      check("T1 time and duration separate (12-hour clock)", msg.includes("🕐 वेळ: 10:00 AM ते 12:00 PM") && msg.includes("⏱️ कालावधी: 2 तास"), "slot");
-      check("T1 address/guests/notes mapped", msg.includes("Flat 7, Sunshine Society, Pune") && msg.includes("👥 व्यक्ती: 4") && msg.includes("less spicy"), "fields");
+      check("T1 time and duration separate (Marathi clock)", msg.includes("🕐 वेळ: सकाळी 10:00 ते दुपारी 12:00") && msg.includes("⏱️ कालावधी: 2 तास"), "slot");
+      check("T1 address/guests/notes mapped", msg.includes("फ्लॅट 7, सनशाईन सोसायटी, पुणे") && msg.includes("👥 व्यक्ती: 4") && msg.includes("less spicy"), "fields");
       check("T1 required ref + service lines, still no leaks", msg.includes("📋 बुकिंग क्रमांक:") && msg.includes("🍽️ सेवा:") && !msg.includes("594") && !msg.includes("cook_for_me") && !msg.includes("मानधन") && !msg.includes("maps/dir") && !msg.includes("http"), "allowlist");
       check("T1 serviceType Marathi mapping intact", marathi.serviceTypeMarathi("cook_for_me") === "माझ्यासाठी स्वयंपाक", marathi.serviceTypeMarathi("cook_for_me"));
       check("T1 all serviceType labels Marathi", ["cook_with_me", "teach_me", "preparation_help"].every((s) => /[\u0900-\u097F]/.test(marathi.serviceTypeMarathi(s))), "labels");
@@ -605,20 +605,18 @@ const errOf = async (fn) => {
       // updating these positions.
       {
         const texts = params.map((p) => String(p.text ?? ""));
-        const wantDate = new Intl.DateTimeFormat("en-GB", {
-          timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric",
-        }).format(new Date(b.date));
+        const wantDate = marathi.formatMarathiDate(b.date);
         const wantWeekday = marathi.calculateMarathiWeekday(b.date);
-        check("T16-order params[0..1] are customer + dd/mm/yyyy date",
+        check("T16-order params[0..1] are customer + Marathi date",
           texts[0] === "Aditi Rao" && texts[1] === wantDate, JSON.stringify(texts.slice(0, 2)));
         check("T16-order params[2] is the Marathi weekday (never a number)",
           texts[2] === wantWeekday && !/^\d+$/.test(texts[2]), JSON.stringify(texts[2]));
-        check("T16-order params[3] is the 12-hour time range",
-          texts[3] === "10:00 AM - 12:00 PM", JSON.stringify(texts[3]));
+        check("T16-order params[3] is the Marathi time range",
+          texts[3] === "सकाळी 10:00 ते दुपारी 12:00", JSON.stringify(texts[3]));
         check("T16-order params[4] is the duration hours",
           texts[4] === "2", JSON.stringify(texts[4]));
-        check("T16-order params[5] is the venue address",
-          texts[5] === "Flat 7, Sunshine Society, Pune", JSON.stringify(texts[5]));
+        check("T16-order params[5] is the Devanagari venue address",
+          texts[5] === "फ्लॅट 7, सनशाईन सोसायटी, पुणे", JSON.stringify(texts[5]));
       }
       check("T16 delivery marked sent", r.ok === true, String(r.ok));
       delete process.env.WHATSAPP_REQUEST_TEMPLATE_FOR_COOK;
@@ -637,7 +635,7 @@ const errOf = async (fn) => {
         params.length === 6, `params=${params.length}`);
       check("T16d weekday/time/duration stay in their slots despite the gap",
         texts[2] === marathi.calculateMarathiWeekday(b.date) &&
-        texts[3] === "10:00 AM - 12:00 PM" &&
+        texts[3] === "सकाळी 10:00 ते दुपारी 12:00" &&
         texts[4] === "2",
         JSON.stringify(texts.slice(2, 5)));
       check("T16d empty slot carries the missing-value marker",

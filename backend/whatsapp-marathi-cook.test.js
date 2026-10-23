@@ -71,17 +71,22 @@ const unpaid = { ...booking, payment: { status: "pending", paidAmount: 0 } };
     check(
       `M2 ${serviceType} confirmation has contact/date/time/duration/guests/address/notes`,
       b.includes("📞 ग्राहक संपर्क: 9123456780") &&
-        b.includes("📅 तारीख: Wed, 7 Oct, 2026") &&
-        b.includes("⏰ वेळ: 10:00 AM - 12:00 PM") &&
+        b.includes("📅 तारीख: बुधवार, 7 ऑक्टोबर 2026") &&
+        b.includes("⏰ वेळ: सकाळी 10:00 ते दुपारी 12:00") &&
         b.includes("⏱️ कालावधी: 2 तास") &&
         b.includes("👥 व्यक्ती: 4") &&
         b.includes("📍 पत्ता:") &&
-        b.includes("Flat 7, Sunshine Society, Pune") &&
+        b.includes("फ्लॅट 7, सनशाईन सोसायटी, पुणे") &&
         b.includes("🗺️ रस्ता पहा (Google Maps):") &&
         b.includes("📝 अतिरिक्त माहिती:") &&
         b.includes("less spicy") &&
         b.includes("कृपया दिलेल्या वेळेवर ग्राहकाच्या पत्त्यावर पोहोचा."),
       serviceType
+    );
+    check(
+      `M2 ${serviceType} confirmation has no English date/AM/PM`,
+      !/\bAM\b|\bPM\b|Mon|Tue|Wed|Thu|Fri|Sat|Sun/.test(b.replace(/https?:\/\/\S+/g, "")),
+      "localised"
     );
   }
   const missing = marathi.buildCookBookingScheduledMessage({ booking: { _id: "bk-mr-009" }, cookName: "Suresh" });
@@ -120,6 +125,52 @@ const unpaid = { ...booking, payment: { status: "pending", paidAmount: 0 } };
   check("M4 accepted has ref + customer + 5-min note", body.includes("bk-mr-001") && body.includes("Aditi Rao") && body.includes("५ मिनिट"), "fields");
 }
 
+// ---- 4b. Marathi date / day / clock / address helpers ----
+{
+  check(
+    "M9 full Marathi date includes weekday",
+    marathi.formatMarathiDateWithWeekday(booking.date) === "बुधवार, 7 ऑक्टोबर 2026",
+    marathi.formatMarathiDateWithWeekday(booking.date)
+  );
+  check(
+    "M9 Marathi time-of-day words replace AM/PM",
+    marathi.formatMarathiTime("08:00") === "सकाळी 8:00" &&
+      marathi.formatMarathiTime("12:30") === "दुपारी 12:30" &&
+      marathi.formatMarathiTime("17:00") === "संध्याकाळी 5:00" &&
+      marathi.formatMarathiTime("20:00") === "रात्री 8:00",
+    [marathi.formatMarathiTime("08:00"), marathi.formatMarathiTime("12:30"), marathi.formatMarathiTime("17:00"), marathi.formatMarathiTime("20:00")].join(" / ")
+  );
+  check(
+    "M9 Marathi slot range",
+    marathi.formatMarathiSlotRange("10:00", "12:00") === "सकाळी 10:00 ते दुपारी 12:00",
+    marathi.formatMarathiSlotRange("10:00", "12:00")
+  );
+  check(
+    "M9 address rendered in Devanagari",
+    marathi.formatAddressMarathi(booking) === "फ्लॅट 7, सनशाईन सोसायटी, पुणे",
+    marathi.formatAddressMarathi(booking)
+  );
+  check(
+    "M9 Devanagari input passes through unchanged",
+    marathi.toDevanagari("फ्लॅट 7, पुणे") === "फ्लॅट 7, पुणे",
+    marathi.toDevanagari("फ्लॅट 7, पुणे")
+  );
+  check(
+    "M9 maps link keeps the original (Latin) address",
+    marathi.mapsDirLink({ address: "Flat 7, Sunshine Society, Pune" }).includes(
+      encodeURIComponent("Flat 7, Sunshine Society, Pune")
+    ),
+    marathi.mapsDirLink({ address: "Flat 7, Sunshine Society, Pune" })
+  );
+  check(
+    "M9 invalid date/time never crash",
+    marathi.formatMarathiDateWithWeekday("not-a-date") === marathi.NOT_AVAILABLE &&
+      marathi.formatMarathiTime("") === "" &&
+      marathi.formatMarathiSlotRange(null, null) === "",
+    "safe"
+  );
+}
+
 // ---- 5. Unicode preservation through transport encoding ----
 {
   const bodies = [
@@ -141,7 +192,7 @@ const unpaid = { ...booking, payment: { status: "pending", paidAmount: 0 } };
     address: "Flat 7, Sunshine Society, Pune",
   };
   const body = marathi.buildCookBookingScheduledMessage({ booking: withPin, cookName: "Suresh", customerName: "Aditi Rao" });
-  check("M8 confirmation has saved address", body.includes("Flat 7, Sunshine Society, Pune"), "address");
+  check("M8 confirmation has saved address", body.includes("फ्लॅट 7, सनशाईन सोसायटी, पुणे"), "address");
   check(
     "M8 valid coords produce directions link",
     body.includes("https://www.google.com/maps/dir/?api=1&destination=18.5204,73.8567"),

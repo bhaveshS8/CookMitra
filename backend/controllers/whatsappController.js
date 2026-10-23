@@ -413,7 +413,7 @@ const acceptViaWhatsApp = async (cook, booking, senderE164) => {
     "",
     `ग्राहक: ${customerName || "ग्राहक"}`,
     `तारीख: ${marathi.formatMarathiDate(fresh?.date)}`,
-    `वेळ: ${slotRange(fresh?.startTime, fresh?.endTime) || "माहिती उपलब्ध नाही"}`,
+    `वेळ: ${marathi.formatMarathiSlotRange(fresh?.startTime, fresh?.endTime) || "माहिती उपलब्ध नाही"}`,
     "",
     "कृपया Cook Mitra वेबसाइट/अॅपवर बुकिंगचे पुढील तपशील पहा.",
   ];
