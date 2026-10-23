@@ -503,7 +503,8 @@ const errOf = async (fn) => {
       sentPayloads.length = 0;
       const r1 = await dispatch.sendCookScheduledMessage(b, { customerName: "Aditi Rao" });
       const body = (sentPayloads.find((p) => p.type === "text")?.text?.body) || "";
-      check("T13 scheduled sent to cook", r1?.ok === true && body.includes("नमस्कार") && body.includes("google.com/maps/search"), body.slice(0, 80));
+      check("T13 scheduled sent to cook", r1?.ok === true && body.includes("नमस्कार") && body.includes("google.com/maps/dir"), body.slice(0, 80));
+      check("T13 scheduled carries the customer's contact number", body.includes("📞 ग्राहक संपर्क: 9199999999"), body.includes("📞") ? "phone" : "missing");
       check("T13 scheduled drops service/payout/url blocks", !body.includes("🍽️ सेवा:") && !body.includes("मानधन") && !body.includes("बुकिंग तपशील"), "trimmed");
       sentPayloads.length = 0;
       const r2 = await dispatch.sendCookScheduledMessage(b, { customerName: "Aditi Rao" });

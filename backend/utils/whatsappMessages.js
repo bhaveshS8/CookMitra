@@ -9,7 +9,7 @@
 // left untouched (older clients/tests depend on them). New WhatsApp
 // interactive flows should use the builders below.
 
-const { FRONTEND_BASE_URL } = require("./whatsapp");
+const { FRONTEND_BASE_URL, normalizeIndianMobile } = require("./whatsapp");
 const { to12h, slotRange } = require("./time");
 
 const SERVICE_TYPE_MARATHI = {
@@ -91,17 +91,22 @@ const calculateMarathiWeekday = (date) => {
   return MARATHI_WEEKDAYS[parts.weekday];
 };
 
+// "Thu, 22 Oct, 2026" — always rendered in IST (the business timezone), so
+// the cook never sees a date shifted by the server's local timezone.
 const formatServiceDate = (booking) => {
   try {
-    if (!booking?.date) return "";
-    return new Date(booking.date).toLocaleDateString("en-IN", {
+    if (!booking?.date) return NOT_AVAILABLE;
+    const d = booking.date instanceof Date ? booking.date : new Date(booking.date);
+    if (Number.isNaN(d.getTime())) return NOT_AVAILABLE;
+    return new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
       weekday: "short",
       day: "numeric",
       month: "short",
       year: "numeric",
-    });
+    }).format(d);
   } catch {
-    return "";
+    return NOT_AVAILABLE;
   }
 };
 
@@ -143,20 +148,20 @@ const formatAddress = (booking) => {
   return joined || "—";
 };
 
-// Tappable Google Maps link to the venue — the cook taps and follows
-// navigation directly. Prefers the stored GPS pin (exact coordinates),
-// falls back to an address search when no coordinates exist. Only uses
-// the booking's own saved location — never invents coordinates/address.
+// Tappable Google Maps directions link to the venue — the cook taps and
+// starts navigation directly. Prefers the stored GPS pin (exact
+// coordinates), falls back to the address when no coordinates exist. Only
+// uses the booking's own saved location — never invents coordinates/address.
 const mapsDirLink = (booking) => {
   try {
     const lat = booking?.location?.lat;
     const lng = booking?.location?.lng;
     if (lat != null && lng != null && String(lat) !== "" && String(lng) !== "") {
-      return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+      return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
     }
     const addr = formatAddress(booking);
     if (addr && addr !== "—") {
-      return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
+      return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`;
     }
     return null;
   } catch {
@@ -267,12 +272,32 @@ const buildBookingRequestMessage = ({ booking, customerName } = {}) => {
   ].join("\n");
 };
 
-const buildCookBookingScheduledMessage = ({ booking, cookName, customerName, bookingUrl } = {}) => {
+// Cook confirmation (booking is confirmed and paid). This is the single
+// copy used for EVERY service type (cook_for_me, cook_with_me, teach_me,
+// preparation_help) and every confirmation path (customer payment, 100%
+// coupon, replacement cook, admin assignment, gateway webhook):
+//   👤 customer, 📞 customer contact, 📅 date (IST), ⏰ time, ⏱️ duration,
+//   👥 guests, 📍 full address, 🗺️ Google Maps directions, 📝 notes.
+// The customer's number is shared only here (post-confirmation job sheet),
+// never in the pre-accept request. Missing values show NOT_AVAILABLE —
+// never a blank line, never a guess.
+const buildCookBookingScheduledMessage = ({ booking, cookName, customerName, customerPhone, bookingUrl } = {}) => {
   const dirLink = mapsDirLink(booking);
   const bookingId =
     booking?._id != null && String(booking._id).trim() !== ""
       ? String(booking._id).trim()
       : "";
+  const durationHours =
+    booking?.durationHours != null && String(booking.durationHours).trim() !== ""
+      ? String(booking.durationHours).trim()
+      : "";
+  const durationLine = durationHours ? `${durationHours} तास` : NOT_AVAILABLE;
+  const guests =
+    booking?.guests != null && String(booking.guests).trim() !== ""
+      ? String(booking.guests).trim()
+      : NOT_AVAILABLE;
+  const timeLine = slotRange(booking?.startTime, booking?.endTime) || NOT_AVAILABLE;
+  const contactNumber = normalizeIndianMobile(customerPhone) || NOT_AVAILABLE;
   return [
     `नमस्कार ${cookName || "कुक"} 🙏`,
     "",
@@ -280,11 +305,12 @@ const buildCookBookingScheduledMessage = ({ booking, cookName, customerName, boo
     "",
     `📋 बुकिंग क्रमांक: ${bookingId || NOT_AVAILABLE}`,
     `👤 ग्राहक: ${customerName || "ग्राहक"}`,
+    `📞 ग्राहक संपर्क: ${contactNumber}`,
     `📅 तारीख: ${formatServiceDate(booking)}`,
-    `⏰ वेळ: ${slotRange(booking?.startTime, booking?.endTime) || "माहिती उपलब्ध नाही"}`,
-    `⏱️ कालावधी: ${booking?.durationHours ?? ""} तास`,
+    `⏰ वेळ: ${timeLine}`,
+    `⏱️ कालावधी: ${durationLine}`,
     "",
-    `👥 व्यक्ती: ${booking?.guests ?? ""}`,
+    `👥 व्यक्ती: ${guests}`,
     "",
     "📍 पत्ता:",
     formatAddress(booking),

@@ -419,6 +419,16 @@ exports.handleWebhook = async (req, res) => {
         });
       } catch {
       }
+      // Cook WhatsApp confirmation: the webhook is the only confirmation
+      // path that does not originate from the app, so without this emit a
+      // booking confirmed here (app confirm call missed / lost response)
+      // would never send the cook their Marathi job sheet with the full
+      // visit details. Fire-and-forget; payment confirmation never depends
+      // on WhatsApp delivery.
+      try {
+        require("../services/whatsappDispatch").notifyWhatsAppEvent("booking.accepted", booking);
+      } catch {
+      }
       return res.status(200).json({ received: true, handled: true });
     }
     try {

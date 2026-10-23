@@ -535,12 +535,16 @@ const sendCookScheduledMessage = async (booking, opts = {}) => {
     if (!contact) return { ok: false, reason: "no-whatsapp-number" };
     let cookName = opts.cookName || contact.name || "";
     let customerName = opts.customerName || "";
+    let customerPhone = opts.customerPhone || "";
     try {
-      if (!customerName && fresh.customer) {
+      if ((!customerName || !customerPhone) && fresh.customer) {
         const customer = await withDbTimeout(
-          User.findById(fresh.customer).select("name").lean()
+          User.findById(fresh.customer).select("name phone mobile").lean()
         );
-        if (customer?.name) customerName = customer.name;
+        if (customer?.name) customerName = customerName || customer.name;
+        // The cook needs the customer's number to coordinate on arrival;
+        // this is the post-confirmation job sheet, not the pre-accept ask.
+        if (!customerPhone) customerPhone = customer?.phone || customer?.mobile || "";
       }
     } catch {
     }
@@ -548,6 +552,7 @@ const sendCookScheduledMessage = async (booking, opts = {}) => {
       booking: fresh,
       cookName,
       customerName,
+      customerPhone,
       bookingUrl: opts.bookingUrl,
     });
     await markDispatch(booking._id, cookId, SCHEDULED_KIND, { status: "sending", attempts: 1 });
