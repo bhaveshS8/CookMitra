@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import aiCook2 from "../assets/carousel-2.png";
 import aiCook3 from "../assets/carousel-3.png";
 
@@ -7,16 +6,16 @@ const AUTOPLAY_MS = 3500;
 
 const DISHES = [
   {
-    name: "Festive Specials",
-    tag: "Fresh from the kitchen",
+    name: "Chakli & Karanji",
+    tag: "Diwali faral favourites",
     src: aiCook2,
-    alt: "Festive dish fresh from a CookMitra home kitchen",
+    alt: "Diwali faral spread fresh from a CookMitra home kitchen",
   },
   {
-    name: "Traditional Delights",
-    tag: "Authentic taste",
+    name: "Kaju Katli & Sweets",
+    tag: "Mithai for the celebration",
     src: aiCook3,
-    alt: "Traditional festive delight prepared at home",
+    alt: "Traditional Diwali sweets prepared at home",
   },
 ];
 
@@ -37,14 +36,6 @@ const DishCarousel = () => {
 
     return () => clearTimeout(id);
   }, [index, isPaused]);
-
-  const goNext = () => {
-    setIndex((current) => (current + 1) % DISHES.length);
-  };
-
-  const goPrev = () => {
-    setIndex((current) => (current - 1 + DISHES.length) % DISHES.length);
-  };
 
   const goTo = (dishIndex) => {
     setIndex(dishIndex);
@@ -75,22 +66,6 @@ const DishCarousel = () => {
           </div>
         </div>
 
-        <button
-          type="button"
-          className="dish-stage-arrow left"
-          onClick={goPrev}
-          aria-label="Previous dish"
-        >
-          <ChevronLeft size={18} />
-        </button>
-        <button
-          type="button"
-          className="dish-stage-arrow right"
-          onClick={goNext}
-          aria-label="Next dish"
-        >
-          <ChevronRight size={18} />
-        </button>
       </div>
 
       <div className="dish-carousel-dots" role="tablist" aria-label="Carousel pages">

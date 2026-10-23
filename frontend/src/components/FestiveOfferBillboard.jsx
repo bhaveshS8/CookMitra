@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import API from "../api/axios";
 import {
@@ -10,15 +10,28 @@ import {
   Flame,
   Star,
   ArrowRight,
+  Sparkles,
 } from "lucide-react";
 
-const SEEN_KEY = "cm-festive-offer-seen";
-const HIDE_KEY = "cm-festive-offer-hide";
-// Navratri ends Oct 20 — update per festival.
-const OFFER_END = new Date("2026-10-21T00:00:00");
+const HIDE_KEY = "cm-diwali-offer-hide";
+const SHOW_DELAY_MS = 1500;
+// Diwali 2026 — Lakshmi Puja is on Nov 8. Update per festival.
+const OFFER_END = new Date("2026-11-09T00:00:00");
 // Fallback code; must exist in backend couponCatalog.
-const OFFER_CODE = "FESTIVE20";
-const OFFER_PERCENT = 20;
+const FALLBACK_COUPON = {
+  code: "FIRSTFREE",
+  discountType: "percent",
+  percent: 100,
+  maxDiscount: 649,
+  minOrder: 0,
+  firstBookingOnly: true,
+};
+
+const isFreeCoupon = (coupon) => {
+  if (!coupon?.code) return false;
+  const code = String(coupon.code).replace(/[^a-z0-9]/gi, "").toUpperCase();
+  return Number(coupon.percent) === 100 || code === "FIRSTFREE";
+};
 
 function useCountdown() {
   const calc = () => {
@@ -48,24 +61,26 @@ const FestiveOfferBillboard = () => {
   );
   const [showModal, setShowModal] = useState(false);
   const [copied, setCopied] = useState(false);
+  const dismissedRef = useRef(false);
   const { d, h, m, s, expired } = useCountdown();
 
-  const [heroCode, setHeroCode] = useState(OFFER_CODE);
-  const [heroPercent, setHeroPercent] = useState(OFFER_PERCENT);
+  const [heroCoupon, setHeroCoupon] = useState(FALLBACK_COUPON);
   useEffect(() => {
     let alive = true;
     API.get("/coupons/active")
       .then((res) => {
-        const list = Array.isArray(res?.data)
-          ? res.data
-              .filter((c) => c && c.code)
-              .sort((a, b) => Number(b.percent || 0) - Number(a.percent || 0))
-          : [];
-        if (alive && list.length) {
-          const top = list[0];
-          setHeroCode(String(top.code).toUpperCase());
-          if (top.percent != null) setHeroPercent(Number(top.percent));
-        }
+        const raw = Array.isArray(res?.data) ? res.data : res?.data?.data;
+        const list = Array.isArray(raw) ? raw.filter((c) => c && c.code) : [];
+        if (!alive || !list.length) return;
+        // The free first-booking coupon is always the hero, even if the
+        // API order or an admin edit puts other offers ahead of it.
+        const free = list.find(isFreeCoupon);
+        const picked =
+          free ||
+          list
+            .slice()
+            .sort((a, b) => Number(b.percent || 0) - Number(a.percent || 0))[0];
+        setHeroCoupon({ ...picked, code: String(picked.code).toUpperCase() });
       })
       .catch(() => {
       });
@@ -75,16 +90,15 @@ const FestiveOfferBillboard = () => {
   }, []);
 
   useEffect(() => {
-    if (isBookingRoute) return undefined;
+    if (isBookingRoute || dismissedRef.current) return undefined;
     let timer;
     try {
       const hidden = localStorage.getItem(HIDE_KEY);
-      const seen = sessionStorage.getItem(SEEN_KEY);
-      if (!hidden && !seen) {
-        timer = setTimeout(() => setShowModal(true), 8000);
+      if (!hidden) {
+        timer = setTimeout(() => setShowModal(true), SHOW_DELAY_MS);
       }
     } catch {
-      timer = setTimeout(() => setShowModal(true), 8000);
+      timer = setTimeout(() => setShowModal(true), SHOW_DELAY_MS);
     }
     return () => clearTimeout(timer);
   }, [isBookingRoute]);
@@ -108,9 +122,9 @@ const FestiveOfferBillboard = () => {
   }, [showModal]);
 
   const closeModal = (persist = false) => {
+    dismissedRef.current = true;
     setShowModal(false);
     try {
-      sessionStorage.setItem(SEEN_KEY, "1");
       if (persist) localStorage.setItem(HIDE_KEY, "1");
     } catch {
     }
@@ -119,6 +133,24 @@ const FestiveOfferBillboard = () => {
   useEffect(() => {
     if (isBookingRoute) setShowModal(false);
   }, [isBookingRoute]);
+
+  const heroCode = heroCoupon.code || FALLBACK_COUPON.code;
+  const heroPercent = Number(heroCoupon.percent || 0);
+  const heroIsFree = isFreeCoupon(heroCoupon);
+  const heroCap = Number(heroCoupon.maxDiscount || 0)
+    ? `up to ₹${Number(heroCoupon.maxDiscount)}`
+    : null;
+  const heroValue = heroIsFree
+    ? "FREE"
+    : heroCoupon.discountType === "flat" && heroCoupon.flatAmount != null
+      ? `₹${heroCoupon.flatAmount}`
+      : `${heroPercent}%`;
+  const heroUnit = heroIsFree ? "ON US" : "OFF";
+  const heroSubline = heroIsFree
+    ? `First cook session${heroCap ? ` · ${heroCap}` : ""}`
+    : heroCoupon.minOrder
+      ? `Min order ₹${heroCoupon.minOrder}`
+      : "On festive bookings";
 
   const copyCode = async () => {
     try {
@@ -137,9 +169,17 @@ const FestiveOfferBillboard = () => {
           onClick={closeModal}
           role="dialog"
           aria-modal="true"
-          aria-label="Navratri offer"
+          aria-label={
+            heroIsFree
+              ? "Diwali offer — your first cook booking is free"
+              : "Diwali offer"
+          }
         >
-          <div className="festive-card festive-navratri" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="festive-card festive-diwali"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="festive-rangoli" aria-hidden="true" />
             <button
               className="festive-close"
               onClick={closeModal}
@@ -151,27 +191,49 @@ const FestiveOfferBillboard = () => {
             <div className="festive-body">
               <div className="festive-main">
                 <p className="festive-eyebrow">
-                  <span aria-hidden="true">💃</span> Navratri Special · Ends {expired ? "tonight" : "Oct 20"}
+                  <span aria-hidden="true">🪔</span> Diwali Special · Ends{" "}
+                  {expired ? "tonight" : "Nov 8"}
                 </p>
 
                 <h2 className="festive-title">
-                  <span className="festive-title-first">Get {heroPercent}% OFF</span>{" "}
-                  <span className="festive-title-gold">Navratri feasts</span>
+                  <span className="festive-title-first">
+                    {heroIsFree
+                      ? "Your first Diwali feast"
+                      : `Get ${heroPercent}% OFF`}
+                  </span>{" "}
+                  <span className="festive-title-gold">
+                    {heroIsFree ? "is on us" : "this Diwali"}
+                  </span>
                 </h2>
 
                 <p className="festive-desc">
-                  Nine nights of garba, dandiya &amp; festive cravings — modaks,
-                  puran poli &amp; festive sweets, cooked fresh in{" "}
-                  <strong>your kitchen</strong>. Use code{" "}
-                  <strong className="festive-desc-code">{heroCode}</strong> at
-                  checkout.
+                  {heroIsFree ? (
+                    <>
+                      Light up the celebration with a verified cook in{" "}
+                      <strong>your kitchen</strong> — faral, sweets &amp; a full
+                      festive spread. Your first booking is{" "}
+                      <strong>completely free</strong>
+                      {heroCap ? ` (${heroCap})` : ""} with code{" "}
+                      <strong className="festive-desc-code">{heroCode}</strong>.
+                    </>
+                  ) : (
+                    <>
+                      Celebrate Diwali with a verified cook in{" "}
+                      <strong>your kitchen</strong> — faral, sweets &amp; a full
+                      festive spread. Use code{" "}
+                      <strong className="festive-desc-code">{heroCode}</strong>{" "}
+                      at checkout.
+                    </>
+                  )}
                 </p>
 
                 <div className="festive-offer-row">
-                  <div className="festive-mega">
+                  <div
+                    className={`festive-mega${heroIsFree ? " festive-mega-free" : ""}`}
+                  >
                     <div className="festive-mega-num">
-                      <span className="mega-20">{heroPercent}%</span>
-                      <span className="mega-off">OFF</span>
+                      <span className="mega-20">{heroValue}</span>
+                      <span className="mega-off">{heroUnit}</span>
                     </div>
                     <div className="festive-mega-side">
                       <span className="festive-mega-stars" aria-hidden="true">
@@ -179,7 +241,7 @@ const FestiveOfferBillboard = () => {
                           <Star key={i} size={11} fill="#ffd24d" color="#ffd24d" />
                         ))}
                       </span>
-                      <span>with code {heroCode}</span>
+                      <span>{heroSubline}</span>
                     </div>
                   </div>
 
@@ -207,14 +269,20 @@ const FestiveOfferBillboard = () => {
                 </div>
 
                 <p className="festive-showcase-note">
-                  Verified cooks · OTP-verified sessions · Min order ₹349
+                  Verified cooks · OTP-verified sessions ·{" "}
+                  {heroIsFree
+                    ? "One free booking per customer"
+                    : heroCoupon.minOrder
+                      ? `Min order ₹${heroCoupon.minOrder}`
+                      : "No minimum order"}
                 </p>
               </div>
 
               <div className="festive-bottom-row">
                 <div className="festive-coupon">
                   <span className="festive-coupon-label">
-                    <Gift size={15} /> Your code
+                    <Gift size={15} />
+                    {heroIsFree ? "Your free code" : "Your code"}
                   </span>
                   <strong className="festive-coupon-code">{heroCode}</strong>
                   <button
@@ -233,7 +301,15 @@ const FestiveOfferBillboard = () => {
                     className="btn btn-lg festive-cta"
                     onClick={() => closeModal()}
                   >
-                    <ChefHat size={20} /> Claim {heroPercent}% OFF <ArrowRight size={20} />
+                    {heroIsFree ? (
+                      <Sparkles size={20} />
+                    ) : (
+                      <ChefHat size={20} />
+                    )}
+                    {heroIsFree
+                      ? "Book my free cook"
+                      : `Claim ${heroPercent}% OFF`}{" "}
+                    <ArrowRight size={20} />
                   </Link>
                   <button className="festive-maybe" onClick={() => closeModal()}>
                     Maybe later

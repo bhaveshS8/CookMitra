@@ -214,7 +214,7 @@ export function ProfileSecurityPage() {
   if (error || !profile) return <SectionError message={error || "Profile not found."} onRetry={load} />;
   return (
     <SectionShell>
-      <SecurityPrivacyTab profile={profile} showToast={showToast} />
+      <SecurityPrivacyTab profile={profile} setProfile={setProfile} showToast={showToast} />
     </SectionShell>
   );
 }

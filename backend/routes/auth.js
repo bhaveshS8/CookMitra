@@ -16,6 +16,7 @@ const {
   updateProfile,
   getMyStats,
   changePassword,
+  setPassword,
   getMyAddresses,
   addMyAddress,
   updateMyAddress,
@@ -154,6 +155,19 @@ router.post(
 router.get("/me", auth, getMe);
 router.get("/me/stats", auth, getMyStats);
 router.post("/logout", logout);
+router.post(
+  "/set-password",
+  auth,
+  sensitiveLimiter,
+  [
+    body("newPassword").optional().isLength({ min: 8, max: 128 }).withMessage("Password must be 8–128 characters"),
+    body("new_password").optional().isLength({ min: 8, max: 128 }).withMessage("Password must be 8–128 characters"),
+    body("password").optional().isLength({ min: 8, max: 128 }).withMessage("Password must be 8–128 characters"),
+  ],
+  validate,
+  setPassword
+);
+
 router.post(
   "/change-password",
   auth,

@@ -95,33 +95,31 @@ const CountUp = ({ to, decimals = 0, suffix = "", duration = 1400 }) => {
   );
 };
 
-// Curated Navratri / vrat dishes only, so the strip matches the festival the
-// hero promotes. Grouped roughly as: sabudana, fasting flours
-// (kuttu / singhara / rajgira), samak & moraiyo, farali snacks, vrat mains
-// and vrat sweets.
+// Curated Diwali faral, sweets and celebration mains, so the strip matches
+// the festival the hero promotes.
 const TICKER_DISHES = [
-  "Sabudana Khichdi",
-  "Sabudana Vada",
-  "Sabudana Thalipeeth",
-  "Sabudana Kheer",
-  "Kuttu Paratha",
-  "Kuttu Puri",
-  "Kuttu Pakora",
-  "Singhara Puri",
-  "Rajgira Paratha",
-  "Rajgira Ladoo",
-  "Samak Rice",
-  "Samak Khichdi",
-  "Moraiyo Khichdi",
-  "Farali Pattice",
-  "Farali Chivda",
-  "Vrat Ke Aloo",
-  "Ratalyacha Kees",
-  "Shakarkandi Chaat",
-  "Vrat Ki Kadhi",
-  "Makhana Kheer",
-  "Roasted Makhana",
-  "Banana Halwa",
+  "Chakli",
+  "Karanji",
+  "Shankarpali",
+  "Bhajani Chivda",
+  "Besan Ladoo",
+  "Motichoor Ladoo",
+  "Kaju Katli",
+  "Gulab Jamun",
+  "Jalebi",
+  "Soan Papdi",
+  "Dry Fruit Barfi",
+  "Mathri",
+  "Namkeen Sev",
+  "Malpua",
+  "Rabri",
+  "Basundi",
+  "Puri & Aloo Sabzi",
+  "Dal Makhani",
+  "Paneer Butter Masala",
+  "Veg Biryani",
+  "Chole Bhature",
+  "Badam Halwa",
 ];
 
 const DISMISSED_RATINGS_KEY = "home-rate-dismissed";
@@ -337,15 +335,15 @@ const Home = () => {
     },
     {
       name: "Vikram Kulkarni",
-      role: "Ganesh Festival in Pune",
-      quote: "Booking a cook for Modaks was the best decision we made. We learned the traditional pleating technique and enjoyed fresh steamed Ukadiche Modak.",
+      role: "Diwali Faral Party in Pune",
+      quote: "Our cook made crisp chakli, flaky karanji and rich kaju katli for our Diwali get-together. Everything tasted just like home — and my kitchen stayed spotless!",
       rating: 5,
       avatar: "VK",
     },
     {
       name: "Rohit & Meera Sen",
-      role: "Navratri Feast Host",
-      quote: "Finding an experienced fasting food specialist in minutes was magical. The Sabudana Khichdi and fruit salads were extraordinary!",
+      role: "Diwali Feast Host",
+      quote: "Booking a cook for our Diwali dinner was the best decision. Dal makhani, paneer butter masala and warm gulab jamun arrived fresh — the whole family was impressed!",
       rating: 5,
       avatar: "RS",
     },
@@ -372,16 +370,16 @@ const Home = () => {
           <div className="hero-v2-left">
             {/* Phone-only entry point (hidden ≥641px — see responsive.css). */}
             <span className="hero-v2-eyebrow hero-enter" style={{ "--d": "0.1s" }}>
-              <Sparkles size={13} /> Navratri Special · Vrat-Friendly Feasts
+              <Sparkles size={13} /> Diwali Special · Faral, Sweets &amp; Feasts
             </span>
             <h1 className="hero-v2-title hero-enter" style={{ "--d": "0.15s" }}>
-              Festive Feasts, <span className="hero-v2-accent">Cooked Fresh</span> in Your Kitchen
+              Diwali Feasts, <span className="hero-v2-accent">Cooked Fresh</span> in Your Kitchen
             </h1>
             <p className="hero-v2-sub hero-enter" style={{ "--d": "0.25s" }}>
-              Celebrate Navratri with vrat-friendly feasts — sabudana khichdi,
-              kuttu parathas, samak rice & more — cooked fresh in your kitchen
-              by verified home cooks. OTP-verified starts, secure UPI payments,
-              and real-time alerts.
+              Celebrate Diwali with chakli, karanji, kaju katli &amp; a full
+              festive spread — cooked fresh in your kitchen by verified home
+              cooks. Your first booking is free, with OTP-verified starts,
+              secure UPI payments and real-time alerts.
             </p>
 
             <div className="hero-v2-actions hero-enter" style={{ "--d": "0.35s" }}>
@@ -396,28 +394,10 @@ const Home = () => {
               ) : (
                 <>
                   <Link to="/cook-on-demand" className="btn btn-lg hero-v2-btn-primary">
-                    <ChefHat size={18} /> Book a Cook <ArrowRight size={18} />
+                    <ChefHat size={18} /> Book a Diwali Cook <ArrowRight size={18} />
                   </Link>
                 </>
               )}
-            </div>
-
-            <div className="hero-v2-proof hero-enter" style={{ "--d": "0.45s" }}>
-              <div className="hero-v2-avatars">
-                <span>AD</span><span>VK</span><span>RS</span>
-                <span className="hero-v2-avatars-more">+2k</span>
-              </div>
-              <div className="hero-v2-rating">
-                <div className="hero-v2-stars">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} size={14} fill="#fbbf24" color="#fbbf24" />
-                  ))}
-                </div>
-                <span className="hero-v2-rating-num">4.9</span>
-              </div>
-              <span className="hero-v2-proof-text">
-                Loved by <strong>2,400+ families</strong>
-              </span>
             </div>
 
             <div className="hero-v2-perks hero-enter" style={{ "--d": "0.55s" }}>
@@ -433,7 +413,7 @@ const Home = () => {
             <div className="hero-v2-cook-wrap">
               <img
                 src={heroImg}
-                alt="Festive Indian feast with traditional dishes and sweets"
+                alt="Diwali Indian feast with traditional dishes and sweets"
                 className="hero-v2-cook-img"
                 loading="eager"
               />
@@ -492,8 +472,8 @@ const Home = () => {
                 Create Your Account
               </h2>
               <p className="section-description" style={{ textAlign: "left", margin: "0 0 1.5rem" }}>
-                Sign up to book verified festive cooks, manage your reservations,
-                and bring authentic festival flavors to your home.
+                Sign up to book verified home cooks, manage your reservations,
+                and bring the true taste of Diwali to your home.
               </p>
               <ul className="lead-benefits">
                 <li><CheckCircle2 size={16} /> Book verified cooks in your area</li>
@@ -513,7 +493,7 @@ const Home = () => {
           <span className="section-eyebrow">Simple & Transparent</span>
           <h2 className="section-title">How Cook Mitra Works</h2>
           <p className="section-description">
-            Bring the joy of authentic festive cooking to your home in four simple steps.
+            Bring the joy of Diwali cooking home in four simple steps.
           </p>
         </div>
 
@@ -537,9 +517,9 @@ const Home = () => {
       <section className="testimonials-section home-band band-abyss">
         <div className="section-header">
           <span className="section-eyebrow">Customer Stories</span>
-          <h2 className="section-title">Loved by Festival Hosts</h2>
+          <h2 className="section-title">Loved by Diwali Hosts</h2>
           <p className="section-description">
-            Read how Cook Mitra brought authentic celebrations into modern homes.
+            Read how Cook Mitra brought the light and warmth of Diwali into modern homes.
           </p>
         </div>
 
@@ -575,18 +555,18 @@ const Home = () => {
           <div className="cta-cook-grid">
             <div className="cta-cook-copy">
               <span className="cta-cook-badge">
-                <ChefHat size={14} /> For Home Chefs · Earn Festive Income
+                <ChefHat size={14} /> For Home Chefs · Earn This Diwali
               </span>
               <h2>Are You a Skilled Home Cook?</h2>
               <p className="cta-cook-sub">
-                Turn your family recipes into festive earnings. Share your traditional
-                culinary recipes and cooking skills with families in your city —
-                on flexible slots, with a verified profile.
+                Turn your family recipes into Diwali earnings. Share your traditional
+                faral and Diwali sweets with families in your city — on flexible
+                slots, with a verified profile.
               </p>
               <ul className="cta-cook-perks">
                 <li>
                   <span className="cta-cook-perk-icon"><ChefHat size={17} /></span>
-                  <span><strong>Share recipes</strong><em>Traditional festive dishes</em></span>
+                  <span><strong>Share recipes</strong><em>Diwali faral &amp; sweets</em></span>
                 </li>
                 <li>
                   <span className="cta-cook-perk-icon"><CalendarClock size={17} /></span>
@@ -607,7 +587,7 @@ const Home = () => {
                   </Link>
                 )}
               </div>
-              <p className="cta-cook-note">No joining fee · Festive demand in Pune</p>
+              <p className="cta-cook-note">No joining fee · Diwali demand in Pune</p>
             </div>
           </div>
         </section>

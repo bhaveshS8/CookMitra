@@ -12,31 +12,24 @@
 .hero-v2-cook-wrap {
   position: relative;
   width: min(100%, 520px);
-  border-radius: 28px;
-  padding: 10px;
-  background: linear-gradient(165deg, #fff3c4 0%, #f5a623 30%, #8a3c0c 72%, #ffd24d 100%);
-  box-shadow: 0 30px 60px -18px rgba(124, 45, 18, 0.35), 0 0 50px rgba(251, 191, 36, 0.3);
-}
-.hero-v2-cook-wrap::before {
-  content: "";
-  position: absolute;
-  inset: 22px -14px -14px 22px;
-  border-radius: 28px;
-  background: linear-gradient(135deg, rgba(251, 191, 36, 0.4), rgba(251, 146, 60, 0.14));
-  border: 1px solid rgba(180, 83, 9, 0.2);
-  z-index: -1;
-  pointer-events: none;
+  border-radius: 26px;
+  padding: 4px;
+  background: #ffffff;
+  border: 1px solid rgba(120, 53, 15, 0.14);
+  box-shadow:
+    0 1px 2px rgba(67, 20, 7, 0.06),
+    0 28px 56px -28px rgba(67, 20, 7, 0.42),
+    0 10px 24px -16px rgba(180, 83, 9, 0.2);
+  overflow: hidden;
 }
 .hero-v2-cook-img {
-  border-radius: 20px;
+  border-radius: 21px;
   width: 100%;
   max-height: 600px;
   object-fit: cover;
   display: block;
   background: linear-gradient(135deg, #FFFBEB 0%, #FFEDD5 100%);
-  transition: transform 0.4s ease;
 }
-.hero-v2-cook-wrap:hover .hero-v2-cook-img { transform: scale(1.025); }
 .hero-diyas {
   position: absolute;
   bottom: -24px;
@@ -130,6 +123,9 @@
 @media (max-width: 640px) {
   .hero-v2-float-rating { top: -12px; right: 8px; }
   .hero-v2-float-live { top: auto; bottom: 54px; left: 8px; max-width: calc(100% - 16px); }
+  /* Keep the mobile hero image clean — the floating rating/live labels
+     crowd the photo and overlap its edges on small screens. */
+  .hero-v2-float { display: none; }
   .hero-diyas { bottom: -14px; font-size: 1.2rem; }
   .hero-diyas .hero-diya-big { font-size: 1.6rem; }
   /* Two stat tiles share the row evenly instead of wrapping (min-width was

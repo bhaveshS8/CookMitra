@@ -401,19 +401,93 @@ svg.festive-count-flame { width: 15px; height: 15px; }
   .festive-title { font-size: 1.35rem; }
 }
 
-.festive-card.festive-navratri { border-top-color: #a21caf; }
-.festive-card.festive-navratri .festive-eyebrow { background: #a21caf; border-color: #a21caf; }
-.festive-card.festive-navratri .festive-title-gold { color: #a21caf; }
-.festive-card.festive-navratri .festive-desc-code { background: #fdf4ff; border-color: #a21caf; color: #86198f; }
-.festive-card.festive-navratri .festive-countdown { background: #fdf4ff; border-color: #f0abfc; }
-.festive-card.festive-navratri .festive-count-flame { color: #a21caf; }
-.festive-card.festive-navratri .festive-count-label { color: #86198f; }
-.festive-card.festive-navratri .festive-coupon { background: #fdf4ff; border-color: #a21caf; }
-.festive-card.festive-navratri .festive-coupon-label { color: #86198f; }
-.festive-card.festive-navratri .festive-coupon-code { border-color: #f0abfc; }
-.festive-card.festive-navratri .festive-cta { background: #a21caf; box-shadow: 0 10px 24px rgba(162, 28, 175, 0.35); }
-.festive-card.festive-navratri .festive-cta:hover { background: #86198f; }
-.festive-card.festive-navratri .festive-close:focus-visible,
-.festive-card.festive-navratri .festive-copy-btn:focus-visible,
-.festive-card.festive-navratri .festive-cta:focus-visible,
-.festive-card.festive-navratri .festive-maybe:focus-visible { outline-color: #a21caf; }
+/* ---------- Diwali theme ---------- */
+.festive-card.festive-diwali {
+  border-top-color: #b45309;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(251, 191, 36, 0.2), transparent 42%),
+    radial-gradient(circle at 0% 100%, rgba(185, 28, 28, 0.1), transparent 46%),
+    #fffdf7;
+  box-shadow:
+    0 24px 70px rgba(120, 53, 15, 0.3),
+    0 0 0 1px rgba(251, 191, 36, 0.28);
+}
+
+/* Soft rangoli glow in the top-right corner. */
+.festive-rangoli {
+  position: absolute;
+  top: -90px;
+  right: -90px;
+  width: 300px;
+  height: 300px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    radial-gradient(circle, rgba(251, 191, 36, 0.28) 0 18%, transparent 19%),
+    radial-gradient(circle, transparent 0 32%, rgba(217, 119, 6, 0.16) 33% 34%, transparent 35%),
+    radial-gradient(circle, transparent 0 46%, rgba(185, 28, 28, 0.12) 47% 48%, transparent 49%),
+    radial-gradient(circle, rgba(251, 191, 36, 0.22), transparent 66%);
+}
+.festive-diwali .festive-body { position: relative; z-index: 3; }
+
+.festive-diwali .festive-eyebrow {
+  color: #fff7ed;
+  background: linear-gradient(120deg, #9a3412, #b91c1c 60%, #c2410c);
+  border-color: #f59e0b;
+  box-shadow: 0 4px 14px rgba(185, 28, 28, 0.22);
+}
+.festive-diwali .festive-title-gold { color: #b91c1c; }
+.festive-diwali .festive-desc-code {
+  background: #fffbeb;
+  border-color: #d97706;
+  color: #92400e;
+}
+.festive-diwali .festive-mega {
+  background: linear-gradient(135deg, #7c2d12 0%, #4a1410 55%, #2f0a0a 100%);
+  border-color: #b45309;
+}
+.festive-diwali .festive-mega-free {
+  box-shadow:
+    inset 0 0 0 1px rgba(251, 191, 36, 0.35),
+    0 0 26px rgba(251, 191, 36, 0.2);
+}
+.festive-diwali .mega-20 {
+  color: #fbbf24;
+  text-shadow: 0 0 18px rgba(251, 191, 36, 0.4);
+}
+.festive-diwali .mega-off {
+  background: #fbbf24;
+  border-color: #fbbf24;
+  color: #3f0d0d;
+}
+.festive-diwali .festive-mega-side { color: #fde68a; }
+.festive-diwali .festive-countdown {
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+.festive-diwali .festive-count-flame { color: #b45309; }
+.festive-diwali .festive-count-label { color: #92400e; }
+.festive-diwali .festive-coupon {
+  background: #fffbeb;
+  border-color: #d97706;
+}
+.festive-diwali .festive-coupon-label { color: #92400e; }
+.festive-diwali .festive-coupon-code {
+  color: #7c2d12;
+  border-color: #fcd34d;
+  background: #ffffff;
+}
+.festive-diwali .festive-copy-btn { background: #7c2d12; }
+.festive-diwali .festive-copy-btn:hover { background: #9a3412; }
+.festive-diwali .festive-cta {
+  background: linear-gradient(120deg, #b91c1c 0%, #c2410c 60%, #d97706 100%);
+  box-shadow: 0 12px 26px rgba(185, 28, 28, 0.35);
+}
+.festive-diwali .festive-cta:hover {
+  background: linear-gradient(120deg, #991b1b 0%, #a83a0d 60%, #b45309 100%);
+}
+.festive-diwali .festive-close:focus-visible,
+.festive-diwali .festive-copy-btn:focus-visible,
+.festive-diwali .festive-cta:focus-visible,
+.festive-diwali .festive-maybe:focus-visible { outline-color: #b45309; }

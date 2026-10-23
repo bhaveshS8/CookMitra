@@ -191,7 +191,7 @@ const ReviewForm = ({ bookingId, existingReview, onSubmitted, variant = "card" }
             })}
           </div>
           <span
-            className={`rf-rate-pill${activeMeta ? ` tone-${activeMeta.tone}` : ""}`}
+            className={`rf-rate-pill${activeMeta ? ` tone-${activeMeta.tone}` : " rf-rate-pill--empty"}`}
             aria-live="polite"
           >
             {activeMeta ? `${hoverRating || rating}★ · ${activeMeta.label}` : "Select a star rating"}

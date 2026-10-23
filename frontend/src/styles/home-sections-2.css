@@ -163,7 +163,7 @@
   max-width: 1120px;
   margin: 0 auto;
 }
-.cta-cook-wrap { padding: 0 1.5rem 3rem; }
+.cta-cook-wrap { padding: clamp(2rem, 4vw, 3rem) 1.5rem 3rem; }
 .cta-cook-wrap .cta-banner { margin-left: auto; margin-right: auto; }
 
 /* Home ends with the cook CTA / dark testimonials band — the footer's
@@ -311,7 +311,7 @@
 }
 
 @media (max-width: 640px) {
-  .cta-cook-wrap { padding: 0 1rem 2rem; }
+  .cta-cook-wrap { padding: 2rem 1rem 2rem; }
   .cta-cook-wrap .cta-banner.cta-cook { margin-top: 0; padding: 0; }
   .cta-cook-grid { gap: 1rem; padding: 1.4rem 1.1rem; }
   .cta-cook-badge { font-size: 0.7rem; padding: 0.25rem 0.65rem; margin-bottom: 0.7rem; }

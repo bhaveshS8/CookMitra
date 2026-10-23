@@ -238,68 +238,6 @@
   .hero-toran-flower, .hero-v2-chip-code { animation: none !important; }
 }
 
-.hero-v2-proof {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  flex-wrap: wrap;
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid rgba(180, 83, 9, 0.22);
-  border-radius: 16px;
-  padding: 0.6rem 0.95rem;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  box-shadow: 0 8px 24px rgba(124, 45, 18, 0.12);
-}
-.hero-v2-proof-text { font-size: 0.86rem; color: #7C2D12; }
-.hero-v2-proof-text strong { color: #C2410C; }
-.hero-v2-rating { display: flex; align-items: center; gap: 0.4rem; }
-.hero-v2-stars { display: flex; gap: 2px; }
-.hero-v2-rating-num { font-weight: 800; font-size: 1rem; color: #C2410C; }
-
-.hero-v2-avatars { display: flex; align-items: center; }
-.hero-v2-avatars > span {
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  min-height: 32px;
-  border-radius: 50%;
-  background: var(--primary-gradient);
-  color: #fff;
-  font-size: 0.66rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid rgba(255, 255, 255, 0.85);
-  margin-left: -8px;
-  flex-shrink: 0;
-  overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-}
-.hero-v2-avatars > span:first-child { margin-left: 0; }
-.hero-v2-avatars > span:nth-child(1) { background: linear-gradient(135deg, #f97316, #c2410c); }
-.hero-v2-avatars > span:nth-child(2) { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
-.hero-v2-avatars > span:nth-child(3) { background: linear-gradient(135deg, #059669, #047857); }
-.hero-v2-avatars > span.hero-v2-avatars-more {
-  width: auto;
-  height: 32px;
-  min-height: 32px;
-  padding: 0 0.55rem;
-  border-radius: 99px;
-  background: #FEF3C7;
-  color: #7C2D12;
-  backdrop-filter: blur(6px);
-  font-weight: 800;
-}
-.hero-v2-avatars img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 50%;
-  display: block;
-}
 @media (max-width: 375px) {
   .hero-v2-brand-logo { width: 42px; height: 42px; }
   .hero-v2-brand > span { font-size: 1.1rem; }

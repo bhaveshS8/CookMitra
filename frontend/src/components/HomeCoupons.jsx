@@ -67,10 +67,10 @@ const HomeCoupons = () => {
           <Sparkles size={12} aria-hidden="true" />
           {coupons.length} Live {coupons.length === 1 ? "Offer" : "Offers"}
         </span>
-        <h2 className="section-title">Festive Offers For You</h2>
+        <h2 className="section-title">Diwali Offers For You</h2>
         <p className="section-description">
-          Apply a coupon while booking — one offer per session, straight off
-          your bill.
+          Apply a coupon while booking your Diwali cook — one offer per session,
+          straight off your bill.
         </p>
       </div>
 
@@ -171,7 +171,7 @@ const HomeCoupons = () => {
 
       <div className="coupon-cta">
         <Link to="/cook-on-demand" className="btn btn-lg hero-v2-btn-primary">
-          Book a Festive Cook <ArrowRight size={18} />
+          Book a Diwali Cook <ArrowRight size={18} />
         </Link>
       </div>
     </section>

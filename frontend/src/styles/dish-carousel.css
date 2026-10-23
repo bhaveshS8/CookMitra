@@ -44,31 +44,6 @@
   transform: none;
 }
 
-.dish-stage-arrow {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(4px);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
-  z-index: 6;
-}
-.dish-stage-arrow.left { left: 0.7rem; }
-.dish-stage-arrow.right { right: 0.7rem; }
-.dish-stage-arrow:hover {
-  background: var(--primary);
-  transform: translateY(-50%) scale(1.06);
-}
-
 .dish-mute-btn {
   position: absolute;
   right: 0.7rem;
@@ -128,22 +103,17 @@
   .dish-carousel { width: 90%; padding: 0.1rem 0 0; }
   .dish-carousel-dots { padding-left: 1rem; padding-right: 1rem; }
   .dish-frame { border-radius: 16px; aspect-ratio: 16 / 6; max-height: 200px; }
-  .dish-stage-arrow { width: 34px; height: 34px; }
   .dish-carousel-dot { width: 10px; height: 10px; }
   .dish-carousel-dot.active { width: 28px; }
 }
 
 @media (max-width: 400px) {
   .dish-frame { border-radius: 14px; }
-  .dish-stage-arrow { width: 30px; height: 30px; }
-  .dish-stage-arrow.left { left: 0.5rem; }
-  .dish-stage-arrow.right { right: 0.5rem; }
   .dish-card-tag { font-size: 0.7rem; left: 0.6rem; bottom: 0.6rem; }
   .dish-mute-btn { width: 32px; height: 32px; right: 0.5rem; bottom: 0.5rem; }
 }
 @media (max-width: 320px) {
   .dish-carousel { width: 94%; }
   .dish-frame { aspect-ratio: 16 / 7; max-height: 168px; }
-  .dish-stage-arrow { width: 28px; height: 28px; }
   .dish-card-tag { font-size: 0.66rem; }
 }
