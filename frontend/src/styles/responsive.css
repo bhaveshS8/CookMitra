@@ -42,7 +42,7 @@
   .home-band { padding: 3rem 1rem; }
   .services-section { padding: 3rem 1rem; }
   .lead-section { padding: 3rem 1rem; }
-  .cta-banner { padding: 2.4rem 1.2rem; margin-top: 2.5rem; }
+  .cta-banner { padding: 2.4rem 1.2rem; margin-top: 0; }
   .section-header { margin-bottom: 1.8rem; }
   .dashboard-container, .cooks-page-container, .cook-profile-page-container, .ondemand-page, .booking-flow-page, .auth-wrapper {
     padding-left: calc(1rem + env(safe-area-inset-left));
@@ -390,4 +390,91 @@
   .login-modal { padding: 1.4rem 0.9rem; }
   .add-cook-modal { padding: 1.2rem 0.85rem; }
   .cf-card { padding: 1.2rem 0.9rem 0.9rem; }
+}
+
+/* ── Home hero — phone polish (≤640px) ────────────────────────────────────
+   Brings the phone hero in line with the mobile app: an eyebrow pill, one
+   glass "trust checklist" instead of three ragged chips, and the social
+   proof tucked under the hero image rather than wedged between the CTA and
+   the trust chips.
+   Every rule below is inside a max-width block, so ≥641px is untouched. */
+
+.hero-v2-eyebrow { display: none; }
+
+@media (max-width: 640px) {
+  /* The left column dissolves into the hero grid (display:contents) so its
+     children become rows we can re-order around the hero image. */
+  .hero-v2-left { display: contents; }
+  .hero-v2-inner { gap: 0; }
+
+  .hero-v2-eyebrow {
+    order: 0;
+    justify-self: start;
+    width: fit-content;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.32rem 0.85rem;
+    border-radius: 99px;
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(180, 83, 9, 0.25);
+    color: #9A3412;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    box-shadow: 0 4px 14px rgba(124, 45, 18, 0.12);
+    margin-bottom: 0.8rem;
+  }
+  .hero-v2-eyebrow svg { color: var(--primary); flex-shrink: 0; }
+
+  .hero-v2-title { order: 1; }
+  .hero-v2-sub { order: 2; margin: 0.7rem 0 0; font-size: 0.97rem; line-height: 1.55; }
+  .hero-v2-actions { order: 3; width: 100%; margin-top: 1.15rem; }
+  .hero-v2-perks { order: 4; margin-top: 1.1rem; }
+  .hero-v2-right { order: 5; margin-top: 1.6rem; }
+  .hero-v2-proof { order: 6; margin-top: 1.1rem; }
+
+  /* Trust chips → one glass checklist: aligned rows read cleaner on a phone
+     than three pills wrapping onto two ragged lines. */
+  .hero-v2-perks {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding: 0.25rem 0.85rem;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(180, 83, 9, 0.18);
+    border-radius: 16px;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    box-shadow: 0 8px 22px rgba(124, 45, 18, 0.1);
+  }
+  .hero-v2-perks span {
+    width: 100%;
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0.55rem 0;
+    font-size: 0.84rem;
+  }
+  .hero-v2-perks span + span { border-top: 1px dashed rgba(180, 83, 9, 0.2); }
+  .hero-v2-perks svg { color: #059669; }
+
+  /* Avatars + rating on row one, "Loved by …" spanning full width beneath. */
+  .hero-v2-proof { width: 100%; gap: 0.55rem 0.75rem; padding: 0.7rem 0.9rem; }
+  .hero-v2-proof-text { flex: 1 1 100%; }
+}
+
+@media (max-width: 375px) {
+  .hero-v2-eyebrow { font-size: 0.68rem; padding: 0.28rem 0.7rem; }
+  .hero-v2-sub { font-size: 0.93rem; }
+  .hero-v2-perks span { font-size: 0.8rem; }
+}
+
+@media (max-width: 320px) {
+  .hero-v2-eyebrow { font-size: 0.64rem; letter-spacing: 0.03em; }
+  .hero-v2-sub { font-size: 0.9rem; }
+  .hero-v2-perks { padding: 0.15rem 0.7rem; }
+  .hero-v2-perks span { font-size: 0.78rem; }
 }

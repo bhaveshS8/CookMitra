@@ -1,0 +1,131 @@
+/* ==========================================================================
+   Mobile bottom tab bar — phone only (<= 640px)
+   Mirrors the app's CustomerTabs / CookTabs for signed-in users.
+
+   Nothing renders above 640px (`.mtabbar` stays display:none and the
+   component returns null), so tablet and desktop are untouched.
+
+   Stacking: page content < bar (55) < navbar + loc-dropdown (60/80)
+   < modals, toasts and overlays (1000+). Every element already pinned to the
+   viewport bottom in this codebase is either a full-screen overlay or a modal
+   action row, so the bar can never occlude one of them.
+   ========================================================================== */
+
+.mtabbar { display: none; }
+
+@media (max-width: 640px) {
+  body.has-mtabbar {
+    /* Shared with the footer clearance below so the two can never drift. */
+    --mtab-h: calc(60px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .mtabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 55;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    height: var(--mtab-h);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: rgba(255, 255, 255, 0.93);
+    backdrop-filter: blur(18px) saturate(1.6);
+    -webkit-backdrop-filter: blur(18px) saturate(1.6);
+    border-top: 1px solid var(--slate-100, #f1f5f9);
+    box-shadow: 0 -10px 30px -14px rgba(15, 23, 42, 0.32);
+  }
+
+  /* Warm hairline echoing the navbar's rule without the grey slab. */
+  .mtabbar::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(232, 89, 12, 0.35), transparent);
+  }
+
+  /* The footer is the last element on every route, so its dark padding is the
+     natural place to absorb the clearance. Without this the bar would sit on
+     top of the copyright row at maximum scroll. */
+  body.has-mtabbar .footer-modern { padding-bottom: var(--mtab-h); }
+
+  /* modern.css parks the FAB at 5.5rem, which a notched phone's safe-area
+     inset pushes the bar past. Beats it on specificity, and this file is
+     imported last anyway. */
+  body.has-mtabbar .to-top-fab { bottom: calc(var(--mtab-h) + 1rem); }
+}
+
+.mtab-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  min-height: 44px;
+  padding: 0.3rem 0.15rem 0.35rem;
+  color: var(--slate-500, #64748b);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.18s ease;
+}
+
+@media (hover: hover) {
+  .mtab-item:hover { color: var(--slate-700, #334155); }
+}
+
+/* Active tick along the top edge. */
+.mtab-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 26px;
+  height: 3px;
+  border-radius: 0 0 4px 4px;
+  background: var(--primary-gradient, linear-gradient(135deg, #ffb020, #e8590c));
+  transform: translateX(-50%) scaleX(0);
+  transform-origin: 50% 0;
+  opacity: 0;
+  transition: transform 0.22s var(--ease-out, ease), opacity 0.22s ease;
+}
+.mtab-item.active { color: var(--primary, #e8590c); }
+.mtab-item.active::before { transform: translateX(-50%) scaleX(1); opacity: 1; }
+
+.mtab-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 25px;
+  border-radius: 99px;
+  transition: background 0.2s ease, transform 0.2s var(--ease-out, ease);
+}
+.mtab-item.active .mtab-ico { background: var(--primary-light, #fff0e1); }
+.mtab-item:active .mtab-ico { transform: scale(0.92); }
+
+.mtab-label {
+  max-width: 100%;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Narrow phones: shrink so four labels still fit without truncating. */
+@media (max-width: 375px) {
+  .mtab-item { font-size: 0.62rem; }
+  .mtab-ico { width: 38px; height: 23px; }
+}
+
+@media (max-width: 320px) {
+  .mtab-item { font-size: 0.57rem; padding: 0.25rem 0.05rem 0.3rem; }
+  .mtab-ico { width: 34px; height: 22px; }
+  .mtab-item svg { width: 19px; height: 19px; }
+}

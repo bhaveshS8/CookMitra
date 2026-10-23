@@ -20,8 +20,38 @@ import {
   UserCheck,
   Award,
   ShieldCheck,
+  Sparkles,
   X,
 } from "lucide-react";
+
+/* "How Cook Mitra Works" steps. Kept as data so the icon, numeral and copy
+   stay together and the stepper renders identically at every breakpoint. */
+const HOW_STEPS = [
+  {
+    step: "01",
+    Icon: Compass,
+    title: "Share Requirements",
+    text: "Pick a service, date, dishes and location — tell us what you need for your gathering.",
+  },
+  {
+    step: "02",
+    Icon: UserCheck,
+    title: "Pick Cook & Slot",
+    text: "See verified cooks free on your date with their open time slots — tap one to send your booking request.",
+  },
+  {
+    step: "03",
+    Icon: CalendarCheck,
+    title: "OTP-Verified Start",
+    text: "Cook arrives at your home, you share the OTP — session starts securely with live tracking and UPI payment after approval.",
+  },
+  {
+    step: "04",
+    Icon: Award,
+    title: "Savor & Review",
+    text: "Enjoy delicious authentic flavors with your family, then share your review and experience with the community.",
+  },
+];
 
 const CountUp = ({ to, decimals = 0, suffix = "", duration = 1400 }) => {
   const [val, setVal] = useState(0);
@@ -65,17 +95,33 @@ const CountUp = ({ to, decimals = 0, suffix = "", duration = 1400 }) => {
   );
 };
 
+// Curated Navratri / vrat dishes only, so the strip matches the festival the
+// hero promotes. Grouped roughly as: sabudana, fasting flours
+// (kuttu / singhara / rajgira), samak & moraiyo, farali snacks, vrat mains
+// and vrat sweets.
 const TICKER_DISHES = [
-  "Modak",
-  "Puran Poli",
-  "Chakli",
-  "Karanji",
-  "Masala Dosa",
-  "Samosa",
-  "Gulab Jamun",
-  "Ladoo",
-  "Shankarpali",
   "Sabudana Khichdi",
+  "Sabudana Vada",
+  "Sabudana Thalipeeth",
+  "Sabudana Kheer",
+  "Kuttu Paratha",
+  "Kuttu Puri",
+  "Kuttu Pakora",
+  "Singhara Puri",
+  "Rajgira Paratha",
+  "Rajgira Ladoo",
+  "Samak Rice",
+  "Samak Khichdi",
+  "Moraiyo Khichdi",
+  "Farali Pattice",
+  "Farali Chivda",
+  "Vrat Ke Aloo",
+  "Ratalyacha Kees",
+  "Shakarkandi Chaat",
+  "Vrat Ki Kadhi",
+  "Makhana Kheer",
+  "Roasted Makhana",
+  "Banana Halwa",
 ];
 
 const DISMISSED_RATINGS_KEY = "home-rate-dismissed";
@@ -324,6 +370,10 @@ const Home = () => {
 
         <div className="hero-v2-inner">
           <div className="hero-v2-left">
+            {/* Phone-only entry point (hidden ≥641px — see responsive.css). */}
+            <span className="hero-v2-eyebrow hero-enter" style={{ "--d": "0.1s" }}>
+              <Sparkles size={13} /> Navratri Special · Vrat-Friendly Feasts
+            </span>
             <h1 className="hero-v2-title hero-enter" style={{ "--d": "0.15s" }}>
               Festive Feasts, <span className="hero-v2-accent">Cooked Fresh</span> in Your Kitchen
             </h1>
@@ -468,49 +518,19 @@ const Home = () => {
         </div>
 
         <div className="how-it-works-grid">
-          <div className="how-card">
-            <div className="how-card-header">
-              <div className="how-icon-box">
-                <Compass size={26} />
-              </div>
-              <span className="how-step-badge">01</span>
+          {HOW_STEPS.map(({ step, Icon, title, text }) => (
+            <div className="how-card" key={step}>
+              <span className="how-ghost" aria-hidden="true">
+                {step}
+              </span>
+              <span className="how-icon-box">
+                <Icon size={21} strokeWidth={2.2} />
+              </span>
+              <span className="how-step-label">Step {step}</span>
+              <h3>{title}</h3>
+              <p>{text}</p>
             </div>
-            <h3>1. Share Requirements</h3>
-            <p>Pick a service, date, dishes and location — tell us what you need for your gathering.</p>
-          </div>
-
-          <div className="how-card">
-            <div className="how-card-header">
-              <div className="how-icon-box">
-                <UserCheck size={26} />
-              </div>
-              <span className="how-step-badge">02</span>
-            </div>
-            <h3>2. Pick Cook & Slot</h3>
-            <p>See verified cooks free on your date with their open time slots — tap one to send your booking request.</p>
-          </div>
-
-          <div className="how-card">
-            <div className="how-card-header">
-              <div className="how-icon-box">
-                <CalendarCheck size={26} />
-              </div>
-              <span className="how-step-badge">03</span>
-            </div>
-            <h3>3. OTP-Verified Start</h3>
-            <p>Cook arrives at your home, you share the OTP — session starts securely with live tracking and UPI payment after approval.</p>
-          </div>
-
-          <div className="how-card">
-            <div className="how-card-header">
-              <div className="how-icon-box">
-                <Award size={26} />
-              </div>
-              <span className="how-step-badge">04</span>
-            </div>
-            <h3>4. Savor & Review</h3>
-            <p>Enjoy delicious authentic flavors with your family, then share your review and experience with the community.</p>
-          </div>
+          ))}
         </div>
       </section>
 

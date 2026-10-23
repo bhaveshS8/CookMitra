@@ -1,50 +1,120 @@
 
+/* ── "How Cook Mitra Works" ────────────────────────────────────────────────
+   One design at every width: a gradient node holding the step icon, a ghost
+   numeral in the corner, and a "STEP 0N" label above the title. Wide screens
+   show the four steps side by side, tablets go 2-up, and phones turn the same
+   cards into a connected vertical stepper — the treatment the mobile app uses.
+
+   `modern.css` already owns the shared card transitions, the .how-card:hover
+   lift and the gradient bar on ::after, so ::before is free for the phone rail. */
+
 .how-it-works-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 1.25rem;
-  max-width: 1000px;
+  max-width: 1060px;
   margin: 0 auto;
 }
+
 .how-card {
   position: relative;
   background: #fff;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid #f6ece2;
+  border-radius: 22px;
+  box-shadow: 0 5px 22px -14px rgba(124, 45, 18, 0.42);
   padding: 1.5rem 1.4rem;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
-.how-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); }
-.how-step-badge {
+
+/* Oversized faint numeral — depth without competing with the label or title. */
+.how-ghost {
   position: absolute;
-  top: 1.1rem;
-  right: 1.1rem;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--primary-gradient);
-  color: #fff;
-  font-size: 0.8rem;
-  font-weight: 800;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-brand);
+  top: 0.35rem;
+  right: 0.9rem;
+  font-size: 3rem;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  color: rgba(234, 88, 12, 0.11);
+  pointer-events: none;
+  user-select: none;
 }
+
+/* Gradient step marker with the icon knocked out in white. */
 .how-icon-box {
-  width: 50px;
-  height: 50px;
-  border-radius: 15px;
-  background: var(--primary-light);
-  color: var(--primary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 0.9rem;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  color: #fff;
+  background: linear-gradient(135deg, #fdba74 0%, #f97316 55%, #c2410c 100%);
+  box-shadow: 0 4px 10px -3px rgba(154, 52, 18, 0.45);
+  margin-bottom: 0.95rem;
 }
-.how-card h3 { font-size: 1.05rem; margin: 0 0 0.4rem; }
+
+.how-step-label {
+  display: block;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 0.35rem;
+}
+
+.how-card h3 { font-size: 1.05rem; margin: 0 0 0.4rem; padding-right: 1.2rem; }
 .how-card p { color: var(--slate-600); font-size: 0.9rem; margin: 0; }
+
+/* Tablet: 2-up, narrowed so the cards don't stretch into empty space. */
+@media (max-width: 899px) and (min-width: 641px) {
+  .how-it-works-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 720px; }
+}
+
+/* Phone: the same cards become a connected vertical stepper.
+   Geometry — the node is a fixed 46px at left:18px / top:22px, so its bottom
+   edge sits at 68px and its horizontal centre at 41px. The rail therefore
+   lives at left:40px (a 2px rule centred on 41) and runs from 68px down across
+   the 1rem grid gap plus the next card's 22px top offset, meeting the next node
+   exactly; the overshoot is hidden behind the next card's opaque white
+   background. The last node has nothing below it, so its rail is dropped — as
+   in the app. */
+@media (max-width: 640px) {
+  .how-it-works-grid { grid-template-columns: 1fr; gap: 1rem; max-width: 560px; }
+  .how-card { padding: 1.3rem 1.15rem 1.3rem 4.5rem; }
+
+  .how-card::before {
+    content: "";
+    position: absolute;
+    left: 40px;
+    top: 68px;
+    bottom: calc(-1rem - 22px);
+    width: 2px;
+    border-radius: 2px;
+    background: #fdba74;
+  }
+  /* The connector fades down the flow so the segments read as one rail. */
+  .how-card:nth-child(2)::before { background: #fcd0ab; }
+  .how-card:nth-child(3)::before { background: #fbe0c9; }
+  .how-card:last-child::before { display: none; }
+
+  .how-icon-box { position: absolute; top: 22px; left: 18px; margin: 0; }
+  .how-ghost { top: 0.4rem; right: 0.85rem; font-size: 2.6rem; }
+}
+
+@media (max-width: 375px) {
+  .how-card { padding: 1.15rem 1rem 1.15rem 4.1rem; }
+  .how-card::before { left: 36px; top: 64px; }
+  .how-icon-box { left: 16px; width: 42px; height: 42px; }
+  .how-card h3 { font-size: 1rem; }
+  .how-card p { font-size: 0.86rem; }
+}
+@media (max-width: 320px) {
+  .how-card { padding: 1.05rem 0.9rem 1.05rem 3.7rem; border-radius: 16px; }
+  .how-card::before { left: 32px; top: 60px; }
+  .how-icon-box { left: 14px; width: 38px; height: 38px; }
+  .how-card h3 { font-size: 0.96rem; }
+}
 
 .testimonials-section .section-title { color: #fff; }
 .testimonials-section .section-description { color: rgba(255, 255, 255, 0.7); }
@@ -91,10 +161,15 @@
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-brand);
   max-width: 1120px;
-  margin: 4rem auto 0;
+  margin: 0 auto;
 }
-.cta-cook-wrap { padding: 0 1.5rem; }
+.cta-cook-wrap { padding: 0 1.5rem 3rem; }
 .cta-cook-wrap .cta-banner { margin-left: auto; margin-right: auto; }
+
+/* Home ends with the cook CTA / dark testimonials band — the footer's
+   global top margin would render as a grey body-bg strip between two
+   colored blocks, so it is dropped on this page only. */
+.App:has(.home-container) .footer-modern { margin-top: 0; }
 
 .cta-cook {
   text-align: left;
@@ -204,16 +279,21 @@
   flex-wrap: wrap;
   margin-bottom: 0.9rem;
 }
+/* White CTA on the orange band. Mirrors the app's `light` button variant: the
+   shadow is warm (#7c2d12 / brown-orange), never black, so the button reads as
+   a raised tappable element rather than a flat white block. White-on-orange is
+   also the only pairing here with real contrast — an orange button on this band
+   would disappear into it. */
 .cta-cook-btn-primary {
   background: #fff;
   color: var(--primary-700);
-  box-shadow: 0 12px 28px -10px rgba(0, 0, 0, 0.4);
   border-color: transparent;
+  box-shadow: 0 2px 6px rgba(124, 45, 18, 0.18), 0 14px 30px -12px rgba(124, 45, 18, 0.55);
 }
 .cta-cook-btn-primary:hover {
-  background: #fff7ed;
+  background: #fff;
   color: var(--primary-800);
-  filter: brightness(1.02);
+  box-shadow: 0 3px 8px rgba(124, 45, 18, 0.22), 0 18px 36px -12px rgba(124, 45, 18, 0.62);
 }
 .cta-cook-btn-ghost {
   background: transparent;
@@ -231,8 +311,8 @@
 }
 
 @media (max-width: 640px) {
-  .cta-cook-wrap { padding: 0 1rem; }
-  .cta-cook-wrap .cta-banner.cta-cook { margin-top: 2rem; padding: 0; }
+  .cta-cook-wrap { padding: 0 1rem 2rem; }
+  .cta-cook-wrap .cta-banner.cta-cook { margin-top: 0; padding: 0; }
   .cta-cook-grid { gap: 1rem; padding: 1.4rem 1.1rem; }
   .cta-cook-badge { font-size: 0.7rem; padding: 0.25rem 0.65rem; margin-bottom: 0.7rem; }
   .cta-cook-copy h2 { font-size: 1.32rem; margin-bottom: 0.45rem; }
@@ -353,14 +433,12 @@
   margin-top: 0.5rem;
 }
 @media (max-width: 375px) {
-  .how-card { padding: 1.25rem 1.15rem; }
-  .how-card h3 { font-size: 1rem; }
-  .how-card p { font-size: 0.86rem; }
   .testimonial-card { padding: 1.25rem 1.15rem; }
 }
 @media (max-width: 320px) {
-  .how-card { padding: 1.1rem 1rem; border-radius: 16px; }
-  .how-icon-box { width: 44px; height: 44px; border-radius: 13px; }
-  .how-step-badge { width: 24px; height: 24px; font-size: 0.72rem; }
   .testimonial-card { padding: 1.1rem 1rem; }
 }
+
+/* ── "How Cook Mitra Works" — phone stepper (≤640px) ──────────────────────
+   Superseded. The stepper now lives with the base .how-* rules at the top of
+   this file so one set of node/rail geometry covers every breakpoint. */

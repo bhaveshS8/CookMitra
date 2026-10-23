@@ -132,6 +132,9 @@
   .hero-v2-float-live { top: auto; bottom: 54px; left: 8px; max-width: calc(100% - 16px); }
   .hero-diyas { bottom: -14px; font-size: 1.2rem; }
   .hero-diyas .hero-diya-big { font-size: 1.6rem; }
+  /* Two stat tiles share the row evenly instead of wrapping (min-width was
+     150px, which overflowed once the gap was added on a small phone). */
+  .hero-v2-stat { flex: 1 1 130px; min-width: 0; padding: 0.75rem 0.9rem; }
 }
 @media (max-width: 375px) {
   .hero-v2-float { font-size: 0.72rem; padding: 0.36rem 0.62rem; }

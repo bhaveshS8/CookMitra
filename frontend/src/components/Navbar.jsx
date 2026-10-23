@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Link, NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import { logoutUser } from "../store/authSlice";
 import { useShowToast } from "../store/hooks";
@@ -37,10 +37,17 @@ const Navbar = () => {
   const dispatch = useDispatch();
   const showToast = useShowToast();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const pollRef = useRef(null);
   const [scrolled, setScrolled] = useState(false);
+
+  /* Close the drawer on any navigation, including taps on the phone bottom tab
+     bar, which lives outside this component. */
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 12);
