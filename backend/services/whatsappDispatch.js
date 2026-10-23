@@ -265,7 +265,7 @@ const templateParamsForBooking = (booking, customerName) => {
     }
     if (weekday === "माहिती उपलब्ध नाही") weekday = "";
     const byName = {
-      customer: String(customerName || "ग्राहक"),
+      customer: customerName ? marathi.toDevanagariName(customerName) : "ग्राहक",
       date: dateStr,
       weekday,
       time: timeRange,
@@ -274,7 +274,7 @@ const templateParamsForBooking = (booking, customerName) => {
     };
     return templateParamOrder().map((k) => byName[k] ?? "");
   } catch {
-    return [String(customerName || "ग्राहक")];
+    return [customerName ? marathi.toDevanagariName(customerName) : "ग्राहक"];
   }
 };
 

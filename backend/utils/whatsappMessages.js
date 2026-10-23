@@ -11,6 +11,8 @@
 
 const { FRONTEND_BASE_URL, normalizeIndianMobile } = require("./whatsapp");
 const { toDevanagari } = require("./marathiText");
+const { toDevanagariName } = require("./marathiNames");
+const { toMarathiNote } = require("./marathiNotes");
 
 const SERVICE_TYPE_MARATHI = {
   cook_for_me: "माझ्यासाठी स्वयंपाक",
@@ -188,7 +190,7 @@ const mapsDirLink = (booking) => {
 
 const formatNotes = (booking) => {
   const notes = String(booking?.notes || "").trim();
-  return notes || "—";
+  return notes ? toMarathiNote(notes) : "—";
 };
 
 const formatPayout = (booking) => {
@@ -221,7 +223,7 @@ const REJECT_BUTTON_TITLE = "❌ नकार द्या";
 const buildBookingRequestMessage = ({ booking, customerName } = {}) => {
   const name =
     customerName != null && String(customerName).trim() !== ""
-      ? String(customerName).trim()
+      ? toDevanagariName(String(customerName).trim())
       : NOT_AVAILABLE;
   const serviceDate = booking?.date ? formatMarathiDate(booking.date) : NOT_AVAILABLE;
   const weekday = booking?.date ? calculateMarathiWeekday(booking.date) : NOT_AVAILABLE;
@@ -249,7 +251,7 @@ const buildBookingRequestMessage = ({ booking, customerName } = {}) => {
       : NOT_AVAILABLE;
   const notes =
     booking?.notes != null && String(booking.notes).trim() !== ""
-      ? String(booking.notes).trim()
+      ? toMarathiNote(String(booking.notes).trim())
       : "";
   const bookingId =
     booking?._id != null && String(booking._id).trim() !== ""
@@ -321,7 +323,7 @@ const buildCookBookingScheduledMessage = ({ booking, cookName, customerName, cus
     "तुमची बुकिंग यशस्वीपणे निश्चित झाली आहे.",
     "",
     `📋 बुकिंग क्रमांक: ${bookingId || NOT_AVAILABLE}`,
-    `👤 ग्राहक: ${customerName || "ग्राहक"}`,
+    `👤 ग्राहक: ${customerName ? toDevanagariName(customerName) : "ग्राहक"}`,
     `📞 ग्राहक संपर्क: ${contactNumber}`,
     `📅 तारीख: ${formatServiceDate(booking)}`,
     `⏰ वेळ: ${timeLine}`,
@@ -461,7 +463,7 @@ const buildCookAcceptedMessage = ({ booking, customerName } = {}) => {
   return [
     "✅ Cook Mitra — तुम्ही बुकिंग स्वीकारले आहे",
     "",
-    `👤 ग्राहक: ${customerName || "ग्राहक"}`,
+    `👤 ग्राहक: ${customerName ? toDevanagariName(customerName) : "ग्राहक"}`,
     `🍽️ सेवा: ${serviceTypeMarathi(booking?.serviceType)}`,
     `📅 तारीख: ${formatServiceDate(booking)}`,
     `📋 बुकिंग क्रमांक: ${bookingId || NOT_AVAILABLE}`,
@@ -493,6 +495,8 @@ module.exports = {
   ACCEPT_BUTTON_TITLE,
   REJECT_BUTTON_TITLE,
   NOT_AVAILABLE,
+  toDevanagariName,
+  toMarathiNote,
   formatMarathiDate,
   calculateMarathiWeekday,
   formatMarathiDateWithWeekday,

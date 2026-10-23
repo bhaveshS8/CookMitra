@@ -151,6 +151,10 @@ const GoogleSignInButton = ({
   // Stretch Google's 40px-tall iframe to fill the visual button so the whole
   // surface stays clickable (e.g. wide registration card vs. GSI's 400px cap).
   const gsiScaleX = Math.min(1.5, Math.max(1, wrapWidth / (btnWidth || 1)));
+  const loadingLabel =
+    text === "signup_with"
+      ? "Creating your account with Google…"
+      : "Signing you in with Google…";
 
   return (
     <div className="google-btn-wrapper" ref={wrapRef}>
@@ -161,6 +165,7 @@ const GoogleSignInButton = ({
       <div
         className={`google-btn${stateClass}`}
         style={{ "--gsi-scale-x": gsiScaleX }}
+        aria-busy={loading ? "true" : undefined}
       >
         <span className="google-btn-content" aria-hidden="true">
           <span className="google-btn-icon">
@@ -186,7 +191,7 @@ const GoogleSignInButton = ({
         {loading && (
           <span className="google-btn-loading" role="status">
             <span className="google-btn-spinner" aria-hidden="true" />
-            Signing in with Google…
+            {loadingLabel}
           </span>
         )}
       </div>

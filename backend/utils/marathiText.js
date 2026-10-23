@@ -297,8 +297,14 @@ const VOWELS = [
   ["u", "उ", "ु"],
 ];
 
-const matchConsonant = (rest) => {
-  for (const [latin, deva] of CONSONANTS) {
+// Names use dental t/d (Aditi → अदिती, Deepak → दीपक). Addresses keep the
+// retroflex forms above (street/plot names read better that way).
+const NAME_CONSONANTS = CONSONANTS.map(([latin, deva]) =>
+  latin === "t" ? [latin, "त"] : latin === "d" ? [latin, "द"] : [latin, deva]
+);
+
+const matchConsonant = (rest, table = CONSONANTS) => {
+  for (const [latin, deva] of table) {
     if (!rest.startsWith(latin)) continue;
     // English soft c/g before e, i, y: "society" → सोसायटी, "page" → पेज.
     if (latin === "c" && /^[eiy]/.test(rest.slice(1))) return { len: 1, deva: "स" };
@@ -315,19 +321,20 @@ const matchVowel = (rest) => {
   return null;
 };
 
-const transliterateWord = (word) => {
+const transliterateWord = (word, { name = false, useWordMap = true } = {}) => {
   const lower = word.toLowerCase().replace(/['’]/g, "");
-  if (WORD_MAP[lower]) return WORD_MAP[lower];
+  if (useWordMap && WORD_MAP[lower]) return WORD_MAP[lower];
   // Short all-caps runs are initials/abbreviations, not words: "MH", "B".
   if (/^[A-Z]{1,4}$/.test(word)) {
     return [...word].map((ch) => LETTER_NAMES[ch.toLowerCase()] || ch).join("");
   }
+  const table = name ? NAME_CONSONANTS : CONSONANTS;
   let out = "";
   let i = 0;
   let prevWasConsonant = false;
   while (i < lower.length) {
     const rest = lower.slice(i);
-    const consonant = matchConsonant(rest);
+    const consonant = matchConsonant(rest, table);
     if (consonant) {
       out += consonant.deva;
       i += consonant.len;
@@ -347,17 +354,31 @@ const transliterateWord = (word) => {
     i += 1;
     prevWasConsonant = false;
   }
+  // Names in Latin script almost always end in a pronounced vowel:
+  // Neha → नेहा, Aditi → अदिती, Guru → गुरू. Address mode leaves them as-is.
+  if (name) {
+    if (/a$/.test(lower) && /[\u0915-\u0939\u0958-\u095F\u0979-\u097F]$/.test(out)) out += "ा";
+    if (/i$/.test(lower)) out = out.replace(/ि$/, "ी");
+    if (/u$/.test(lower)) out = out.replace(/ु$/, "ू");
+  }
   return out;
 };
 
 // Transliterate every Latin run; preserve Devanagari, digits and punctuation.
-const toDevanagari = (value) => {
+// `useWordMap: false` skips the address vocabulary (used for notes/names,
+// where a word like "no" must not become the address abbreviation "क्र").
+const toDevanagari = (value, { useWordMap = true } = {}) => {
   const text = String(value ?? "");
   if (!text) return text;
   return text.replace(/[A-Za-z]+|[^A-Za-z]+/g, (chunk) => {
     if (!/^[A-Za-z]+$/.test(chunk)) return chunk.replace(/&/g, "आणि");
-    return transliterateWord(chunk);
+    return transliterateWord(chunk, { useWordMap });
   });
 };
 
-module.exports = { toDevanagari };
+// Name fallback: name-tuned consonants, final-vowel lengthening, no address
+// vocabulary. Callers try a name dictionary first (see marathiNames.js).
+const transliterateNameWord = (word) =>
+  transliterateWord(word, { name: true, useWordMap: false });
+
+module.exports = { toDevanagari, transliterateNameWord };

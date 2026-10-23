@@ -57,7 +57,7 @@ const unpaid = { ...booking, payment: { status: "pending", paidAmount: 0 } };
   const body = marathi.buildCookBookingScheduledMessage({ booking, cookName: "Suresh", customerName: "Aditi Rao", customerPhone: "9123456780" });
   check("M2 scheduled has booking ref", body.includes("📋 बुकिंग क्रमांक: bk-mr-001"), "ref");
   check("M2 scheduled states paid, no double-charge", body.includes("आधीच पेमेंट केले आहे") && body.includes("पुन्हा पेमेंट घेऊ नका"), "paid");
-  check("M2 scheduled names customer", body.includes("Aditi Rao") && body.includes("Suresh"), "parties");
+  check("M2 scheduled names customer", body.includes("अदिती राव") && body.includes("Suresh"), "parties");
   check("M2 scheduled gives the cook the customer's contact number", body.includes("📞 ग्राहक संपर्क: 9123456780"), "contact");
   check("M2 scheduled is Devanagari", DEVA.test(body), "mr");
   // Every visit detail the cook needs is present, on every service type.
@@ -79,7 +79,7 @@ const unpaid = { ...booking, payment: { status: "pending", paidAmount: 0 } };
         b.includes("फ्लॅट 7, सनशाईन सोसायटी, पुणे") &&
         b.includes("🗺️ रस्ता पहा (Google Maps):") &&
         b.includes("📝 अतिरिक्त माहिती:") &&
-        b.includes("less spicy") &&
+        b.includes("कमी तिखट") &&
         b.includes("कृपया दिलेल्या वेळेवर ग्राहकाच्या पत्त्यावर पोहोचा."),
       serviceType
     );
@@ -122,7 +122,7 @@ const unpaid = { ...booking, payment: { status: "pending", paidAmount: 0 } };
 {
   const body = marathi.buildCookAcceptedMessage({ booking, customerName: "Aditi Rao" });
   check("M4 accepted is Marathi", DEVA.test(body) && body.includes("स्वीकारले"), "mr");
-  check("M4 accepted has ref + customer + 5-min note", body.includes("bk-mr-001") && body.includes("Aditi Rao") && body.includes("५ मिनिट"), "fields");
+  check("M4 accepted has ref + customer + 5-min note", body.includes("bk-mr-001") && body.includes("अदिती राव") && body.includes("५ मिनिट"), "fields");
 }
 
 // ---- 4b. Marathi date / day / clock / address helpers ----
@@ -168,6 +168,40 @@ const unpaid = { ...booking, payment: { status: "pending", paidAmount: 0 } };
       marathi.formatMarathiTime("") === "" &&
       marathi.formatMarathiSlotRange(null, null) === "",
     "safe"
+  );
+}
+
+// ---- 4c. Cook-facing customer name + note localization ----
+{
+  check(
+    "M10 common customer names render in Devanagari",
+    marathi.toDevanagariName("Suresh Patil") === "सुरेश पाटील" &&
+      marathi.toDevanagariName("Aditi Rao") === "अदिती राव",
+    marathi.toDevanagariName("Suresh Patil")
+  );
+  check(
+    "M10 Devanagari names pass through",
+    marathi.toDevanagariName("सुरेश पाटील") === "सुरेश पाटील",
+    "passthrough"
+  );
+  check(
+    "M10 notes translate common cooking instructions",
+    marathi.toMarathiNote("less spicy") === "कमी तिखट" &&
+      marathi.toMarathiNote("no onion garlic") === "कांदा-लसूण नको" &&
+      marathi.toMarathiNote("no tomato") === "टोमॅटो नको",
+    marathi.toMarathiNote("no onion garlic")
+  );
+  check("M10 empty notes stay empty", marathi.toMarathiNote("") === "", "empty");
+  const req = marathi.buildBookingRequestMessage({
+    booking,
+    customerName: "Suresh Patil",
+  });
+  check(
+    "M10 request uses localized name + notes",
+    req.includes("👤 ग्राहक: सुरेश पाटील") &&
+      req.includes("कमी तिखट") &&
+      !req.includes("less spicy"),
+    "localized"
   );
 }
 
