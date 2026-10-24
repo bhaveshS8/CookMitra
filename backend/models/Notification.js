@@ -88,8 +88,9 @@ const notificationSchema = new mongoose.Schema(
       default: false,
     },
     // Stable idempotency key for event-driven notifications (duplicate
-    // deliveries of the same booking event share one eventKey — see
-    // utils/eventOutbox.js). Sparse so legacy docs without a key coexist.
+    // deliveries of the same booking event share one eventKey - see
+    // utils/eventOutbox.js). Legacy docs without a key (null/missing) are
+    // excluded by the unique index's partial filter below.
     eventKey: {
       type: String,
       default: null,
@@ -102,9 +103,12 @@ const notificationSchema = new mongoose.Schema(
 notificationSchema.index({ user: 1, read: 1 });
 // One notification per (event, recipient): the same booking event notifies up
 // to two parties under one eventKey, so uniqueness must be compound.
+// MongoDB 8 rejects mixing sparse:true with partialFilterExpression
+// (CannotCreateIndex), so the partial filter alone scopes uniqueness to
+// docs that actually have a string eventKey.
 notificationSchema.index(
   { eventKey: 1, user: 1 },
-  { unique: true, sparse: true, partialFilterExpression: { eventKey: { $type: "string" } } }
+  { unique: true, partialFilterExpression: { eventKey: { $type: "string" } } }
 );
 
 // Auto-expiry: notifications older than the retention window are removed by

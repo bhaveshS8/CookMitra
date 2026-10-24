@@ -76,14 +76,14 @@ pipeline {
                 // Verify API and database connectivity with retry loop
                 sh '''
                 for i in $(seq 1 12); do
-                    if curl -sf http://localhost:5000/api/health; then
-                        echo "App is healthy and responding!"
+                    if curl -sf http://localhost:5000/api/ready; then
+                        echo "App is ready and database-connected!"
                         exit 0
                     fi
                     echo "Waiting for app to start (attempt $i/12)..."
                     sleep 5
                 done
-                echo "Health check failed after 60s"
+                echo "Readiness check failed after 60s"
                 exit 1
                 '''
             }

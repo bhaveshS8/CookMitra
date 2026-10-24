@@ -25,6 +25,7 @@ const CookProfile = require("./models/CookProfile");
 const Availability = require("./models/Availability");
 const DispatchJob = require("./models/DispatchJob");
 const WebhookEvent = require("./models/WebhookEvent");
+const EventBooking = require("./models/EventBooking");
 const LedgerEntry = require("./models/LedgerEntry");
 const BookingRestriction = require("./models/BookingRestriction");
 const slots = require("./utils/slots");
@@ -672,12 +673,19 @@ async function testEndToEnd() {
       const raw = Buffer.from(JSON.stringify(evt));
       const sig = webhookSign(raw);
       const rw = makeRes();
-      await paymentCtrl.handleWebhook({ body: raw, headers: { "x-razorpay-signature": sig } }, rw, next);
-      const rw2 = makeRes();
-      await paymentCtrl.handleWebhook({ body: raw, headers: { "x-razorpay-signature": sig } }, rw2, next);
-      check("CL-F6 webhook + redelivery stay idempotent, single redemption",
-        rw.body?.handled === true && rw2.body?.handled === "duplicate" && doc.payment?.status === "paid" && couponStore.get("FESTIVE20").usedCount === 1,
-        `w1=${rw.body?.handled} w2=${rw2.body?.handled} used=${couponStore.get("FESTIVE20").usedCount} ledger=${ledgerWrites}`);
+      const originalEventFindOne = EventBooking.findOne;
+      EventBooking.findOne = async () => null;
+      try {
+        await paymentCtrl.handleWebhook({ body: raw, headers: { "x-razorpay-signature": sig } }, rw, next);
+        const rw2 = makeRes();
+        await paymentCtrl.handleWebhook({ body: raw, headers: { "x-razorpay-signature": sig } }, rw2, next);
+        check("CL-F6 webhook + redelivery stay idempotent, single redemption",
+          rw.body?.handled === true && rw2.body?.handled === "duplicate" &&
+          doc.payment?.status === "paid" && couponStore.get("FESTIVE20").usedCount === 1,
+          `w1=${rw.body?.handled} w2=${rw2.body?.handled} used=${couponStore.get("FESTIVE20").usedCount} ledger=${ledgerWrites}`);
+      } finally {
+        EventBooking.findOne = originalEventFindOne;
+      }
       // 7. forged signature rejected
       const doc2id = new Types.ObjectId().toString();
       const doc2 = { ...JSON.parse(JSON.stringify(doc)), _id: doc2id, status: "accepted", payment: { status: "pending", paidAmount: 0 } };

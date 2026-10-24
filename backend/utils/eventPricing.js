@@ -36,27 +36,50 @@ const durationKeyForHours = (hours) => {
 
 // Plain-object view of the pricing doc (or launch defaults when absent).
 // Map fields come back as Maps from Mongoose — normalize to objects.
+// Every service/duration slot is filled from launch defaults before the
+// stored values are overlaid, so legacy or partial documents remain usable.
 const normalizePricing = (doc) => {
   const d = EventPricing.DEFAULT_PRICING;
-  if (!doc) return JSON.parse(JSON.stringify({ ...d }));
-  const mapToObj = (m, fallback) => {
-    if (!m) return { ...fallback };
-    if (typeof m === "object" && !(m instanceof Map)) return { ...fallback, ...m };
-    const out = { ...fallback };
-    for (const [k, v] of m.entries()) {
-      if (v instanceof Map) {
-        out[k] = {};
-        for (const [kk, vv] of v.entries()) out[k][kk] = Number(vv);
-      } else {
-        out[k] = Number(v);
+  if (!doc) return JSON.parse(JSON.stringify(d));
+  const mapToObj = (m) => {
+    if (!m) return {};
+    if (m instanceof Map) {
+      const out = {};
+      for (const [k, v] of m.entries()) {
+        if (v instanceof Map) {
+          out[k] = {};
+          for (const [kk, vv] of v.entries()) out[k][kk] = Number(vv);
+        } else if (v && typeof v === "object") {
+          out[k] = { ...v };
+        } else {
+          out[k] = Number(v);
+        }
       }
+      return out;
     }
-    return out;
+    return typeof m === "object" ? { ...m } : {};
   };
+  const serviceSource = mapToObj(doc.servicePrices);
+  const extraSource = mapToObj(doc.extraHourPrices);
+  const servicePrices = {};
+  const extraHourPrices = {};
+  for (const svc of EventPricing.SERVICE_KEYS) {
+    servicePrices[svc] = {};
+    for (const dk of EventPricing.DURATION_KEYS) {
+      const stored = serviceSource[svc]?.[dk];
+      servicePrices[svc][dk] = stored === undefined || stored === null
+        ? Number(d.servicePrices[svc][dk])
+        : Number(stored);
+    }
+    const storedExtra = extraSource[svc];
+    extraHourPrices[svc] = storedExtra === undefined || storedExtra === null
+      ? Number(d.extraHourPrices[svc])
+      : Number(storedExtra);
+  }
   return {
-    servicePrices: mapToObj(doc.servicePrices, d.servicePrices),
+    servicePrices,
     additionalCookPrice: Number(doc.additionalCookPrice ?? d.additionalCookPrice),
-    extraHourPrices: mapToObj(doc.extraHourPrices, d.extraHourPrices),
+    extraHourPrices,
     travelSlabs: Array.isArray(doc.travelSlabs) && doc.travelSlabs.length > 0
       ? [...doc.travelSlabs]
           .map((s) => ({ maxKm: Number(s.maxKm), charge: Number(s.charge) }))
@@ -65,21 +88,32 @@ const normalizePricing = (doc) => {
   };
 };
 
-const getPricingTable = async () => {
+// Reads the pricing document once and returns BOTH the normalized table and
+// its version (Mongoose __v). Quotes carry the version so a booking can
+// reject a price that changed while the customer was reviewing it.
+const getPricingSnapshot = async () => {
   let doc = null;
-  try {
-    // Unit tests / offline boot run disconnected — a findOne() would buffer
-    // and hang instead of throwing, so skip the DB read entirely and serve
-    // the launch defaults.
-    const mongoose = require("mongoose");
-    if (mongoose.connection && mongoose.connection.readyState === 1) {
+  const mongoose = require("mongoose");
+  const connected = Boolean(mongoose.connection && mongoose.connection.readyState === 1);
+  if (connected) {
+    try {
       doc = await EventPricing.findOne({ key: "default" }).lean();
+    } catch (cause) {
+      const error = new Error("Pricing is temporarily unavailable. Please try again.");
+      error.statusCode = 503;
+      error.code = "PRICING_UNAVAILABLE";
+      error.cause = cause;
+      throw error;
     }
-  } catch {
-    doc = null; // DB error: fall back to launch defaults
   }
-  return normalizePricing(doc);
+  return {
+    table: normalizePricing(doc),
+    version: doc && Number.isInteger(doc.__v) ? doc.__v : 0,
+    updatedAt: (doc && doc.updatedAt) || null,
+  };
 };
+
+const getPricingTable = async () => (await getPricingSnapshot()).table;
 
 // Fixed travel-charge lookup (§8): first slab whose maxKm covers the distance.
 // Pure function — callers must validate distanceKm beforehand; this clamps
@@ -174,8 +208,9 @@ const calculateEventPrice = async ({
   distanceKm = 0,
   additionalCook = 0,
   extraHours = 0,
+  pricingTable = null,
 }) => {
-  const table = await getPricingTable();
+  const table = pricingTable || (await getPricingTable());
   if (!EventPricing.SERVICE_KEYS.includes(serviceType)) {
     throw new Error("Valid service type is required");
   }
@@ -232,7 +267,9 @@ const calculateEventPrice = async ({
 
 module.exports = {
   durationKeyForHours,
+  normalizePricing,
   getPricingTable,
+  getPricingSnapshot,
   travelChargeForDistance,
   calculateEventPrice,
   validatePricingTable,

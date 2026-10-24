@@ -1,11 +1,23 @@
+const crypto = require("crypto");
 const mongoose = require("mongoose");
 const EventBooking = require("../models/EventBooking");
 const EventType = require("../models/EventType");
 const User = require("../models/User");
 const CookProfile = require("../models/CookProfile");
 const Notification = require("../models/Notification");
+const { findRegularConflict, findEventConflict } = require("../services/schedulingConflicts");
+const {
+  eventPaymentsRequired,
+  recordEventLedger,
+} = require("../services/eventPaymentService");
 const EventOutbox = require("../models/EventOutbox");
-const { calculateEventPrice, travelChargeForDistance, getPricingTable } = require("../utils/eventPricing");
+const { istDayRange, istWeekday } = require("../utils/time");
+const {
+  calculateEventPrice,
+  travelChargeForDistance,
+  getPricingTable,
+  getPricingSnapshot,
+} = require("../utils/eventPricing");
 const { paginationParams, applyPagination, sendList, HARD_CAP } = require("../utils/pagination");
 const {
   enqueueEventOutbox,
@@ -20,12 +32,43 @@ const generateBookingId = () =>
     .slice(2, 6)
     .toUpperCase()}`;
 
+// Stable hash of the booking intent (not the pricing version). Retries of the
+// same submission reuse the same idempotency key + fingerprint; a different
+// payload with that key is a client bug, not a duplicate to silently accept.
+// Text fields are trimmed and lower-cased first: a retry that differs only in
+// letter case (e.g. "Birthday" vs "birthday", or an address typed with
+// different casing) is the same intent, not a conflict.
+const normalizeIntentValue = (value) =>
+  typeof value === "string" ? value.trim().toLowerCase() : value;
+const bookingIntentFingerprint = (intent) =>
+  crypto
+    .createHash("sha256")
+    .update(JSON.stringify(intent.map(normalizeIntentValue)))
+    .digest("hex");
+
+// Returns true when the response was already sent (replay or conflict).
+const respondWithIdempotentReplay = async ({ customerId, idempotencyKey, fingerprint, res }) => {
+  const existing = await EventBooking.findOne({ customerId, idempotencyKey });
+  if (!existing) return false;
+  if (existing.idempotencyFingerprint && existing.idempotencyFingerprint !== fingerprint) {
+    res.status(409).json({
+      code: "IDEMPOTENCY_KEY_REUSED",
+      message:
+        "This request key was already used for a different booking. Please start a new booking attempt.",
+    });
+    return true;
+  }
+  if (typeof res.set === "function") res.set("Idempotent-Replay", "true");
+  res.status(200).json(existing);
+  return true;
+};
+
 // Allowed status moves (§15). Assignment goes through assignCook().
 const ALLOWED_TRANSITIONS = {
-  pending: ["cook_assigned", "cancelled"],
-  cook_assigned: ["confirmed", "cancelled"],
-  confirmed: ["in_progress", "cancelled"],
-  in_progress: ["completed", "cancelled"],
+  pending: ["cook_assigned"],
+  cook_assigned: ["confirmed"],
+  confirmed: ["in_progress"],
+  in_progress: ["completed"],
   completed: [],
   cancelled: [],
 };
@@ -86,15 +129,54 @@ const windowsOverlap = (a, b) => a.start < b.end && b.start < a.end;
 // match a real cook query) + cook_assigned + confirmed + in_progress.
 // Cancelled/completed never block.
 const LIVE_STATUSES = ["cook_assigned", "confirmed", "in_progress", "pending"];
-const findEventOverlap = async (cookId, eventDate, window, excludeId = null) => {
-  const q = { cookId, bookingStatus: { $in: LIVE_STATUSES } };
-  if (excludeId) q._id = { $ne: excludeId };
-  const others = await EventBooking.find(q).select("eventDate startTime duration extraHours bookingId");
-  return (others || []).find((o) => {
-    if (!sameDayIST(o.eventDate, eventDate)) return false;
-    const w = bookingWindow(o);
-    return w && windowsOverlap(w, window);
+
+const findEventOverlap = async (cookId, eventDate, window, excludeId = null) =>
+  findEventConflict({ cookId, date: eventDate, window, excludeEventId: excludeId });
+
+const REGULAR_BLOCKING_STATUSES = ["accepted", "confirmed", "in_progress"];
+
+const findRegularBookingOverlap = async (cookId, eventDate, window) =>
+  findRegularConflict({ cookId, date: eventDate, window });
+
+const findScheduleConflict = async (cookId, eventDate, window) => {
+  const profile = await CookProfile.findOne({ user: cookId }).select("schedule").lean();
+  const schedule = profile?.schedule;
+  if (!schedule) return null;
+  const dayStr = istDayStr(eventDate);
+  const blocked = Array.isArray(schedule.blockedDates) ? schedule.blockedDates : [];
+  if (blocked.includes(dayStr)) {
+    return { kind: "blocked", message: "This cook is unavailable on that date" };
+  }
+  const weekly = (Array.isArray(schedule.weekly) ? schedule.weekly : []).filter((w) => w && w.enabled);
+  if (weekly.length === 0) return null;
+  const weekday = istWeekday(eventDate);
+  const fits = weekly.some((w) => {
+    if (Number(w.day) !== weekday) return false;
+    const start = timeToMinutes(w.startTime);
+    const end = timeToMinutes(w.endTime);
+    return start != null && end != null && start <= window.start && window.end <= end;
   });
+  return fits
+    ? null
+    : { kind: "hours", message: "This cook's configured working hours do not cover those event hours" };
+};
+
+const findAssignmentConflict = async (cookId, eventDate, window, excludeId = null) => {
+  const eventClash = await findEventOverlap(cookId, eventDate, window, excludeId);
+  if (eventClash) {
+    return {
+      kind: "event",
+      message: `This cook already has an event booking (${eventClash.bookingId || "another event"}) overlapping those hours`,
+    };
+  }
+  const regularClash = await findRegularBookingOverlap(cookId, eventDate, window);
+  if (regularClash) {
+    return {
+      kind: "regular",
+      message: `This cook already has a regular booking (${regularClash.bookingId || "another booking"}) overlapping those hours`,
+    };
+  }
+  return findScheduleConflict(cookId, eventDate, window);
 };
 
 // Strict finite-number guard — rejects NaN/Infinity/booleans/empty instead of
@@ -187,7 +269,7 @@ const revertAssignment = async ({ updated, prevCook, prevStatus, note }) =>
     { _id: updated._id, __v: updated.__v, bookingStatus: "cook_assigned", cookId: updated.cookId },
     {
       $set: { cookId: prevCook || null, bookingStatus: prevStatus },
-      $push: { statusHistory: { status: prevStatus, note } },
+      $push: { statusHistory: { status: prevStatus, note, actor: null, actorRole: "SYSTEM" } },
       $inc: { __v: 1 },
     },
     { new: true }
@@ -224,6 +306,7 @@ exports.createEventBooking = async (req, res, next) => {
     // bookingStatus, statusHistory, serviceAmount, ...) are ignored.
     const {
       eventType,
+      customEventType = "",
       eventDate,
       startTime,
       duration,
@@ -240,6 +323,49 @@ exports.createEventBooking = async (req, res, next) => {
       distance,
       customerNotes = "",
     } = req.body || {};
+
+    // Idempotency: standard header, with a body fallback for older clients.
+    // The key is scoped to the authenticated customer by the unique index.
+    const headerKey =
+      (req.headers && (req.headers["idempotency-key"] || req.headers["Idempotency-Key"])) || "";
+    const idempotencyKey = String(headerKey || req.body?.idempotencyKey || "").trim();
+    if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 128)) {
+      return res.status(400).json({ message: "Idempotency key must be between 8 and 128 characters" });
+    }
+    const intentFingerprint = idempotencyKey
+      ? bookingIntentFingerprint([
+          String(eventType || "").trim(),
+          String(customEventType || "").trim(),
+          String(eventDate || "").trim(),
+          String(startTime || "").trim(),
+          Number(duration),
+          Number(guestCount),
+          String(address || "").trim(),
+          String(area || "").trim(),
+          String(landmark || "").trim(),
+          String(foodType || ""),
+          String(menu || "").trim(),
+          String(serviceType || ""),
+          Number(additionalCook),
+          Number(extraHours),
+          Number(distanceKm ?? distance ?? 0),
+          String(customerNotes || ""),
+        ])
+      : "";
+
+    // Replay before any validation: a booking that already committed must be
+    // returned even if the catalogue or pricing changed since the first try.
+    if (
+      idempotencyKey &&
+      (await respondWithIdempotentReplay({
+        customerId: req.user.id,
+        idempotencyKey,
+        fingerprint: intentFingerprint,
+        res,
+      }))
+    ) {
+      return;
+    }
 
     // Event type: must match an ACTIVE catalogue entry (trimmed,
     // case-insensitive exact match — same rule as the admin duplicate guard,
@@ -259,6 +385,17 @@ exports.createEventBooking = async (req, res, next) => {
       return res.status(400).json({ message: "That event type is no longer available — please go back to Step 1 and pick one from the list" });
     }
     const canonicalEventType = catalogueEntry.name;
+    // Custom occasion name: only meaningful when the customer picked "Other".
+    // The raw eventType still stores "Other" (catalogue-validated); the typed
+    // name is kept beside it and surfaced instead of "Other" in the UI.
+    const customTypeName =
+      canonicalEventType.toLowerCase() === "other" ? String(customEventType || "").trim() : "";
+    if (customTypeName.length > 80) {
+      return res.status(400).json({ message: "Event name is too long (max 80 characters)" });
+    }
+    if (canonicalEventType.toLowerCase() === "other" && !customTypeName) {
+      return res.status(400).json({ message: "Please enter your event name" });
+    }
     if (!EventBooking.EVENT_SERVICES.includes(serviceType)) {
       return res.status(400).json({ message: "Valid service type is required" });
     }
@@ -311,6 +448,9 @@ exports.createEventBooking = async (req, res, next) => {
     if (!Number.isFinite(cooksN) || !Number.isInteger(cooksN) || cooksN < 0 || cooksN > 10) {
       return res.status(400).json({ message: "Additional cooks must be between 0 and 10" });
     }
+    if (cooksN !== 0) {
+      return res.status(400).json({ message: "Additional cooks are not available yet. Please book without additional cooks." });
+    }
     const extraN = strictNumber(extraHours);
     if (!Number.isFinite(extraN) || extraN < 0 || extraN > 12) {
       return res.status(400).json({ message: "Extra hours must be between 0 and 12" });
@@ -336,6 +476,24 @@ exports.createEventBooking = async (req, res, next) => {
       return res.status(400).json({ message: "Overnight events are not supported — please shorten the duration" });
     }
 
+    // Stale-quote protection: the client echoes the version from its quote.
+    // The SAME snapshot supplies the amounts, so a version match can never be
+    // paired with a different price table. Missing version stays supported
+    // for older clients, but the recomputed amounts remain authoritative.
+    const rawPricingVersion = req.body?.pricingVersion;
+    const versionValue =
+      typeof rawPricingVersion === "string" ? rawPricingVersion.trim() : rawPricingVersion;
+    let clientPricingVersion = null;
+    if (versionValue !== undefined && versionValue !== null && versionValue !== "") {
+      if (typeof versionValue !== "number" && typeof versionValue !== "string") {
+        return res.status(400).json({ message: "Invalid pricing version" });
+      }
+      clientPricingVersion = Number(versionValue);
+      if (!Number.isInteger(clientPricingVersion) || clientPricingVersion < 0) {
+        return res.status(400).json({ message: "Invalid pricing version" });
+      }
+    }
+    const pricingSnapshot = await getPricingSnapshot();
     let quote;
     try {
       quote = await calculateEventPrice({
@@ -344,9 +502,24 @@ exports.createEventBooking = async (req, res, next) => {
         distanceKm: distN,
         additionalCook: cooksN,
         extraHours: extraN,
+        pricingTable: pricingSnapshot.table,
       });
     } catch (e) {
       return res.status(400).json({ message: e.message || "Could not calculate price" });
+    }
+    if (clientPricingVersion !== null && clientPricingVersion !== pricingSnapshot.version) {
+      return res.status(409).json({
+        code: "PRICING_CHANGED",
+        message:
+          "Event prices were updated while you were reviewing your quote. Please review the refreshed price and submit again.",
+        pricingVersion: pricingSnapshot.version,
+        pricingUpdatedAt: pricingSnapshot.updatedAt,
+        quote: {
+          ...quote,
+          pricingVersion: pricingSnapshot.version,
+          pricingUpdatedAt: pricingSnapshot.updatedAt,
+        },
+      });
     }
 
     // Booking insert + outbox enqueue commit together when transactions are
@@ -355,7 +528,10 @@ exports.createEventBooking = async (req, res, next) => {
     const createPayload = {
       bookingId: generateBookingId(),
       customerId: req.user.id,
+      idempotencyKey,
+      idempotencyFingerprint: intentFingerprint,
       eventType: canonicalEventType,
+      customEventType: customTypeName,
       eventDate: day,
       startTime: String(startTime),
       duration: dur,
@@ -369,6 +545,7 @@ exports.createEventBooking = async (req, res, next) => {
       additionalCook: cooksN,
       extraHours: Math.round(extraN * 100) / 100,
       distanceKm: distN,
+      pricingVersion: pricingSnapshot.version,
       distanceVerified: false, // customer estimate — provisional until admin verifies
       serviceAmount: quote.serviceAmount,
       additionalCookAmount: quote.additionalCookAmount,
@@ -377,7 +554,14 @@ exports.createEventBooking = async (req, res, next) => {
       totalAmount: quote.totalAmount,
       bookingStatus: "pending",
       customerNotes: String(customerNotes || ""),
-      statusHistory: [{ status: "pending", note: "Booking request received" }],
+      statusHistory: [
+        {
+          status: "pending",
+          note: "Booking request received",
+          actor: req.user.id,
+          actorRole: "CUSTOMER",
+        },
+      ],
     };
     let booking;
     let requestOutbox = null;
@@ -418,7 +602,7 @@ exports.createEventBooking = async (req, res, next) => {
               recipients: admins.map((a) => ({
                 user: a._id,
                 type: "event_booking_request",
-                message: `New event booking ${created.bookingId}: ${canonicalEventType} on ${eventDayStr} — please assign a cook.`,
+                message: `New event booking ${created.bookingId}: ${customTypeName || canonicalEventType} on ${eventDayStr} — please assign a cook.`,
               })),
             },
             session
@@ -430,6 +614,24 @@ exports.createEventBooking = async (req, res, next) => {
       requestOutbox = result.outboxDoc;
       catalogueGone = result.catalogueGone === true;
     } catch (e) {
+      // Concurrent duplicate submission: the unique (customerId,
+      // idempotencyKey) index let exactly one insert win. Return that booking
+      // instead of surfacing a 500 or creating another one.
+      if (e && e.code === 11000 && idempotencyKey) {
+        const duplicateKey = e.keyPattern || {};
+        const duplicateOnIdempotency =
+          duplicateKey.idempotencyKey ||
+          /idempotencyKey/.test(String(e.message || ""));
+        if (duplicateOnIdempotency) {
+          const replayed = await respondWithIdempotentReplay({
+            customerId: req.user.id,
+            idempotencyKey,
+            fingerprint: intentFingerprint,
+            res,
+          });
+          if (replayed) return;
+        }
+      }
       // Transaction abort / envelopes: never report success for a failed op.
       throw e;
     }
@@ -604,6 +806,12 @@ const guardCookEligibilityForAssign = async (cookId, session = null) => {
 // requests.
 exports.assignCook = async (req, res, next) => {
   try {
+    // Defense in depth: the route's authorize("admin") is the primary gate,
+    // but assignment must remain admin-only even if this controller is ever
+    // reached directly (mounted elsewhere, invoked by a script, tests).
+    if (String(req.user?.role || "").toUpperCase() !== "ADMIN") {
+      return res.status(403).json({ message: "Not authorized for this action" });
+    }
     if (!mongoose.isValidObjectId(req.params.id)) {
       return res.status(404).json({ message: "Event booking not found" });
     }
@@ -633,11 +841,9 @@ exports.assignCook = async (req, res, next) => {
     if (window.end > 24 * 60) {
       return res.status(400).json({ message: "Overnight events are not supported" });
     }
-    const clash = await findEventOverlap(cookId, booking.eventDate, window, booking._id);
-    if (clash) {
-      return res.status(409).json({
-        message: `This cook already has an event booking (${clash.bookingId || "another event"}) overlapping those hours`,
-      });
+    const conflict = await findAssignmentConflict(cookId, booking.eventDate, window, booking._id);
+    if (conflict) {
+      return res.status(409).json({ message: conflict.message });
     }
 
     const prevCook = booking.cookId;
@@ -661,7 +867,12 @@ exports.assignCook = async (req, res, next) => {
           expectedVersion: prevVersion,
           expectedStatuses: ["pending", "cook_assigned"],
           set: { cookId, bookingStatus: "cook_assigned" },
-          pushHistory: { status: "cook_assigned", note: "Cook assigned by admin" },
+          pushHistory: {
+            status: "cook_assigned",
+            note: "Cook assigned by admin",
+            actor: req.user.id,
+            actorRole: "ADMIN",
+          },
         },
         session
       );
@@ -676,12 +887,12 @@ exports.assignCook = async (req, res, next) => {
             {
               user: u.customerId,
               type: "event_cook_assigned",
-              message: `Good news! ${cookUser.name || "A cook"} has been assigned to your ${u.eventType} on ${istDayStr(u.eventDate)}.`,
+              message: `Good news! ${cookUser.name || "A cook"} has been assigned to your ${u.customEventType || u.eventType} on ${istDayStr(u.eventDate)}.`,
             },
             {
               user: cookId,
               type: "event_assignment",
-              message: `New event assignment: ${u.eventType} on ${istDayStr(u.eventDate)}, ${u.startTime} — ${u.guestCount} guests.`,
+              message: `New event assignment: ${u.customEventType || u.eventType} on ${istDayStr(u.eventDate)}, ${u.startTime} — ${u.guestCount} guests.`,
             },
           ],
         },
@@ -746,38 +957,36 @@ exports.assignCook = async (req, res, next) => {
     // always observes the earlier commit (primary reads), so at least one
     // side reverts. A transaction would not fix this either (different
     // documents → no write conflict under snapshot isolation).
-    const postClash = await findEventOverlap(cookId, updated.eventDate, bookingWindow(updated), updated._id);
-    if (postClash) {
+    const postConflict = await findAssignmentConflict(cookId, updated.eventDate, bookingWindow(updated), updated._id);
+    if (postConflict) {
       let reverted = null;
       try {
         reverted = await revertAssignment({
           updated,
           prevCook,
           prevStatus,
-          note: "Auto-reverted: overlapping assignment detected",
+          note: "Auto-reverted: assignment conflict detected",
         });
       } catch (e) {
         logNotifyError(updated.bookingId, e);
       }
       if (!reverted) {
         // The booking moved again before the revert landed (e.g. confirmed
-        // concurrently) — the overlap may still stand. The assignment IS the
+        // concurrently) — the conflict may still stand. The assignment IS the
         // current DB truth, so its notices still go out; the admin conflict
         // is flagged durably for manual review. Never fail silently.
         await flagRevertFailureForAdmins(
           updated.bookingId,
-          `overlap with ${postClash.bookingId || "another event"} could not be auto-reverted`
+          `${postConflict.kind} conflict (${postConflict.message}) could not be auto-reverted`
         );
         await deliverOutboxBestEffort(assignOutbox, updated.bookingId);
         return res.status(409).json({
-          message: `Overlapping assignment detected but the booking changed concurrently — please reload and review manually (booking ${updated.bookingId})`,
+          message: `Assignment conflict detected but the booking changed concurrently — please reload and review manually (booking ${updated.bookingId})`,
         });
       }
-      await voidAssignNotices("overlapping assignment auto-reverted");
-      console.warn(`[event-revert] booking ${updated.bookingId} reverted (overlap with ${postClash.bookingId || "another event"}) — admin retry safe`);
-      return res.status(409).json({
-        message: `This cook already has an event booking (${postClash.bookingId || "another event"}) overlapping those hours`,
-      });
+      await voidAssignNotices("assignment conflict auto-reverted");
+      console.warn(`[event-revert] booking ${updated.bookingId} reverted (${postConflict.kind} conflict) — admin retry safe`);
+      return res.status(409).json({ message: postConflict.message });
     }
 
     // Post-update eligibility re-check: the cook's role/status/approval/
@@ -841,10 +1050,22 @@ exports.updateEventBookingStatus = async (req, res, next) => {
     const booking = await EventBooking.findById(req.params.id);
     if (!booking) return res.status(404).json({ message: "Event booking not found" });
     const { status, note = "" } = req.body || {};
-    // Idempotent retry: already at target → success, no duplicate history.
+    if (status === "cancelled") {
+      return res.status(400).json({
+        message: "Use the cancellation endpoint so refunds and notifications are processed",
+        code: "USE_CANCEL_ENDPOINT",
+      });
+    }
+    // Idempotent retry: already at target — success, no duplicate history.
     if (status && booking.bookingStatus === status) {
       const current = await populateBooking(EventBooking.findById(booking._id));
       return res.json(current);
+    }
+    if (status === "cook_assigned") {
+      return res.status(400).json({
+        code: "USE_ASSIGN_ENDPOINT",
+        message: "Assign a cook through the assignment endpoint so eligibility and conflicts are checked.",
+      });
     }
     const allowed = ALLOWED_TRANSITIONS[booking.bookingStatus] || [];
     if (!status || !allowed.includes(status)) {
@@ -854,6 +1075,12 @@ exports.updateEventBookingStatus = async (req, res, next) => {
     }
     if (["confirmed", "in_progress", "completed"].includes(status) && !booking.cookId) {
       return res.status(400).json({ message: "Assign a cook before confirming this booking" });
+    }
+    if (status === "confirmed" && eventPaymentsRequired() && booking.payment?.status !== "paid") {
+      return res.status(400).json({
+        message: "Online payment is required before this event can be confirmed",
+        code: "EVENT_PAYMENT_REQUIRED",
+      });
     }
     if (String(note || "").length > 1000) {
       return res.status(400).json({ message: "Note is too long (max 1000 characters)" });
@@ -868,7 +1095,12 @@ exports.updateEventBookingStatus = async (req, res, next) => {
           expectedVersion: booking.__v,
           expectedStatuses: [booking.bookingStatus],
           set: { bookingStatus: status },
-          pushHistory: { status, note: String(note || "") },
+          pushHistory: {
+            status,
+            note: String(note || ""),
+            actor: req.user.id,
+            actorRole: String(req.user.role || "").toUpperCase(),
+          },
         },
         session
       );
@@ -941,17 +1173,53 @@ exports.cancelEventBooking = async (req, res, next) => {
     if (["completed"].includes(booking.bookingStatus)) {
       return res.status(400).json({ message: "This booking cannot be cancelled" });
     }
+    if (booking.bookingStatus === "in_progress" && booking.payment?.status === "paid") {
+      return res.status(409).json({
+        code: "REFUND_POLICY_UNRESOLVED",
+        message:
+          "This paid event has already started. Cancellation is unavailable until CookMitra's refund policy is approved; contact support for help.",
+      });
+    }
 
     let updated = null;
     let cancelOutbox = null;
+    const refundActive = ["pending", "processing", "processed", "manual"].includes(
+      booking.payment?.refundStatus
+    );
+    const refundQueued =
+      booking.payment?.status === "paid" &&
+      Number(booking.payment?.paidAmount || 0) > 0 &&
+      booking.bookingStatus !== "in_progress" &&
+      !refundActive;
+    const refundRequestedAt = new Date();
+    const refundMessage = refundQueued
+      ? ` A full refund of ₹${Math.round(Number(booking.payment.paidAmount))} is awaiting admin approval.`
+      : "";
     await commitBookingMutation(async (session) => {
       const u = await atomicBookingUpdate(
         {
           bookingId: booking._id,
           expectedVersion: booking.__v,
           expectedStatuses: ["pending", "cook_assigned", "confirmed", "in_progress"],
-          set: { bookingStatus: "cancelled" },
-          pushHistory: { status: "cancelled", note: role === "ADMIN" ? "Cancelled by admin" : "Cancelled by customer" },
+          set: {
+            bookingStatus: "cancelled",
+            ...(refundQueued
+              ? {
+                  "payment.refundStatus": "pending",
+                  "payment.refundAmount": Math.round(Number(booking.payment.paidAmount)),
+                  "payment.refundReason": "Event cancelled before service start",
+                  "payment.refundRequestedAt": refundRequestedAt,
+                  "payment.refundError": "",
+                }
+              : {}),
+          },
+          pushHistory: {
+            status: "cancelled",
+            note: (role === "ADMIN" ? "Cancelled by admin" : "Cancelled by customer") +
+              (refundQueued ? " - full refund queued for admin approval" : ""),
+            actor: req.user.id,
+            actorRole: role,
+          },
         },
         session
       );
@@ -962,7 +1230,7 @@ exports.cancelEventBooking = async (req, res, next) => {
         recipients.push({
           user: other,
           type: "event_cancelled",
-          message: `Your event booking ${u.bookingId} has been cancelled by CookMitra.`,
+          message: `Your event booking ${u.bookingId} has been cancelled by CookMitra.${refundMessage}`,
         });
       }
       if (u.cookId) {
@@ -971,6 +1239,25 @@ exports.cancelEventBooking = async (req, res, next) => {
           type: "event_cancelled",
           message: `Event booking ${u.bookingId} has been cancelled.`,
         });
+      }
+      if (role !== "ADMIN") {
+        const admins = session
+          ? await User.find({ role: "ADMIN", status: "active" }).select("_id").session(session)
+          : await User.find({ role: "ADMIN", status: "active" }).select("_id");
+        for (const a of admins || []) {
+          recipients.push({
+            user: a._id,
+            type: "event_cancelled",
+            message: `Event booking ${u.bookingId} was cancelled by the customer.${refundMessage}`,
+          });
+        }
+        if (refundQueued) {
+          recipients.push({
+            user: u.customerId,
+            type: "refund_pending",
+            message: `Your event booking ${u.bookingId} was cancelled. A full refund of ₹${Math.round(Number(booking.payment.paidAmount))} is awaiting admin approval.`,
+          });
+        }
       }
       const outboxDoc =
         recipients.length > 0
@@ -995,6 +1282,18 @@ exports.cancelEventBooking = async (req, res, next) => {
       const miss = await classifyUpdateMiss(booking._id);
       // If it became terminal concurrently, surface a 400/409 accordingly.
       return res.status(miss.status).json({ message: miss.message });
+    }
+
+    if (refundQueued) {
+      await recordEventLedger(updated, {
+        type: "event_refund.requested",
+        amount: Number(updated.payment?.paidAmount || 0),
+        paymentId: updated.payment?.razorpayPaymentId,
+        orderId: updated.payment?.razorpayOrderId,
+        source: role === "ADMIN" ? "admin" : "customer",
+        actor: req.user.id,
+        note: "Event cancelled before service start - full refund queued",
+      });
     }
 
     await deliverOutboxBestEffort(cancelOutbox, updated.bookingId);
@@ -1025,6 +1324,12 @@ exports.verifyTravelDistance = async (req, res, next) => {
     if (["completed", "cancelled"].includes(booking.bookingStatus)) {
       return res.status(400).json({ message: "Terminal bookings cannot be modified" });
     }
+    if (booking.payment?.status === "paid") {
+      return res.status(409).json({
+        message: "The final amount is locked after payment. Queue a refund instead of changing the price.",
+        code: "EVENT_PAYMENT_LOCKED",
+      });
+    }
     const distN = strictNumber(req.body?.distanceKm);
     if (!Number.isFinite(distN) || distN < 0 || distN > 100000) {
       return res.status(400).json({ message: "Distance must be between 0 and 100000 km" });
@@ -1034,6 +1339,7 @@ exports.verifyTravelDistance = async (req, res, next) => {
       const table = await getPricingTable();
       travelCharge = travelChargeForDistance(table.travelSlabs, distN);
     } catch (e) {
+      if (e && (e.statusCode === 503 || e.code === "PRICING_UNAVAILABLE")) return next(e);
       return res.status(400).json({ message: e.message || "Could not calculate price" });
     }
     // Preserve the stored snapshot; only travel + total move. Round travel
@@ -1071,21 +1377,66 @@ exports.verifyTravelDistance = async (req, res, next) => {
   }
 };
 
-// Admin dashboard counts (§16): totals by status + revenue from live bookings.
+// Admin dashboard counts (§16): totals by status, booked value, and collected
+// revenue. Event payments are not implemented, so amount is booked value only
+// until an approved payment/settlement flow exists.
 // Includes an additive `outbox` summary (pending/due/dead/sent) so operators
 // get retry/dead-letter visibility without a new dashboard or endpoint.
 exports.getEventStats = async (req, res, next) => {
   try {
     const groups = await EventBooking.aggregate([
-      { $group: { _id: "$bookingStatus", count: { $sum: 1 }, revenue: { $sum: "$totalAmount" } } },
+      {
+        $group: {
+          _id: "$bookingStatus",
+          count: { $sum: 1 },
+          bookedValue: { $sum: "$totalAmount" },
+          paidValue: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ["$payment.status", "paid"] },
+                    { $ne: ["$payment.testMode", true] },
+                  ],
+                },
+                "$payment.paidAmount",
+                0,
+              ],
+            },
+          },
+          refundedValue: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $in: ["$payment.refundStatus", ["processed", "manual"]] },
+                    { $ne: ["$payment.testMode", true] },
+                  ],
+                },
+                "$payment.refundAmount",
+                0,
+              ],
+            },
+          },
+        },
+      },
     ]);
     const byStatus = {};
     let totalBookings = 0;
-    let totalRevenue = 0;
+    let bookedValue = 0;
+    let collectedRevenue = 0;
     for (const g of groups) {
-      byStatus[g._id] = { count: g.count, revenue: g.revenue };
+      const live = !["cancelled"].includes(g._id);
+      const collected = Math.max(0, Math.round(Number(g.paidValue || 0) - Number(g.refundedValue || 0)));
+      byStatus[g._id] = {
+        count: g.count,
+        bookedValue: g.bookedValue,
+        collectedRevenue: collected,
+        refundedValue: Math.round(Number(g.refundedValue || 0)),
+      };
       totalBookings += g.count;
-      if (!["cancelled"].includes(g._id)) totalRevenue += g.revenue;
+      if (live) bookedValue += g.bookedValue;
+      collectedRevenue += collected;
     }
     let outbox = { pending: 0, due: 0, dead: 0, sent: 0 };
     try {
@@ -1093,7 +1444,15 @@ exports.getEventStats = async (req, res, next) => {
     } catch (e) {
       logNotifyError("stats", e);
     }
-    res.json({ totalBookings, totalRevenue, byStatus, outbox });
+    res.json({
+      totalBookings,
+      totalRevenue: collectedRevenue,
+      collectedRevenue,
+      bookedValue,
+      unpaidValue: Math.max(0, bookedValue - collectedRevenue),
+      byStatus,
+      outbox,
+    });
   } catch (error) {
     next(error);
   }

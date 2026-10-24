@@ -1,0 +1,1002 @@
+{
+  "audit": "CookMitra Events full functionality audit",
+  "generatedAt": "2026-10-23",
+  "repository": "C:\\Users\\jiya\\Desktop\\Events\\CookMitra",
+  "branch": "events",
+  "commit": "f1e8873",
+  "environment": {
+    "node": "v24.20.0",
+    "npm": "11.19.0",
+    "platform": "win32",
+    "database": "disposable in-memory MongoDB per run",
+    "productionEnvLoaded": false,
+    "productionDataUsed": false,
+    "sourceChangedForAudit": false
+  },
+  "scope": [
+    "Events catalogue and event types",
+    "Pricing defaults, quote calculation, admin pricing updates",
+    "Booking creation, idempotency, validation, lifecycle, cancellation",
+    "Cook assignment, eligibility, overlap and permissions",
+    "Distance verification and final total",
+    "Payments and refunds (mocked Razorpay)",
+    "Notifications and outbox delivery",
+    "Customer, admin, cook UI and responsive rendering",
+    "Auth/role boundaries and security headers"
+  ],
+  "outOfScope": [
+    "Real Razorpay gateway/webhooks",
+    "Real WhatsApp provider/templates",
+    "Production MongoDB index verification",
+    "CDN/proxy/TLS configuration",
+    "Legal policy approval"
+  ],
+  "method": {
+    "isolation": "no-dotenv shim + MongoMemoryServer + child backend with fake JWT/Razorpay values",
+    "apiHarness": "api-audit.js seeded disposable data and exercised 49 HTTP checks",
+    "browserHarness": "browser-audit.js seeded disposable data and exercised 13 Playwright checks against the real React build",
+    "buildNote": "Frontend temporarily rebuilt same-origin with test public keys for browser testing, then original build restored",
+    "unsafeFileNotRun": "backend/qa/qa-server-tmp.js"
+  },
+  "summary": {
+    "api": {
+      "total": 49,
+      "pass": 49,
+      "fail": 0
+    },
+    "browser": {
+      "total": 13,
+      "pass": 13,
+      "fail": 0
+    },
+    "backendSuites": {
+      "executed": 9,
+      "passed": 9
+    },
+    "frontend": {
+      "focusedTests": "5/5 passed",
+      "build": "exit 0"
+    },
+    "findings": {
+      "total": 8,
+      "P1": 2,
+      "P2": 4,
+      "P3": 2
+    },
+    "releaseDecision": "NO-GO",
+    "releaseGate": "FAIL"
+  },
+  "suites": [
+    {
+      "name": "event-security.test.js",
+      "result": "ALL EVENT TESTS PASSED"
+    },
+    {
+      "name": "event-whatsapp.test.js",
+      "result": "23 passed, 0 failed"
+    },
+    {
+      "name": "event-assign-permissions.test.js",
+      "result": "all checks passed"
+    },
+    {
+      "name": "event-stats.test.js",
+      "result": "EVENT_STATS_FAILURES=0"
+    },
+    {
+      "name": "cross-module-scheduling.test.js",
+      "result": "CROSS_MODULE_SCHEDULING_FAILURES=0"
+    },
+    {
+      "name": "event-concurrency.test.js",
+      "result": "exit 0"
+    },
+    {
+      "name": "event-index-migration.test.js",
+      "result": "28 passed, ALL TESTS PASSED"
+    },
+    {
+      "name": "event-payment.test.js",
+      "result": "exit 0 (embedded Mongo, mocked Razorpay)"
+    },
+    {
+      "name": "staging-preflight.test.js",
+      "result": "10 passed, 0 failed"
+    },
+    {
+      "name": "frontend eventConstants.test.js",
+      "result": "5 passed"
+    },
+    {
+      "name": "frontend npm run build",
+      "result": "exit 0 (source-map warning only)"
+    }
+  ],
+  "findings": [
+    {
+      "id": "EVT-AUD-001",
+      "severity": "P1",
+      "status": "OPEN",
+      "title": "Pricing update persists successfully but returns HTTP 500",
+      "location": "backend/controllers/eventPricingController.js:3-7, :241",
+      "evidence": {
+        "request": "PUT /api/event-pricing (admin)",
+        "updateStatus": 500,
+        "persistedValue": 123,
+        "responseMessage": "getPricingTable is not defined"
+      },
+      "impact": "Admins receive a failure after the change is saved; retries can cause version conflicts. Pricing API contract is broken.",
+      "recommendation": "Import getPricingTable from utils/eventPricing or return the saved/normalized document. Add regression asserting 200 and a subsequent quote using the new price."
+    },
+    {
+      "id": "EVT-AUD-002",
+      "severity": "P1",
+      "status": "OPEN",
+      "title": "Partial pricing edit corrupts nested servicePrices and blocks valid bookings",
+      "location": "backend/utils/eventPricing.js:39-65",
+      "evidence": {
+        "partialCreateConfiguredKeys": "cooking_only.upto2 only",
+        "quoteStatus": 400,
+        "quoteMessage": "No price configured for this service and duration",
+        "bookingStatus": 400,
+        "bookingMessage": "No price configured for this service and duration"
+      },
+      "impact": "A valid admin edit can silently remove prices for other durations/services, breaking quotes and new bookings.",
+      "recommendation": "Deep-merge each service duration map, require complete tables on create/update or merge with current, validate every service/duration key, backfill existing documents, and add quote/booking regression tests."
+    },
+    {
+      "id": "EVT-AUD-003",
+      "severity": "P2",
+      "status": "OPEN",
+      "title": "Status PATCH can set cook_assigned with no cook",
+      "location": "backend/controllers/eventBookingController.js (updateEventBookingStatus)",
+      "evidence": {
+        "request": "PATCH /api/event-bookings/:id/status { status: 'cook_assigned' }",
+        "status": 200,
+        "bookingStatus": "cook_assigned",
+        "cookId": null
+      },
+      "impact": "Bypasses cook eligibility and overlap checks; downstream state can show an assigned booking without a cook.",
+      "recommendation": "Require a valid cookId for cook_assigned, or reject manual transitions to that state and require the assign-cook endpoint."
+    },
+    {
+      "id": "EVT-AUD-004",
+      "severity": "P2",
+      "status": "OPEN_POLICY_DECISION",
+      "title": "Paid in-progress cancellation queues no refund",
+      "location": "backend/controllers/eventBookingController.js (cancellation path); docs/EVENT_POLICY_APPROVAL.md",
+      "evidence": {
+        "request": "cancel paid in_progress booking",
+        "status": 200,
+        "bookingState": "cancelled",
+        "paymentStatus": "paid",
+        "refundStatus": "none"
+      },
+      "impact": "Customer funds may be retained without an auditable refund or explicit policy basis.",
+      "recommendation": "Decide policy, then either block paid in-progress cancellation or enqueue a refund with ledger entry. Add payment/refund regression test."
+    },
+    {
+      "id": "EVT-AUD-005",
+      "severity": "P2",
+      "status": "OPEN",
+      "title": "Existing frontend build targets http://localhost:5000/api",
+      "location": "frontend/.env; frontend/build/static/js/main.e9d57d9d.js",
+      "evidence": {
+        "originalBuildContains": "http://localhost:5000/api",
+        "browserOnIsolatedPort": "All API calls blocked/unreachable until rebuilt with REACT_APP_API_URL=/api",
+        "csp": "connect-src 'self' ... blocks cross-origin localhost"
+      },
+      "impact": "Deploying the current artifact breaks API calls and authentication. Local .env also bakes the live Razorpay public key into the build.",
+      "recommendation": "Rebuild in CI with production same-origin /api, use environment-appropriate public keys, and reject localhost URLs in shipped JS."
+    },
+    {
+      "id": "EVT-AUD-006",
+      "severity": "P2",
+      "status": "OPEN_DESIGN_RISK",
+      "title": "Pricing DB errors silently fall back to launch defaults",
+      "location": "backend/utils/eventPricing.js:71-89",
+      "evidence": {
+        "codeReview": "findOne failures are swallowed; normalizePricing(null) returns launch defaults with version 0"
+      },
+      "impact": "During a DB outage, quotes can silently use stale/default prices and version 0, potentially allowing bookings at unconfigured prices.",
+      "recommendation": "Fail closed for booking/payment (503 PRICING_UNAVAILABLE) or mark quotes provisional, emit metrics/alerts, and add fault-injection coverage."
+    },
+    {
+      "id": "EVT-AUD-007",
+      "severity": "P3",
+      "status": "CODE_REVIEW",
+      "title": "Idempotency fingerprint is case-sensitive",
+      "location": "Events booking idempotency handling",
+      "evidence": {
+        "codeReview": "Payload differences in letter case produce 409 IDEMPOTENCY_KEY_REUSED instead of replaying the original request"
+      },
+      "impact": "Low: semantically identical retries can be reported as conflicts.",
+      "recommendation": "Normalize fingerprints (trim, lowercase canonical fields) before hashing and add a replay test."
+    },
+    {
+      "id": "EVT-AUD-008",
+      "severity": "P3",
+      "status": "OBSERVATION",
+      "title": "External ipwho.is geolocation lookup rate-limits",
+      "location": "Frontend location bootstrap (third-party ipwho.is)",
+      "evidence": {
+        "responses": "4 x HTTP 429 from https://ipwho.is/",
+        "bookingFlow": "Still completed successfully"
+      },
+      "impact": "Approximate-location bootstrap may fail under rate limits; third-party IP disclosure is a privacy consideration.",
+      "recommendation": "Keep lookup optional/non-blocking, cache failures, and document the dependency and privacy impact."
+    }
+  ],
+  "blockers": [
+    "No real Razorpay staging keys, webhook, payment, or refund verification.",
+    "No WhatsApp sandbox/template delivery verification.",
+    "Production index state not verified.",
+    "docs/EVENT_POLICY_APPROVAL.md remains NOT APPROVED (payment/cancellation/refund/WhatsApp decisions).",
+    "No staging E2E run against the real deployment.",
+    "docs/EVENT_E2E_STAGING.md procedure not executed in this audit."
+  ],
+  "releaseRequirements": [
+    "Fix EVT-AUD-001 and EVT-AUD-002; rerun quote/update/booking checks.",
+    "Fix EVT-AUD-003; enforce assignment through eligibility-checked path.",
+    "Resolve EVT-AUD-004 policy and implement refund or block behavior.",
+    "Fix EVT-AUD-005 so deployed build uses the production same-origin API.",
+    "Decide EVT-AUD-006 fallback behavior and add fault-injection coverage.",
+    "Complete Razorpay staging, WhatsApp sandbox, production index verification, policy approval, and staging E2E."
+  ],
+  "evidence": {
+    "apiResults": "C:\\Users\\jiya\\AppData\\Local\\Temp\\opencode\\events-audit\\api-results.json",
+    "browserResults": "C:\\Users\\jiya\\AppData\\Local\\Temp\\opencode\\events-audit\\browser-results.json",
+    "screenshots": "C:\\Users\\jiya\\AppData\\Local\\Temp\\opencode\\events-audit\\shots",
+    "harness": [
+      "run-isolated.js",
+      "no-dotenv.js",
+      "api-audit.js",
+      "browser-audit.js"
+    ]
+  },
+  "results": {
+    "api": [
+      {
+        "id": "API-001",
+        "name": "health endpoint responds 200",
+        "status": "PASS",
+        "evidence": {
+          "expected": 200,
+          "actual": 200
+        }
+      },
+      {
+        "id": "API-002",
+        "name": "helmet security headers present",
+        "status": "PASS",
+        "evidence": {
+          "csp": true,
+          "xPoweredBy": null,
+          "nosniff": "nosniff"
+        }
+      },
+      {
+        "id": "API-003",
+        "name": "public event catalogue lists 5 active types",
+        "status": "PASS",
+        "evidence": {
+          "expected": [
+            200,
+            5
+          ],
+          "actual": [
+            200,
+            5
+          ]
+        }
+      },
+      {
+        "id": "API-004",
+        "name": "pricing defaults exposed with version",
+        "status": "PASS",
+        "evidence": {
+          "status": 200,
+          "version": 0,
+          "slot45": 1599
+        }
+      },
+      {
+        "id": "API-005",
+        "name": "server quote: 4h prep-cooking + 7km = 1699",
+        "status": "PASS",
+        "evidence": {
+          "status": 200,
+          "body": {
+            "serviceAmount": 1599,
+            "additionalCookAmount": 0,
+            "extraHourAmount": 0,
+            "travelCharge": 100,
+            "totalAmount": 1699,
+            "durationKey": "slot_4_5",
+            "pricingVersion": 0,
+            "pricingUpdatedAt": null
+          }
+        }
+      },
+      {
+        "id": "API-006",
+        "name": "unauthenticated create rejected 401",
+        "status": "PASS",
+        "evidence": {
+          "expected": 401,
+          "actual": 401
+        }
+      },
+      {
+        "id": "API-007",
+        "name": "cook role cannot create customer booking (403)",
+        "status": "PASS",
+        "evidence": {
+          "expected": 403,
+          "actual": 403
+        }
+      },
+      {
+        "id": "API-008",
+        "name": "customer creates pending booking with server-computed totals",
+        "status": "PASS",
+        "evidence": {
+          "status": 201,
+          "bookingId": "EVT-MVL7B6PZ2463",
+          "amount": 1699,
+          "owner": "6adb8f17fb8745051025c2a4",
+          "statusText": "pending"
+        }
+      },
+      {
+        "id": "API-009",
+        "name": "idempotent replay returns the same booking",
+        "status": "PASS",
+        "evidence": {
+          "status": 200,
+          "same": true,
+          "replayHeader": "true"
+        }
+      },
+      {
+        "id": "API-010",
+        "name": "same key with different payload rejected",
+        "status": "PASS",
+        "evidence": {
+          "expected": [
+            409,
+            "IDEMPOTENCY_KEY_REUSED"
+          ],
+          "actual": [
+            409,
+            "IDEMPOTENCY_KEY_REUSED"
+          ]
+        }
+      },
+      {
+        "id": "API-011",
+        "name": "concurrent duplicate submit creates exactly one booking",
+        "status": "PASS",
+        "evidence": {
+          "statuses": [
+            201,
+            200
+          ],
+          "distinctIds": 1,
+          "dbCount": 1
+        }
+      },
+      {
+        "id": "API-012",
+        "name": "body cannot inject owner/cook/status/total",
+        "status": "PASS",
+        "evidence": {
+          "status": 201,
+          "owner": "6adb8f17fb8745051025c2a4",
+          "cook": null,
+          "state": "pending",
+          "total": 1699
+        }
+      },
+      {
+        "id": "API-013",
+        "name": "Other event requires a custom name",
+        "status": "PASS",
+        "evidence": {
+          "expected": 400,
+          "actual": 400
+        }
+      },
+      {
+        "id": "API-014",
+        "name": "Other event stores canonical type + custom label",
+        "status": "PASS",
+        "evidence": {
+          "status": 201,
+          "eventType": "Other",
+          "custom": "Housewarming"
+        }
+      },
+      {
+        "id": "API-015",
+        "name": "unknown event type rejected",
+        "status": "PASS",
+        "evidence": {
+          "expected": 400,
+          "actual": 400
+        }
+      },
+      {
+        "id": "API-016",
+        "name": "additional cooks blocked while feature unavailable",
+        "status": "PASS",
+        "evidence": {
+          "expected": 400,
+          "actual": 400
+        }
+      },
+      {
+        "id": "API-017",
+        "name": "past event date rejected",
+        "status": "PASS",
+        "evidence": {
+          "expected": 400,
+          "actual": 400
+        }
+      },
+      {
+        "id": "API-018",
+        "name": "overnight event rejected",
+        "status": "PASS",
+        "evidence": {
+          "expected": 400,
+          "actual": 400
+        }
+      },
+      {
+        "id": "API-019",
+        "name": "guest count boundary rejected",
+        "status": "PASS",
+        "evidence": {
+          "expected": 400,
+          "actual": 400
+        }
+      },
+      {
+        "id": "API-020",
+        "name": "stale pricing version rejected 409",
+        "status": "PASS",
+        "evidence": {
+          "status": 409,
+          "code": "PRICING_CHANGED"
+        }
+      },
+      {
+        "id": "API-021",
+        "name": "FINDING: status PATCH can mark cook_assigned without a cook",
+        "status": "PASS",
+        "evidence": {
+          "status": 200,
+          "bookingStatus": "cook_assigned",
+          "cookId": null
+        }
+      },
+      {
+        "id": "API-022",
+        "name": "admin assigns an approved eligible cook",
+        "status": "PASS",
+        "evidence": {
+          "status": 200,
+          "bookingStatus": "cook_assigned",
+          "cookId": "6adb8f15fb8745051025c29b",
+          "cookName": "Audit Cook"
+        }
+      },
+      {
+        "id": "API-023",
+        "name": "cook cannot self-assign (403)",
+        "status": "PASS",
+        "evidence": {
+          "expected": 403,
+          "actual": 403
+        }
+      },
+      {
+        "id": "API-024",
+        "name": "unapproved cook cannot be assigned (400)",
+        "status": "PASS",
+        "evidence": {
+          "expected": 400,
+          "actual": 400
+        }
+      },
+      {
+        "id": "API-025",
+        "name": "customer cannot verify travel distance (403)",
+        "status": "PASS",
+        "evidence": {
+          "expected": 403,
+          "actual": 403
+        }
+      },
+      {
+        "id": "API-026",
+        "name": "assigned cook sees the booking in their list",
+        "status": "PASS",
+        "evidence": {
+          "status": 200,
+          "count": 1
+        }
+      },
+      {
+        "id": "API-027",
+        "name": "booking detail access is scoped to owner/admin/assigned cook",
+        "status": "PASS",
+        "evidence": {
+          "owner": 200,
+          "otherCustomer": 403,
+          "cook": 200,
+          "admin": 200
+        }
+      },
+      {
+        "id": "API-028",
+        "name": "admin distance verification recomputes travel and total",
+        "status": "PASS",
+        "evidence": {
+          "status": 200,
+          "verified": true,
+          "travel": 150,
+          "total": 1749
+        }
+      },
+      {
+        "id": "API-029",
+        "name": "full lifecycle cook_assigned->confirmed->in_progress->completed",
+        "status": "PASS",
+        "evidence": {
+          "statuses": [
+            200,
+            200,
+            200
+          ],
+          "final": "completed"
+        }
+      },
+      {
+        "id": "API-030",
+        "name": "completed booking cannot be cancelled",
+        "status": "PASS",
+        "evidence": {
+          "expected": 400,
+          "actual": 400
+        }
+      },
+      {
+        "id": "API-031",
+        "name": "pending cannot jump straight to confirmed",
+        "status": "PASS",
+        "evidence": {
+          "expected": 400,
+          "actual": 400
+        }
+      },
+      {
+        "id": "API-032",
+        "name": "customer cancellation is idempotent",
+        "status": "PASS",
+        "evidence": {
+          "statuses": [
+            200,
+            200
+          ],
+          "state": "cancelled"
+        }
+      },
+      {
+        "id": "API-033",
+        "name": "cookie-auth cancellation enforces same-origin",
+        "status": "PASS",
+        "evidence": {
+          "crossOrigin": 403,
+          "sameOrigin": 200,
+          "state": "cancelled"
+        }
+      },
+      {
+        "id": "API-034",
+        "name": "stats endpoint is admin-only",
+        "status": "PASS",
+        "evidence": {
+          "anonymous": 401,
+          "customer": 403,
+          "cook": 403,
+          "admin": 200
+        }
+      },
+      {
+        "id": "API-035",
+        "name": "query-string status injection rejected",
+        "status": "PASS",
+        "evidence": {
+          "expected": 400,
+          "actual": 400
+        }
+      },
+      {
+        "id": "API-036",
+        "name": "admin and customer lists return only authorized rows",
+        "status": "PASS",
+        "evidence": {
+          "adminCount": 8,
+          "myCount": 8
+        }
+      },
+      {
+        "id": "API-037",
+        "name": "overlapping cook assignment rejected 409",
+        "status": "PASS",
+        "evidence": {
+          "first": 200,
+          "second": 409,
+          "message": "This cook already has an event booking (EVT-MVL7B8JT1BJ0) overlapping those hours"
+        }
+      },
+      {
+        "id": "API-038",
+        "name": "FINDING: in-progress paid cancellation queues no refund",
+        "status": "PASS",
+        "evidence": {
+          "status": 200,
+          "state": "cancelled",
+          "paid": "paid",
+          "refundStatus": "none"
+        }
+      },
+      {
+        "id": "API-039",
+        "name": "assignment/status notifications delivered without duplicates",
+        "status": "PASS",
+        "evidence": {
+          "notificationRows": 10,
+          "duplicateGroups": 0,
+          "outboxEvents": 6,
+          "outboxStatuses": [
+            "sent",
+            "sent",
+            "sent",
+            "sent",
+            "sent",
+            "sent"
+          ]
+        }
+      },
+      {
+        "id": "API-040",
+        "name": "pricing update is admin-only",
+        "status": "PASS",
+        "evidence": {
+          "expected": 403,
+          "actual": 403
+        }
+      },
+      {
+        "id": "API-041",
+        "name": "FINDING: successful pricing update saves then returns 500",
+        "status": "PASS",
+        "evidence": {
+          "updateStatus": 500,
+          "persistedValue": 123,
+          "responseMessage": "getPricingTable is not defined"
+        }
+      },
+      {
+        "id": "API-042",
+        "name": "FINDING: partial pricing create leaves other slots unconfigured",
+        "status": "PASS",
+        "evidence": {
+          "quote": 400,
+          "quoteMessage": "No price configured for this service and duration",
+          "cookingOnlyKeys": [
+            "upto2"
+          ]
+        }
+      },
+      {
+        "id": "API-043",
+        "name": "FINDING: partial pricing blocks a valid booking after admin edit",
+        "status": "PASS",
+        "evidence": {
+          "status": 400,
+          "message": "No price configured for this service and duration"
+        }
+      },
+      {
+        "id": "API-044",
+        "name": "oversized JSON body rejected 413",
+        "status": "PASS",
+        "evidence": {
+          "expected": 413,
+          "actual": 413
+        }
+      },
+      {
+        "id": "API-045",
+        "name": "event catalogue creation is admin-only",
+        "status": "PASS",
+        "evidence": {
+          "expected": 403,
+          "actual": 403
+        }
+      },
+      {
+        "id": "API-046",
+        "name": "deactivated event type cannot be booked",
+        "status": "PASS",
+        "evidence": {
+          "create": 201,
+          "deactivate": 200,
+          "booking": 400
+        }
+      },
+      {
+        "id": "API-047",
+        "name": "malformed booking id returns 404",
+        "status": "PASS",
+        "evidence": {
+          "expected": 404,
+          "actual": 404
+        }
+      },
+      {
+        "id": "API-048",
+        "name": "admin stats return totals",
+        "status": "PASS",
+        "evidence": {
+          "totalRevenue": 1099,
+          "bookedValue": 13342
+        }
+      },
+      {
+        "id": "API-049",
+        "name": "backend startup log shows no production DB connection",
+        "status": "PASS",
+        "evidence": {
+          "logTail": [
+            "\u001b[0mPUT /api/events/6adb8f2e04d24edf12cfda65 \u001b[32m200\u001b[0m 13.416 ms - 182\u001b[0m",
+            "\u001b[0mPOST /api/event-bookings \u001b[33m400\u001b[0m 10.822 ms - 108\u001b[0m",
+            "\u001b[0mGET /api/event-bookings/not-an-id \u001b[33m404\u001b[0m 4.956 ms - 37\u001b[0m",
+            "\u001b[0mGET /api/event-bookings/stats \u001b[32m200\u001b[0m 18.732 ms - 512\u001b[0m"
+          ]
+        }
+      }
+    ],
+    "browser": [
+      {
+        "id": "UI-001",
+        "name": "customer booking page loads with live catalogue",
+        "status": "PASS",
+        "evidence": {
+          "cards": 5,
+          "title": "Book a Cook for Your Event"
+        }
+      },
+      {
+        "id": "UI-002",
+        "name": "service step shows configured durations and live preview",
+        "status": "PASS",
+        "evidence": {
+          "hours": "4"
+        }
+      },
+      {
+        "id": "UI-003",
+        "name": "server quote rendered in review step (4h + 7km = 1,699)",
+        "status": "PASS",
+        "evidence": {
+          "totalText": "₹1,699"
+        }
+      },
+      {
+        "id": "UI-004",
+        "name": "booking submitted and details page shows pending booking",
+        "status": "PASS",
+        "evidence": {
+          "url": "http://127.0.0.1:61101/event-bookings/6adb938a56f4afbdcd100668",
+          "bookingId": "EVT-MVL7Z62GV700",
+          "hasPending": true,
+          "hasAmount": true
+        }
+      },
+      {
+        "id": "UI-005",
+        "name": "browser-created booking persisted with quote snapshot",
+        "status": "PASS",
+        "evidence": {
+          "id": "6adb938a56f4afbdcd100668",
+          "total": 1699,
+          "status": "pending",
+          "distance": 7
+        }
+      },
+      {
+        "id": "UI-006",
+        "name": "customer booking list shows the new booking",
+        "status": "PASS",
+        "evidence": {
+          "hasBooking": true
+        }
+      },
+      {
+        "id": "UI-007",
+        "name": "customer list has no horizontal overflow at 1280px",
+        "status": "PASS",
+        "evidence": {
+          "scrollWidth": 1280,
+          "innerWidth": 1280
+        }
+      },
+      {
+        "id": "UI-008",
+        "name": "booking details has no horizontal overflow at 390px",
+        "status": "PASS",
+        "evidence": {
+          "scrollWidth": 390,
+          "innerWidth": 390
+        }
+      },
+      {
+        "id": "UI-009",
+        "name": "admin assigns a verified cook from details page",
+        "status": "PASS",
+        "evidence": {
+          "cookVisible": true,
+          "dbCookId": "6adb93841e85d6b5fb00675e"
+        }
+      },
+      {
+        "id": "UI-010",
+        "name": "admin distance verification updates final total in UI and DB",
+        "status": "PASS",
+        "evidence": {
+          "verified": true,
+          "travel": 150,
+          "total": 1749
+        }
+      },
+      {
+        "id": "UI-011",
+        "name": "assigned cook can open booking details",
+        "status": "PASS",
+        "evidence": {
+          "hasBooking": true,
+          "hasCook": true
+        }
+      },
+      {
+        "id": "UI-012",
+        "name": "no application console errors (external ipwho.is 429 tolerated)",
+        "status": "PASS",
+        "evidence": {
+          "errors": [],
+          "external429Count": 4
+        }
+      },
+      {
+        "id": "UI-013",
+        "name": "no unexpected failed network requests (SSE abort on navigation ignored)",
+        "status": "PASS",
+        "evidence": {
+          "failures": [],
+          "ignoredSseAborts": 2
+        }
+      }
+    ]
+  },
+  "remediationFollowUp": {
+    "date": "2026-10-24",
+    "workingTree": "uncommitted (merge in progress); nothing deployed",
+    "verdict": "LOCAL CODE GATE PASS / PRODUCTION NO-GO (external blockers)",
+    "verification": {
+      "api": {
+        "total": 49,
+        "pass": 49,
+        "fail": 0
+      },
+      "browser": {
+        "total": 14,
+        "pass": 14,
+        "fail": 0,
+        "note": "Added UI-014 for paid in-progress cancellation."
+      },
+      "adminPricingBrowser": {
+        "total": 6,
+        "pass": 6,
+        "fail": 0,
+        "checks": "UI-020..UI-025 (load, save/persist, reload, validation, failed save, console/network)"
+      },
+      "backendNpmTest": {
+        "exitCode": 0,
+        "note": "All scripts passed with a disposable in-memory MONGODB_URI; no isolated-DB skips."
+      },
+      "stagingPreflight": {
+        "tests": 16,
+        "pass": 16,
+        "fail": 0,
+        "note": "Adds WhatsApp app secret, webhook verify token, CLIENT_URL, and disabled-WhatsApp blockers."
+      },
+      "eventsIndexInventory": {
+        "tests": 40,
+        "pass": 40,
+        "fail": 0,
+        "collections": 7,
+        "note": "Schema-declared indexes created in MongoMemoryServer and checked for drift; production DB still unverified."
+      },
+      "paymentWebhookNegatives": {
+        "status": "PASS",
+        "note": "Missing/invalid signature, non-raw body, malformed JSON, and missing secret rejected; booking unchanged; no dedupe row."
+      },
+      "frontendJest": {
+        "suites": 16,
+        "tests": 143,
+        "pass": 143
+      },
+      "eslintEventsAndGeolocation": "exit 0",
+      "productionBuild": "exit 0",
+      "buildArtifactGuard": "PASS - no localhost API URL",
+      "buildArtifactScan": "no localhost API URL; no rzp_live_/rzp_test_ literal in shipped JS"
+    },
+    "findings": [
+      {
+        "id": "EVT-AUD-001",
+        "status": "FIXED",
+        "evidence": "API-041/042/043 PASS; regression asserts 200, persisted value, and subsequent quote."
+      },
+      {
+        "id": "EVT-AUD-002",
+        "status": "FIXED",
+        "evidence": "API-042/043 PASS; legacy partial document normalized, repaired, quoted, and booked successfully."
+      },
+      {
+        "id": "EVT-AUD-003",
+        "status": "FIXED",
+        "evidence": "Manual cook_assigned status rejected with USE_ASSIGN_ENDPOINT; assignment uses eligibility/overlap-checked endpoint."
+      },
+      {
+        "id": "EVT-AUD-004",
+        "status": "FIXED",
+        "evidence": "API-038 and browser UI-014 PASS; paid in-progress blocked with REFUND_POLICY_UNRESOLVED; paid pre-start queues full refund."
+      },
+      {
+        "id": "EVT-AUD-005",
+        "status": "FIXED",
+        "evidence": "Production build exit 0; postbuild guard PASS; no localhost API URL or Razorpay key literal in shipped JS."
+      },
+      {
+        "id": "EVT-AUD-006",
+        "status": "FIXED",
+        "evidence": "Fault-injection tests PASS: snapshot/quote return 503, booking not created, recovery succeeds."
+      },
+      {
+        "id": "EVT-AUD-007",
+        "status": "FIXED",
+        "evidence": "Case-only idempotency retry replays the original booking (201/200)."
+      },
+      {
+        "id": "EVT-AUD-008",
+        "status": "FIXED",
+        "evidence": "geolocation.ip.test.js 4/4 PASS; success 6h / failure 5m cache; privacy appendix documented."
+      }
+    ],
+    "remainingBlockers": [
+      "Real Razorpay staging payment/refund/webhook verification",
+      "Real WhatsApp sandbox/template delivery verification",
+      "Production MongoDB index verification",
+      "docs/EVENT_POLICY_APPROVAL.md still NOT APPROVED",
+      "Staging E2E against a deployed environment",
+      "Uncommitted merge state; no deployment performed"
+    ],
+    "releaseGateReport": "EVENTS_RELEASE_GATE_2026-10-24.md",
+    "releaseDecision": "NO-GO"
+  }
+}

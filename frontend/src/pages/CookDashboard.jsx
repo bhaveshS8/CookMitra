@@ -775,10 +775,13 @@ const CookDashboard = () => {
           event details + event earnings. */}
       {view === "events" && (
         <div>
-          <h3 style={{ fontSize: "1.1rem", marginBottom: "0.25rem" }}>Event Assignments</h3>
-          <p style={{ color: "var(--slate-500)", fontSize: "0.9rem", marginBottom: "1rem" }}>
-            Birthdays, anniversaries and family functions CookMitra assigns to you.
-          </p>
+          <div className="cev-page-head">
+            <span className="cev-eyebrow">
+              <ChefHat size={13} aria-hidden="true" /> Cook assigned
+            </span>
+            <h3>Event Assignments</h3>
+            <p>Birthdays, anniversaries and family functions CookMitra assigns to you.</p>
+          </div>
           <CookEventBookings />
         </div>
       )}

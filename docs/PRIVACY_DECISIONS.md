@@ -145,6 +145,22 @@ none are asserted.
 
 ---
 
+## Appendix — Event approximate-location bootstrap (EVT-AUD-008)
+
+The Events booking flow offers an optional "use my approximate location"
+shortcut. It first calls `https://ipwho.is/` and, on failure, the
+`https://get.geojs.io/v1/ip/geo.json` fallback. This discloses the
+visitor's IP address to that third party. The app keeps only coarse
+city/district/state labels; the IP address is never stored, logged, or
+sent to the CookMitra backend. The lookup is non-blocking (failure falls
+back to manual address entry), successes are cached for six hours, and
+failures for five minutes so a rate-limited provider (observed HTTP 429)
+is not retried on every mount. If the owner prefers not to depend on a
+third party, the shortcut can be removed without affecting precise GPS
+location, reverse geocoding, or the manual address flow.
+
+---
+
 ## Requested owner actions
 
 1. Approve one option for each decision (recommended: **1A→1B later,

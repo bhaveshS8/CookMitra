@@ -39,11 +39,21 @@ export const EVENT_FOOD_TYPES = [
   "Dinner",
   "Snacks",
   "Full Meal",
-  "Custom",
 ];
 
 export const EVENT_SERVICE_LABEL = (id) =>
   (EVENT_SERVICES.find((s) => s.id === id) || {}).label || String(id || "").replace(/_/g, " ");
+
+// Display label for an event booking's occasion. When the customer picked
+// "Other" and typed a custom name, that name is shown instead of "Other".
+export const eventTypeLabel = (booking) => {
+  if (!booking) return "";
+  const custom = typeof booking === "string" ? "" : String(booking.customEventType || "").trim();
+  const base = typeof booking === "string" ? booking : booking.eventType;
+  const name = (base || "").trim();
+  if (name.toLowerCase() === "other" && custom) return custom;
+  return name || "Event";
+};
 
 // Launch price tables (§6/§7/§8) — preview fallback when /event-pricing is
 // unreachable. Keys mirror the backend duration buckets.
@@ -82,6 +92,39 @@ export const eventDurationKey = (hours) => {
   if (h < 7) return "slot_6_7";
   if (h <= 8) return "slot_7_8";
   return null;
+};
+
+// Distance is decimal km - keep one dot and at most maxDecimals places.
+export const sanitizeDecimalInput = (value, maxDecimals = 2) => {
+  const cleaned = String(value ?? "").replace(/,/g, "").replace(/[^0-9.]/g, "");
+  if (!cleaned) return "";
+  const dot = cleaned.indexOf(".");
+  const whole = (dot === -1 ? cleaned : cleaned.slice(0, dot)).replace(/^0+(?=\d)/, "");
+  if (dot === -1) return whole;
+  const fraction = cleaned.slice(dot + 1).replace(/\./g, "").slice(0, maxDecimals);
+  return `${whole || "0"}.${fraction}`;
+};
+
+// Customer-facing travel copy derived from the admin-editable slab table.
+export const eventTravelSlabHint = (slabs) => {
+  const list = (Array.isArray(slabs) && slabs.length > 0 ? slabs : EVENT_TRAVEL_SLABS)
+    .map((s) => ({ maxKm: Number(s.maxKm), charge: Number(s.charge) || 0 }))
+    .filter((s) => (s.maxKm === Infinity || Number.isFinite(s.maxKm)) && s.maxKm > 0)
+    .sort((a, b) => a.maxKm - b.maxKm);
+  let lower = 0;
+  return list
+    .map((s, i) => {
+      const from = lower;
+      lower = s.maxKm;
+      const range =
+        i === list.length - 1 && s.maxKm > 1000000
+          ? `${from}+ km`
+          : from === 0
+            ? `0-${s.maxKm} km`
+            : `${from}-${s.maxKm} km`;
+      return `${range} ${s.charge === 0 ? "FREE" : formatCurrency(s.charge)}`;
+    })
+    .join(" · ");
 };
 
 export const eventTravelCharge = (slabs, distanceKm) => {
@@ -133,3 +176,69 @@ export const eventStatusLabel = (s) =>
   EVENT_STATUS_LABELS[s] || String(s || "").replace(/_/g, " ");
 
 export const EVENT_STATUS_FLOW = ["pending", "cook_assigned", "confirmed", "in_progress", "completed"];
+
+// Shared badge tones so customer, cook and admin surfaces stay consistent.
+export const EVENT_STATUS_TONES = {
+  pending: "amber",
+  cook_assigned: "blue",
+  confirmed: "emerald",
+  in_progress: "purple",
+  completed: "emerald",
+  cancelled: "rose",
+};
+
+export const eventStatusTone = (s) => EVENT_STATUS_TONES[s] || "slate";
+
+export const EVENT_REFUND_LABELS = {
+  pending: "Refund requested",
+  processing: "Refund processing",
+  processed: "Refund processed",
+  failed: "Refund needs attention",
+  manual: "Refund settled manually",
+  rejected: "Refund declined",
+};
+
+// Payment badge metadata derived ONLY from the saved booking/payment record.
+// It never infers a successful payment from event status alone.
+export const eventPaymentMeta = (booking) => {
+  const payment = booking?.payment || {};
+  const refund = String(payment.refundStatus || "");
+  if (refund && refund !== "none") {
+    return {
+      label: EVENT_REFUND_LABELS[refund] || "Refund status updated",
+      tone: ["failed", "rejected"].includes(refund) ? "rose" : ["processed", "manual"].includes(refund) ? "emerald" : "amber",
+      isRefund: true,
+    };
+  }
+  if (payment.status === "paid") return { label: "Paid", tone: "emerald" };
+  if (payment.status === "failed") return { label: "Payment failed", tone: "rose" };
+  if (booking?.bookingStatus === "cancelled") return { label: "No payment recorded", tone: "slate" };
+  if (booking?.bookingStatus === "pending") return { label: "Payment not open", tone: "slate" };
+  if (!booking?.cookId) return { label: "Payment not open", tone: "slate" };
+  if (booking?.bookingStatus === "cook_assigned" && booking?.distanceVerified !== true) {
+    return { label: "Awaiting distance verification", tone: "slate" };
+  }
+  if (["confirmed", "in_progress", "completed"].includes(booking?.bookingStatus)) {
+    return { label: "No payment recorded", tone: "slate" };
+  }
+  if (payment.status === "pending") return { label: "Payment pending", tone: "amber" };
+  return { label: "Payment not started", tone: "slate" };
+};
+
+// Admin action eligibility. The backend also rejects terminal/paid bookings;
+// this keeps every admin surface from offering a verification that cannot land.
+export const canVerifyEventDistance = (booking) =>
+  Boolean(booking?.cookId) &&
+  booking?.distanceVerified !== true &&
+  !["completed", "cancelled"].includes(booking?.bookingStatus) &&
+  booking?.payment?.status !== "paid";
+
+export const PAYMENT_AMOUNT_LABEL = (booking) => {
+  const payment = booking?.payment || {};
+  if (payment.status === "paid") {
+    return Number(payment.paidAmount) > 0
+      ? `Paid ${formatCurrency(payment.paidAmount)}`
+      : "Paid";
+  }
+  return "";
+};

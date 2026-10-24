@@ -1,6 +1,7 @@
 const EventPricing = require("../models/EventPricing");
 const {
-  getPricingTable,
+  normalizePricing,
+  getPricingSnapshot,
   calculateEventPrice,
   durationKeyForHours,
   validatePricingTable,
@@ -9,32 +10,21 @@ const {
 // Public: current price table (booking flow + price preview).
 exports.getPricing = async (req, res, next) => {
   try {
-    const table = await getPricingTable();
-    const doc = await safeFindPricingDoc();
+    const snapshot = await getPricingSnapshot();
     res.json({
-      ...table,
+      ...snapshot.table,
       durationKeys: EventPricing.DURATION_KEYS,
       services: EventPricing.SERVICE_KEYS,
-      // Exposed for admin conflict messaging; booking flow ignores it.
-      version: doc ? doc.__v : 0,
-      updatedAt: doc ? doc.updatedAt : null,
+      // Booking submissions echo this version back; a mismatch means the
+      // table changed after the customer reviewed the quote.
+      version: snapshot.version,
+      updatedAt: snapshot.updatedAt,
     });
   } catch (error) {
     next(error);
   }
 };
 
-const safeFindPricingDoc = async () => {
-  try {
-    const mongoose = require("mongoose");
-    if (mongoose.connection && mongoose.connection.readyState === 1) {
-      return await EventPricing.findOne({ key: "default" });
-    }
-  } catch {
-    // offline — no version info
-  }
-  return null;
-};
 
 // Pricing quote (§19). Reads the admin-configured table — never trusts
 // client-side totals.
@@ -48,15 +38,27 @@ exports.calculateQuote = async (req, res, next) => {
       additionalCook = 0,
       extraHours = 0,
     } = req.body || {};
+    // One read supplies both the amounts and the version the client must
+    // echo when creating the booking.
+    const snapshot = await getPricingSnapshot();
     const quote = await calculateEventPrice({
       serviceType,
       duration,
       distanceKm: distanceKm ?? distance ?? 0,
       additionalCook,
       extraHours,
+      pricingTable: snapshot.table,
     });
-    res.json(quote);
+    res.json({
+      ...quote,
+      pricingVersion: snapshot.version,
+      pricingUpdatedAt: snapshot.updatedAt,
+    });
   } catch (error) {
+    if (error && (error.statusCode === 503 || error.code === "PRICING_UNAVAILABLE")) {
+      error.message = error.message || "Pricing is temporarily unavailable. Please try again.";
+      return next(error);
+    }
     return res.status(400).json({ message: error.message || "Could not calculate price" });
   }
 };
@@ -81,7 +83,17 @@ const requireAdminPrice = (v, label) => {
 exports.updatePricing = async (req, res, next) => {
   try {
     const { servicePrices, additionalCookPrice, extraHourPrices, travelSlabs } = req.body || {};
+    const hasUpdate =
+      servicePrices !== undefined ||
+      additionalCookPrice !== undefined ||
+      extraHourPrices !== undefined ||
+      travelSlabs !== undefined;
     let doc = await EventPricing.findOne({ key: "default" });
+    // Empty payload is a no-op: return the current complete table without
+    // writing (and without bumping __v, which would invalidate live quotes).
+    if (!hasUpdate) {
+      return res.json(normalizePricing(doc));
+    }
     if (!doc) doc = new EventPricing({ key: "default" });
 
     if (servicePrices !== undefined) {
@@ -198,36 +210,20 @@ exports.updatePricing = async (req, res, next) => {
       doc.travelSlabs = slabs;
     }
 
-    // Validate the ENTIRE resulting configuration (not just supplied fields)
-    // so a partial update can never leave the app without usable pricing.
+    // Validate and persist the ENTIRE resulting configuration (not just the
+    // supplied fields) so a partial edit can never leave the app unconfigured.
+    const full = normalizePricing(doc);
     try {
-      const preview = {
-        servicePrices: doc.servicePrices instanceof Map
-          ? Object.fromEntries([...doc.servicePrices.entries()].map(([k, v]) => [k, v instanceof Map ? Object.fromEntries(v.entries()) : v]))
-          : doc.servicePrices,
-        additionalCookPrice: doc.additionalCookPrice,
-        extraHourPrices: doc.extraHourPrices instanceof Map
-          ? Object.fromEntries(doc.extraHourPrices.entries())
-          : doc.extraHourPrices,
-        travelSlabs: doc.travelSlabs,
-      };
-      // Fill defaults for a brand-new doc so first-time validation passes.
-      const d = EventPricing.DEFAULT_PRICING;
-      const full = {
-        servicePrices: { ...d.servicePrices, ...(preview.servicePrices || {}) },
-        additionalCookPrice: preview.additionalCookPrice ?? d.additionalCookPrice,
-        extraHourPrices: { ...d.extraHourPrices, ...(preview.extraHourPrices || {}) },
-        travelSlabs: preview.travelSlabs && preview.travelSlabs.length > 0 ? preview.travelSlabs : d.travelSlabs,
-      };
-      // Ensure every service has every duration after merge.
-      for (const svc of EventPricing.SERVICE_KEYS) {
-        full.servicePrices[svc] = { ...(d.servicePrices[svc] || {}), ...(full.servicePrices[svc] || {}) };
-      }
       validatePricingTable(full);
     } catch (e) {
       return res.status(400).json({ message: e.message || "Invalid pricing configuration" });
     }
-
+    doc.servicePrices = full.servicePrices;
+    doc.additionalCookPrice = full.additionalCookPrice;
+    doc.extraHourPrices = full.extraHourPrices;
+    doc.travelSlabs = full.travelSlabs;
+    doc.markModified("servicePrices");
+    doc.markModified("extraHourPrices");
     doc.updatedBy = req.user ? req.user.id : null;
     try {
       await doc.save();
@@ -241,8 +237,7 @@ exports.updatePricing = async (req, res, next) => {
       }
       throw e;
     }
-    const table = await getPricingTable();
-    res.json(table);
+    res.json(full);
   } catch (error) {
     if (error && error.name === "VersionError") {
       return res.status(409).json({ message: "Pricing was updated by another admin — please reload and retry." });

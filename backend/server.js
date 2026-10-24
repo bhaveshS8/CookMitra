@@ -150,17 +150,24 @@ if (process.env.NODE_ENV === "production") {
       "CONFIG NOTICE: RAZORPAY_WEBHOOK_SECRET is not set — POST /api/payments/webhook cannot verify signatures (browser payments still work, webhook reconcile is skipped)."
     );
   }
-  if (process.env.REQUIRE_PAYMENTS === "true") {
+  const flagEnabled = (value) =>
+    ["true", "1", "yes"].includes(String(value || "").trim().toLowerCase());
+  const paymentsRequired =
+    flagEnabled(process.env.REQUIRE_PAYMENTS) || flagEnabled(process.env.EVENT_PAYMENTS_REQUIRED);
+  if (paymentsRequired) {
     let paymentsReady = false;
     try {
+      const razorpayConfig = require("./config/razorpay");
       paymentsReady =
-        require("./config/razorpay").isConfigured && Boolean(process.env.RAZORPAY_WEBHOOK_SECRET);
+        razorpayConfig.isConfigured &&
+        String(razorpayConfig.keyId || "").startsWith("rzp_live_") &&
+        Boolean(process.env.RAZORPAY_WEBHOOK_SECRET);
     } catch {
       paymentsReady = false;
     }
     if (!paymentsReady) {
       console.error(
-        "CONFIG ERROR: REQUIRE_PAYMENTS=true but live Razorpay keys and/or RAZORPAY_WEBHOOK_SECRET are missing. Refusing to start."
+        "CONFIG ERROR: live payments are required (REQUIRE_PAYMENTS/EVENT_PAYMENTS_REQUIRED) but rzp_live_* keys, RAZORPAY_KEY_SECRET, or RAZORPAY_WEBHOOK_SECRET are missing. Refusing to start."
       );
       process.exit(1);
     }
@@ -343,6 +350,7 @@ app.use("/api/bookings", require("./routes/bookings"));
 // cooks), and the admin-editable event pricing engine.
 app.use("/api/events", require("./routes/events"));
 app.use("/api/event-bookings", require("./routes/eventBookings"));
+app.use("/api/event-payments", strictLimiter, require("./routes/eventPayments"));
 app.use("/api/event-pricing", require("./routes/eventPricing"));
 app.use("/api/payments", strictLimiter, require("./routes/payments"));
 app.use("/api/availability", require("./routes/availability"));

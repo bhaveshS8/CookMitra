@@ -87,6 +87,36 @@ export const localTomorrowStr = () => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 
+// India Standard Time (Asia/Kolkata, UTC+05:30, no DST) "now" helpers.
+// Used to hide/disable past booking slots regardless of the browser's
+// local timezone, matching the server's IST validation exactly.
+export const IST_TIME_ZONE = "Asia/Kolkata";
+
+const istNowParts = () => {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: IST_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (t) => parts.find((p) => p.type === t)?.value;
+  return { y: get("year"), mo: get("month"), d: get("day"), h: get("hour"), mi: get("minute") };
+};
+
+export const istTodayStr = () => {
+  const { y, mo, d } = istNowParts();
+  return `${y}-${mo}-${d}`;
+};
+
+export const istNowMinutes = () => {
+  const { h, mi } = istNowParts();
+  // Some ICU builds report midnight as hour "24" with hour12: false.
+  return (Number(h) % 24) * 60 + Number(mi);
+};
+
 export const formatTime12 = (time) => {
   const m = String(time || "").match(/^(\d{1,2}):(\d{2})/);
   if (!m) return String(time || "");

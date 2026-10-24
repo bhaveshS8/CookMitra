@@ -2,6 +2,7 @@ const Availability = require("../models/Availability");
 const Booking = require("../models/Booking");
 const CookProfile = require("../models/CookProfile");
 const { getDayWindows, getDayBookings, computeStartOptions, suggestDurations, parseDay, resolveCookAvailability, timeToMinutes, findContainingWindow, findOverlapBooking, dayBounds, activeSlotMatch, resolveCookWindows } = require("../utils/slots");
+const { findEventBusyWindows, findEventBusyWindowsMap } = require("../services/schedulingConflicts");
 
 exports.searchAvailability = async (req, res, next) => {
   try {
@@ -55,6 +56,11 @@ exports.searchAvailability = async (req, res, next) => {
       const key = String(b.cook);
       if (!byCook.has(key)) byCook.set(key, []);
       byCook.get(key).push(b);
+    }
+    const eventByCook = await findEventBusyWindowsMap({ cookIds: cookUserIds, date }).catch(() => new Map());
+    for (const [cookId, windows] of eventByCook.entries()) {
+      if (!byCook.has(cookId)) byCook.set(cookId, []);
+      byCook.get(cookId).push(...windows);
     }
 
     const withSlots = cooks.map((cook) => {
@@ -157,6 +163,8 @@ exports.getAvailability = async (req, res, next) => {
       }
       const windows = await getDayWindows(cookId, date);
       const bookings = await getDayBookings(cookId, date);
+      const eventWindows = await findEventBusyWindows({ cookId, date }).catch(() => []);
+      bookings.push(...eventWindows);
       if (startTime != null || endTime != null) {
         if (!startTime || !endTime) {
           return res.status(400).json({ message: "startTime and endTime are both required" });

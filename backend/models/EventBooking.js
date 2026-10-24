@@ -42,6 +42,13 @@ const eventBookingSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
+    // Client-generated submission key. A retry (double-click, timeout,
+    // refresh) with the same key returns the already-created booking instead
+    // of creating a duplicate. Scoped to the customer by the compound index.
+    idempotencyKey: { type: String, default: "", trim: true, maxlength: 128 },
+    // SHA-256 of the normalized booking intent. Reusing a key with a
+    // different payload is rejected rather than returning an unrelated booking.
+    idempotencyFingerprint: { type: String, default: "", trim: true, maxlength: 64 },
     // Assigned by Admin/CookMitra (§11). Null until assignment.
     cookId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -58,6 +65,15 @@ const eventBookingSchema = new mongoose.Schema(
       type: String,
       required: [true, "Event type is required"],
       trim: true,
+    },
+    // Customer-typed occasion when they picked "Other" (e.g. "Housewarming").
+    // Optional and only meaningful alongside eventType === "Other"; the raw
+    // eventType still stores "Other" so catalogue validation is unaffected.
+    customEventType: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 80,
     },
     eventDate: {
       type: Date,
@@ -105,12 +121,47 @@ const eventBookingSchema = new mongoose.Schema(
     // verification by submitting 0: zero is still provisional.
     distanceKm: { type: Number, default: 0, min: 0 },
     distanceVerified: { type: Boolean, default: false },
+    // Version of the admin pricing table used for this snapshot, so later
+    // audits can tell which table produced the amounts.
+    pricingVersion: { type: Number, default: 0, min: 0 },
     // Price snapshot (server-computed from the admin pricing table).
     serviceAmount: { type: Number, default: 0 },
     additionalCookAmount: { type: Number, default: 0 },
     extraHourAmount: { type: Number, default: 0 },
     travelCharge: { type: Number, default: 0 },
     totalAmount: { type: Number, default: 0 },
+    // Online payment lifecycle. Events are paid only after an admin assigns a
+    // cook and verifies the final travel/fee. Refunds are admin-approved.
+    payment: {
+      razorpayOrderId: { type: String, default: "" },
+      razorpayOrderIds: { type: [String], default: [] },
+      razorpayPaymentId: { type: String, default: "" },
+      razorpaySignature: { type: String, default: "" },
+      status: {
+        type: String,
+        enum: ["pending", "paid", "failed"],
+        default: "pending",
+      },
+      paidAmount: { type: Number, default: 0 },
+      paidAt: { type: Date },
+      testMode: { type: Boolean, default: false },
+      webhookReconciled: { type: Boolean, default: false },
+      refundId: { type: String, default: "" },
+      refundStatus: {
+        type: String,
+        enum: ["none", "pending", "processing", "processed", "failed", "manual", "rejected"],
+        default: "none",
+      },
+      refundAmount: { type: Number, default: 0 },
+      refundedAt: { type: Date },
+      refundReference: { type: String, default: "", trim: true },
+      refundReason: { type: String, default: "", trim: true, maxlength: 120 },
+      refundRequestedAt: { type: Date },
+      refundApprovedAt: { type: Date },
+      refundApprovedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      refundAdminNote: { type: String, default: "", trim: true, maxlength: 500 },
+      refundError: { type: String, default: "", trim: true, maxlength: 300 },
+    },
     bookingStatus: {
       type: String,
       enum: EVENT_BOOKING_STATUSES,
@@ -122,17 +173,37 @@ const eventBookingSchema = new mongoose.Schema(
         status: String,
         timestamp: { type: Date, default: Date.now },
         note: String,
+        actor: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+        actorRole: { type: String, default: "" },
       },
     ],
   },
   { timestamps: true, optimisticConcurrency: true }
 );
 
+// One booking per (customer, idempotency key). Empty keys are excluded so
+// older clients / other paths are unaffected.
+eventBookingSchema.index(
+  { customerId: 1, idempotencyKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { idempotencyKey: { $gt: "" } },
+  }
+);
 eventBookingSchema.index({ customerId: 1, bookingStatus: 1 });
 eventBookingSchema.index({ cookId: 1, bookingStatus: 1 });
 eventBookingSchema.index({ eventDate: 1, bookingStatus: 1 });
 eventBookingSchema.index({ bookingStatus: 1, createdAt: -1 });
 eventBookingSchema.index({ cookId: 1, eventDate: 1, bookingStatus: 1 });
+eventBookingSchema.index({ "payment.razorpayOrderId": 1 });
+eventBookingSchema.index(
+  { "payment.razorpayPaymentId": 1 },
+  {
+    unique: true,
+    partialFilterExpression: { "payment.razorpayPaymentId": { $gt: "" } },
+  }
+);
+eventBookingSchema.index({ "payment.refundStatus": 1, "payment.refundRequestedAt": 1 });
 
 // Optimistic concurrency safety net: concurrent find-then-save paths throw
 // VersionError instead of silently overwriting (set via schema option above).

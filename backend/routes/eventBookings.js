@@ -23,6 +23,11 @@ router.post(
   authorize("customer"),
   [
     body("eventType").trim().notEmpty().withMessage("Event type is required"),
+    body("customEventType")
+      .optional({ values: "falsy" })
+      .trim()
+      .isLength({ max: 80 })
+      .withMessage("Event name is too long (max 80 characters)"),
     body("eventDate").notEmpty().withMessage("Event date is required"),
     body("startTime").notEmpty().withMessage("Start time is required"),
     body("duration")
@@ -73,7 +78,7 @@ router.patch(
   auth,
   authorize("admin"),
   [body("status")
-    .isIn(["cook_assigned", "confirmed", "in_progress", "completed", "cancelled"])
+    .isIn(["cook_assigned", "confirmed", "in_progress", "completed"])
     .withMessage("Valid status is required")],
   validate,
   updateEventBookingStatus

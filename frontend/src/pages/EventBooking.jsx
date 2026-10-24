@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useSelector, useDispatch } from "react-redux";
 import {
@@ -21,32 +21,51 @@ import {
   Plus,
   Check,
   CheckCircle2,
-  ShieldCheck,
   PartyPopper,
+  Sunrise,
+  Moon,
+  Cookie,
+  Utensils,
+  Shapes,
 } from "lucide-react";
 import API from "../api/axios";
-import { localTodayStr, localTomorrowStr, formatDate } from "../utils/constants";
+import { localTomorrowStr, formatTime12, istTodayStr, istNowMinutes } from "../utils/constants";
 import {
   formatCurrency,
   EVENT_TYPE_FALLBACK,
   EVENT_SERVICES,
   EVENT_FOOD_TYPES,
   EVENT_SERVICE_LABEL,
+  eventTravelSlabHint,
   previewEventPrice,
+  sanitizeDecimalInput,
 } from "../utils/eventConstants";
 import { useShowToast, useSiteLocation } from "../store/hooks";
 import { requestPreciseLocation } from "../store/locationSlice";
 import LoginPromptModal from "../components/LoginPromptModal";
+import CustomCalendar from "../components/CustomCalendar";
 
+// Occasion icons (Step 1 cards). The seeded catalogue uses "calendar" for the
+// catch-all "Other" occasion — a neutral shape reads better there than a
+// calendar, so "calendar" maps to Shapes.
 const EVENT_ICONS = {
-  cake: <Cake size={26} />,
-  heart: <Heart size={26} />,
-  users: <Users size={26} />,
-  sparkles: <Sparkles size={26} />,
-  calendar: <CalendarDays size={26} />,
+  cake: <Cake size={24} />,
+  heart: <Heart size={24} />,
+  users: <Users size={24} />,
+  sparkles: <Sparkles size={24} />,
+  calendar: <Shapes size={24} />,
 };
 
-const eventIcon = (icon) => EVENT_ICONS[String(icon || "").toLowerCase()] || <PartyPopper size={26} />;
+const eventIcon = (icon) => EVENT_ICONS[String(icon || "").toLowerCase()] || <PartyPopper size={24} />;
+
+// Subtle icons for each food-type card in Step 2 (display only).
+const FOOD_ICONS = {
+  Breakfast: <Sunrise size={20} />,
+  Lunch: <Utensils size={20} />,
+  Dinner: <Moon size={20} />,
+  Snacks: <Cookie size={20} />,
+  "Full Meal": <UtensilsCrossed size={20} />,
+};
 
 const STEPS = [
   { label: "Event", desc: "Pick your occasion" },
@@ -56,10 +75,25 @@ const STEPS = [
   { label: "Price", desc: "Review & request" },
 ];
 
-const clampNum = (v, min, max, fallback) => {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, n));
+// Hourly Start Time slots for Step 2 (6:00 AM – 11:00 PM). Values stay in
+// the same "HH:MM" 24-hour format the form state, validators and the
+// /event-bookings payload already expect — only the display changes.
+const TIME_SLOTS = Array.from({ length: 18 }, (_, i) => `${String(i + 6).padStart(2, "0")}:00`);
+
+/* "HH:MM" -> minutes since midnight (for past-slot comparisons). */
+const timeToMinutes = (hm) => {
+  const m = String(hm || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+};
+
+/* "YYYY-MM-DD" +/- whole days -> "YYYY-MM-DD" (date-only maths, no TZ drift). */
+const shiftDateStr = (s, days) => {
+  const m = String(s || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return s;
+  const dt = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
 };
 
 /* Keep numeric steppers / inputs strictly numeric — strips stray chars on paste. */
@@ -69,6 +103,47 @@ const onlyDigits = (v, fallback = "") => {
   if (digits === "") return fallback === "" ? "" : String(fallback);
   return String(parseInt(digits, 10));
 };
+
+const BOOKING_ATTEMPT_KEY = "cookmitra:event-booking-attempt";
+
+const newIdempotencyKey = () => {
+  const cryptoObj = typeof window !== "undefined" ? window.crypto : null;
+  if (cryptoObj?.randomUUID) return cryptoObj.randomUUID();
+  return `evt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+};
+
+const bookingAttemptKey = (signature, memory) => {
+  if (memory?.current?.signature === signature && memory.current.key) {
+    return memory.current.key;
+  }
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(BOOKING_ATTEMPT_KEY) || "null");
+    if (saved?.signature === signature && saved?.key) {
+      if (memory) memory.current = { signature, key: saved.key };
+      return saved.key;
+    }
+  } catch {
+    // storage unavailable/corrupt - fall through to a fresh key
+  }
+  const key = newIdempotencyKey();
+  if (memory) memory.current = { signature, key };
+  try {
+    sessionStorage.setItem(BOOKING_ATTEMPT_KEY, JSON.stringify({ signature, key }));
+  } catch {
+    // best-effort: the in-memory call still sends the key
+  }
+  return key;
+};
+
+const clearBookingAttemptKey = () => {
+  try {
+    sessionStorage.removeItem(BOOKING_ATTEMPT_KEY);
+  } catch {
+    // ignore
+  }
+};
+
+
 
 const EventBooking = () => {
   const user = useSelector((s) => s.auth.user);
@@ -80,6 +155,7 @@ const EventBooking = () => {
   const [pricing, setPricing] = useState(null);
   const [form, setForm] = useState({
     eventType: "",
+    customEventType: "",
     eventDate: localTomorrowStr(),
     startTime: "18:00",
     guestCount: "20",
@@ -100,11 +176,58 @@ const EventBooking = () => {
   const [quoting, setQuoting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const idempotencyRef = useRef({ signature: "", key: "" });
   const dispatch = useDispatch();
   const { location: siteLocation, error: locError, isLocating } = useSiteLocation();
   // Key of the last GPS fix already applied to the form — autofill fills
   // BLANK fields once per fix and never overwrites what the user typed.
   const [locAppliedKey, setLocAppliedKey] = useState(null);
+
+  // Live IST clock (minutes since midnight) — re-rendered every 30 s so
+  // same-day past slots disappear as time moves forward.
+  const [istMinutes, setIstMinutes] = useState(() => istNowMinutes());
+  useEffect(() => {
+    const id = setInterval(() => setIstMinutes(istNowMinutes()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // A slot is past when the selected date is IST-today and its start time
+  // is at or before the current IST time.
+  const isPastSlot = (slot) => {
+    const slotMin = timeToMinutes(slot);
+    if (slotMin == null) return false;
+    return form.eventDate === istTodayStr() && slotMin <= istMinutes;
+  };
+
+  // ---- Preferred Date quick-select (all dates stay "YYYY-MM-DD" strings) ----
+  // Two compact chips (Today / Tomorrow) sit above one calendar field; the
+  // calendar field is the single place where the chosen date is displayed.
+  const istToday = istTodayStr();
+  const istTomorrow = shiftDateStr(istToday, 1);
+
+  const pickDate = (d) => {
+    if (!d) return;
+    set("eventDate", d);
+  };
+
+  // Start-time slots in one compact grid: past slots are hidden when the
+  // date is IST-today and every configured slot shows for future dates.
+  // Re-filtered each render, so switching the date (or the clock moving)
+  // refreshes the available slots immediately.
+  const visibleTimeSlots = TIME_SLOTS.filter((t) => !isPastSlot(t));
+
+  // When the date becomes today (or time moves on), clear any selected
+  // start time that is now in the past so it can't be submitted.
+  useEffect(() => {
+    const slotMin = timeToMinutes(form.startTime);
+    if (slotMin == null) return;
+    if (form.eventDate === istTodayStr() && slotMin <= istMinutes) {
+      setForm((f) => {
+        const m = timeToMinutes(f.startTime);
+        return m != null && m <= istMinutes ? { ...f, startTime: "" } : f;
+      });
+    }
+  }, [form.eventDate, form.startTime, istMinutes]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -194,15 +317,15 @@ const EventBooking = () => {
 
   const validateDetails = () => {
     if (!form.eventDate) return "Please choose your event date";
-    if (form.eventDate < localTodayStr()) return "That date already passed — please pick today or a future date";
+    if (form.eventDate < istTodayStr()) return "That date already passed — please pick today or a future date";
     if (!form.startTime) return "Please choose a start time";
     if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(form.startTime)) return "Start time must be HH:MM (24-hour)";
-    // Same-day guard (approximate in the browser's local time; the server
-    // enforces the same rule strictly in IST and rejects past times there).
-    if (form.eventDate === localTodayStr()) {
-      const now = new Date();
-      const cur = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-      if (form.startTime <= cur) return "That start time has already passed today — please pick a later time";
+    // Same-day guard in IST (matches the server's strict IST check).
+    if (form.eventDate === istTodayStr()) {
+      const slotMin = timeToMinutes(form.startTime);
+      if (slotMin != null && slotMin <= istNowMinutes()) {
+        return "That start time has already passed today — please pick a later time";
+      }
     }
     const g = Number(form.guestCount);
     if (!Number.isInteger(g) || g < 1 || g > 1000) return "Guest count must be between 1 and 1000";
@@ -216,7 +339,7 @@ const EventBooking = () => {
     const extra = Number(form.extraHours);
     if (!Number.isFinite(extra) || extra < 0 || extra > 12) return "Extra hours must be between 0 and 12";
     const cooks = Number(form.additionalCook);
-    if (!Number.isInteger(cooks) || cooks < 0 || cooks > 10) return "Additional cooks must be between 0 and 10";
+    if (cooks !== 0) return "Additional cooks are not available yet";
     // Overnight guard mirrors the backend: the session must end same-day.
     const m = String(form.startTime || "").match(/^([01]\d|2[0-3]):([0-5]\d)$/);
     if (m) {
@@ -294,8 +417,10 @@ const EventBooking = () => {
     setSubmitting(true);
     setFormError("");
     try {
-      const res = await API.post("/event-bookings", {
+      const bookingIntent = {
         eventType: String(form.eventType || "").trim(),
+        customEventType:
+          form.eventType === "Other" ? String(form.customEventType || "").trim() : "",
         eventDate: form.eventDate,
         startTime: form.startTime,
         duration: Number(form.duration),
@@ -310,13 +435,28 @@ const EventBooking = () => {
         extraHours: Number(form.extraHours),
         distanceKm: Number(form.distanceKm),
         customerNotes: form.customerNotes.trim(),
-      });
+      };
+      const attemptSignature = JSON.stringify(bookingIntent);
+      const idempotencyKey = bookingAttemptKey(attemptSignature, idempotencyRef);
+      const res = await API.post(
+        "/event-bookings",
+        {
+          ...bookingIntent,
+          pricingVersion:
+            Number.isInteger(Number(quote?.pricingVersion))
+              ? Number(quote.pricingVersion)
+              : undefined,
+        },
+        { headers: { "Idempotency-Key": idempotencyKey } }
+      );
       showToast("Booking request received! CookMitra will assign a suitable cook.", "success");
       const newId = res.data?._id;
       if (!newId) {
         setFormError("Booking was created but the details page ID is missing. Please find it under My Event Bookings.");
         return;
       }
+      idempotencyRef.current = { signature: "", key: "" };
+      clearBookingAttemptKey();
       navigate(`/event-bookings/${newId}`);
     } catch (err) {
       const status = err.response?.status;
@@ -336,6 +476,12 @@ const EventBooking = () => {
       }
       // 409 = concurrent update / overlap conflict — the message already says
       // to reload; 401 bounces to login via the axios interceptor.
+      if (status === 409 && err.response?.data?.code === "PRICING_CHANGED") {
+        const refreshed = err.response.data.quote;
+        if (refreshed) setQuote(refreshed);
+        setFormError(msg);
+        return;
+      }
       setFormError(status === 409 ? `${msg} Please review your details and retry.` : msg);
     } finally {
       setSubmitting(false);
@@ -347,26 +493,22 @@ const EventBooking = () => {
 
   return (
     <div className="ondemand-page od-modern events-page">
-      <div className="od-hero">
+      <div className="od-hero od-event-hero">
         <div className="od-hero-text">
           <span className="od-eyebrow">
             <PartyPopper size={12} /> CookMitra Events
           </span>
-          <h1 className="od-title">Book an Event Cook</h1>
+          <h1 className="od-title">Book a Cook for Your Event</h1>
           <p className="od-sub">
-            <ShieldCheck size={13} />
-            <span className="od-sub-text">Birthdays · Anniversaries · Family functions — you celebrate, we cook</span>
+            <Sparkles size={14} aria-hidden="true" />
+            <span className="od-sub-text">
+              Celebrate your special moments while we take care of the cooking.
+            </span>
           </p>
         </div>
-        {preview && (
-          <div className="od-hero-price" aria-live="polite">
-            <span>Estimated</span>
-            <strong>{formatCurrency(preview.totalAmount)}</strong>
-          </div>
-        )}
       </div>
 
-      <ol className="od-steps-modern" aria-label="Event booking progress">
+      <ol className="od-steps-modern od-steps-progress" aria-label="Event booking progress">
         {STEPS.map((s, i) => {
           const n = i + 1;
           const state = step > n ? "done" : step === n ? "active" : "";
@@ -385,33 +527,25 @@ const EventBooking = () => {
         })}
       </ol>
 
-      {step > 2 && (
-        <div className="od-livebar" aria-live="polite">
-          <button type="button" className="btn btn-outline btn-sm" onClick={() => setStep((s) => s - 1)} aria-label="Go back one step">
-            <ArrowLeft size={15} aria-hidden="true" /> Go Back
-          </button>
-          {form.eventType && <span className="od-livechip">{form.eventType}</span>}
-          <span className="od-livechip">{form.eventDate || "Pick a date"}</span>
-          <span className="od-livechip">
-            {EVENT_SERVICE_LABEL(form.serviceType)} · {form.duration || "–"} hr
-          </span>
-          {preview && <span className="od-livechip od-livechip-price">{formatCurrency(preview.totalAmount)}</span>}
-        </div>
-      )}
-
       {/* STEP 1 — Select event */}
       {step === 1 && (
         <div className="ondemand-form-card">
-          <h2 className="ondemand-section-title">
-            <PartyPopper size={17} /> Step 1 — What are you celebrating?
+          <h2 className="ondemand-section-title event-occasion-heading">
+            <PartyPopper size={18} aria-hidden="true" /> What are you celebrating?
           </h2>
-          <p className="ondemand-form-sub">Pick your occasion — CookMitra assigns a suitable cook for you.</p>
+          <p className="ondemand-form-sub event-occasion-sub">
+            Choose your occasion and let CookMitra help you plan the cooking for your special day.
+          </p>
           {eventTypes.length === 0 ? (
             <div className="event-pick-empty" role="status">
               No event types are available right now. Please try again in a moment.
             </div>
           ) : (
-            <div className="service-pick-grid event-pick-grid" role="radiogroup" aria-label="Event type">
+            <div
+              className={`event-pick-grid ${eventTypes.length === 5 ? "event-pick-grid--5" : ""}`}
+              role="radiogroup"
+              aria-label="Event type"
+            >
               {eventTypes.map((t) => {
                 const name = t.name || t;
                 const active = form.eventType === name;
@@ -421,38 +555,69 @@ const EventBooking = () => {
                     key={t._id || name}
                     role="radio"
                     aria-checked={active}
-                    className={`service-pick-card event-pick-card ${active ? "selected" : ""}`}
+                    className={`event-pick-card ${active ? "selected" : ""}`}
                     onClick={() => {
                       set("eventType", name);
                       setFormError("");
                     }}
                   >
-                    <span className="service-pick-check" aria-hidden="true">
-                      {active && <CheckCircle2 size={18} />}
+                    <span className="event-occasion-icon" aria-hidden="true">{eventIcon(t.icon)}</span>
+                    <span className="event-occasion-body">
+                      <strong>{name}</strong>
+                      <span className="event-occasion-desc">{t.description || "Home event"}</span>
                     </span>
-                    <span className="service-pick-icon" aria-hidden="true">{eventIcon(t.icon)}</span>
-                    <strong>{name}</strong>
-                    <span>{t.description || "Home event"}</span>
+                    <span className="event-occasion-check" aria-hidden="true">
+                      {active && <CheckCircle2 size={16} />}
+                    </span>
                   </button>
                 );
               })}
+            </div>
+          )}
+          {form.eventType === "Other" && (
+            <div className="form-group event-other-group">
+              <label htmlFor="event-other-name">
+                <Shapes size={15} aria-hidden="true" /> What is the occasion?
+              </label>
+              <input
+                id="event-other-name"
+                type="text"
+                className="form-control"
+                value={form.customEventType}
+                maxLength={80}
+                placeholder="Enter your event name"
+                autoComplete="off"
+                aria-invalid={formError ? "true" : undefined}
+                onChange={(e) => {
+                  set("customEventType", e.target.value);
+                  if (formError) setFormError("");
+                }}
+              />
+              <p className="od-field-hint">
+                <Sparkles size={13} aria-hidden="true" /> Up to 80 characters — for example Housewarming, Naming Ceremony or Baby Shower.
+              </p>
             </div>
           )}
           <p className="event-error-slot" role={formError ? "alert" : undefined}>{formError}</p>
           <div className="od-stickybar">
             <button
               type="button"
-              className="btn btn-primary btn-block btn-lg od-cta event-nav-btn"
+              className="btn btn-primary btn-block btn-lg od-cta event-nav-btn event-continue-btn"
               onClick={() => {
                 if (!form.eventType) {
                   setFormError("Please select your event type");
+                  return;
+                }
+                if (form.eventType === "Other" && !form.customEventType.trim()) {
+                  setFormError("Please enter your event name");
                   return;
                 }
                 setFormError("");
                 setStep(2);
               }}
             >
-              Continue <ArrowRight size={17} />
+              <span>Continue to Event Details</span>
+              <ArrowRight size={18} aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -461,41 +626,75 @@ const EventBooking = () => {
       {/* STEP 2 — Event details */}
       {step === 2 && (
         <div className="ondemand-form-card od-event-details">
-          <h2 className="ondemand-section-title"><CalendarDays size={17} /> Step 2 — Event details</h2>
+          <h2 className="ondemand-section-title"><CalendarDays size={17} /> Event details</h2>
           <p className="ondemand-form-sub">Set the date, guest count and the dishes you'd like cooked.</p>
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="event-date">
-                <CalendarCheck size={15} aria-hidden="true" /> Event Date *
-              </label>
-              <input
-                id="event-date"
-                type="date"
-                className="form-control"
-                value={form.eventDate}
-                min={localTodayStr()}
-                onChange={(e) => set("eventDate", e.target.value)}
-              />
+          <div className="form-group od-date-group">
+            <span className="od-field-label">
+              <CalendarCheck size={15} aria-hidden="true" /> Preferred Date *
+            </span>
+            <div className="od-presets od-date-presets" role="group" aria-label="Quick dates">
+              <button
+                type="button"
+                className={`bk-dur-chip ${form.eventDate === istToday ? "active" : ""}`}
+                aria-pressed={form.eventDate === istToday}
+                onClick={() => pickDate(istToday)}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                className={`bk-dur-chip ${form.eventDate === istTomorrow ? "active" : ""}`}
+                aria-pressed={form.eventDate === istTomorrow}
+                onClick={() => pickDate(istTomorrow)}
+              >
+                Tomorrow
+              </button>
             </div>
-            <div className="form-group">
-              <label htmlFor="event-time">
-                <Clock3 size={15} aria-hidden="true" /> Start Time *
-              </label>
-              <input
-                id="event-time"
-                type="time"
-                className="form-control"
-                value={form.startTime}
-                onChange={(e) => set("startTime", e.target.value)}
+            <div className="od-date-cal-row">
+              <CustomCalendar
+                id="event-date"
+                value={form.eventDate}
+                min={istToday}
+                placeholder="Pick another date"
+                onChange={pickDate}
               />
             </div>
           </div>
-          <div className="form-row">
+
+          <div className="form-group od-time-group">
+            <span className="od-field-label" id="event-time-label">
+              <Clock3 size={15} aria-hidden="true" /> Start Time *
+            </span>
+            {visibleTimeSlots.length === 0 ? (
+              <p className="od-time-empty" role="status">
+                All of today's start times have passed — please pick tomorrow or another date.
+              </p>
+            ) : (
+              <div className="od-time-grid" role="radiogroup" aria-labelledby="event-time-label">
+                {visibleTimeSlots.map((t) => {
+                  const active = form.startTime === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      className={`od-time-slot${active ? " is-selected" : ""}`}
+                      onClick={() => set("startTime", t)}
+                    >
+                      {formatTime12(t)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="form-row od-details-row">
             <div className="form-group">
               <label htmlFor="event-guests">
                 <Users size={15} aria-hidden="true" /> Number of Guests *
               </label>
-              <div className="od-stepper">
+              <div className="od-stepper od-guests-stepper">
                 <button type="button" className="od-step-btn" aria-label="Fewer guests" onClick={() => adjustNumber("guestCount", -1, { min: 1, max: 1000 })}>
                   <Minus size={16} />
                 </button>
@@ -513,20 +712,36 @@ const EventBooking = () => {
                 </button>
               </div>
             </div>
-            <div className="form-group">
-              <label htmlFor="event-food-type">
-                <UtensilsCrossed size={15} aria-hidden="true" /> Food Type *
-              </label>
-              <select id="event-food-type" className="form-control" value={form.foodType} onChange={(e) => set("foodType", e.target.value)}>
-                {EVENT_FOOD_TYPES.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </select>
+          </div>
+
+          <div className="form-group od-food-group">
+            <span className="od-field-label">
+              <UtensilsCrossed size={15} aria-hidden="true" /> Food Type *
+            </span>
+            <div className="service-pick-grid od-food-grid" role="radiogroup" aria-label="Food type">
+              {EVENT_FOOD_TYPES.map((f) => {
+                const active = form.foodType === f;
+                return (
+                  <button
+                    type="button"
+                    key={f}
+                    role="radio"
+                    aria-checked={active}
+                    className={`service-pick-card od-food-card ${active ? "selected" : ""}`}
+                    onClick={() => set("foodType", f)}
+                  >
+                    <span className="service-pick-check" aria-hidden="true">
+                      {active && <CheckCircle2 size={18} />}
+                    </span>
+                    <span className="service-pick-icon" aria-hidden="true">{FOOD_ICONS[f] || <UtensilsCrossed size={20} />}</span>
+                    <strong>{f}</strong>
+                  </button>
+                );
+              })}
             </div>
           </div>
-          <div className="form-group">
+
+          <div className="form-group od-menu-group">
             <label htmlFor="event-menu">
               <UtensilsCrossed size={15} aria-hidden="true" /> Menu — dishes you need *
             </label>
@@ -534,10 +749,13 @@ const EventBooking = () => {
               id="event-menu"
               className="form-control"
               rows={3}
-              placeholder="e.g. Puri, Bhaji, Rice, Dal, Salad and Gulab Jamun"
+              placeholder="e.g., Paneer curry, Dal, Rice, Chapati"
               value={form.menu}
               onChange={(e) => set("menu", e.target.value)}
             />
+            <p className="od-field-hint">
+              <Sparkles size={13} aria-hidden="true" /> List every dish, separated by commas — you can add as many as you like.
+            </p>
           </div>
           <p className="event-error-slot" role={formError ? "alert" : undefined}>{formError}</p>
           <div className="od-stickybar">
@@ -556,7 +774,7 @@ const EventBooking = () => {
       {/* STEP 3 — Service & hours */}
       {step === 3 && (
         <div className="ondemand-form-card">
-          <h2 className="ondemand-section-title"><Clock3 size={17} /> Step 3 — Service & hours</h2>
+          <h2 className="ondemand-section-title"><Clock3 size={17} /> Service & hours</h2>
           <p className="ondemand-form-sub">Three simple services — price depends on hours.</p>
           <div className="service-pick-grid">
             {EVENT_SERVICES.map((s) => (
@@ -595,27 +813,6 @@ const EventBooking = () => {
                   aria-label="Service hours"
                 />
                 <button type="button" className="od-step-btn" aria-label="More hours" onClick={() => adjustNumber("duration", 1, { min: 1, max: 8 })}>
-                  <Plus size={16} />
-                </button>
-              </div>
-            </div>
-            <div className="form-group">
-              <label>
-                <Users size={15} /> Additional Cooks (₹{pricing?.additionalCookPrice ?? 400} each)
-              </label>
-              <div className="od-stepper">
-                <button type="button" className="od-step-btn" aria-label="Fewer cooks" onClick={() => adjustNumber("additionalCook", -1, { min: 0, max: 10 })}>
-                  <Minus size={16} />
-                </button>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  className="form-control"
-                  value={form.additionalCook}
-                  onChange={(e) => set("additionalCook", onlyDigits(e.target.value, form.additionalCook))}
-                  aria-label="Additional cooks"
-                />
-                <button type="button" className="od-step-btn" aria-label="More cooks" onClick={() => adjustNumber("additionalCook", 1, { min: 0, max: 10 })}>
                   <Plus size={16} />
                 </button>
               </div>
@@ -666,7 +863,7 @@ const EventBooking = () => {
       {/* STEP 4 — Location */}
       {step === 4 && (
         <div className="ondemand-form-card">
-          <h2 className="ondemand-section-title"><MapPin size={17} /> Step 4 — Event location</h2>
+          <h2 className="ondemand-section-title"><MapPin size={17} /> Event location</h2>
           <div className="form-group">
             <label htmlFor="event-address">
               <MapPin size={15} /> Full Address *
@@ -737,10 +934,10 @@ const EventBooking = () => {
                 className="form-control"
                 placeholder="e.g. 7"
                 value={form.distanceKm}
-                onChange={(e) => set("distanceKm", onlyDigits(e.target.value, form.distanceKm))}
+                onChange={(e) => set("distanceKm", sanitizeDecimalInput(e.target.value))}
               />
               <small className="field-hint">
-                Travel: 0–3 km FREE · 3–5 km ₹50 · 5–8 km ₹100 · 8–10 km ₹150 · 10–15 km ₹250 · 15–20 km ₹350 · 20+ km ₹450
+                Travel: {eventTravelSlabHint(pricing?.travelSlabs)}
               </small>
             </div>
             <div className="form-group">
@@ -771,7 +968,7 @@ const EventBooking = () => {
       {/* STEP 5 — Price & request */}
       {step === 5 && (
         <div className="ondemand-form-card">
-          <h2 className="ondemand-section-title"><BadgeIndianRupee size={17} /> Step 5 — Price breakdown</h2>
+          <h2 className="ondemand-section-title"><BadgeIndianRupee size={17} /> Price breakdown</h2>
           {quoting ? (
             <div className="loading-spinner-wrapper">
               <div className="spinner"></div>
@@ -786,13 +983,6 @@ const EventBooking = () => {
                     {EVENT_SERVICE_LABEL(form.serviceType)} · {form.duration} hr
                   </span>
                   <strong>{formatCurrency(shownQuote.serviceAmount)}</strong>
-                </li>
-                <li className="event-price-row">
-                  <span>
-                    <ChefHat size={15} aria-hidden="true" />
-                    Additional Cook × {clampNum(form.additionalCook, 0, 10, 0)}
-                  </span>
-                  <strong>{formatCurrency(shownQuote.additionalCookAmount)}</strong>
                 </li>
                 <li className="event-price-row">
                   <span>
@@ -819,14 +1009,6 @@ const EventBooking = () => {
                 <strong>
                   {formatCurrency(shownQuote.totalAmount)}
                 </strong>
-              </div>
-              <div className="event-context-box">
-                {form.eventType} · {formatDate(form.eventDate)} · {form.startTime} · {form.guestCount} guests
-                <br />
-                {form.address}, {form.area}
-                {form.landmark ? ` (Near ${form.landmark})` : ""}
-                <br />
-                Menu ({form.foodType}): {form.menu}
               </div>
               {quote?.previewOnly && (
                 <p className="event-estimate-note">

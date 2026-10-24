@@ -40,6 +40,11 @@ const TYPE_META = {
   refund_pending: { label: "Refund under review", icon: Clock, color: "var(--accent-amber)" },
   refund_processed: { label: "Refund processed", icon: CheckCircle2, color: "var(--accent-emerald)" },
   general: { label: "Update", icon: Bell, color: "var(--primary)" },
+  event_booking_request: { label: "New event booking", icon: Calendar, color: "var(--accent-amber)" },
+  event_cook_assigned: { label: "Cook assigned", icon: CheckCircle2, color: "var(--accent-emerald)" },
+  event_assignment: { label: "Event assignment", icon: ChefHat, color: "var(--accent-blue)" },
+  event_status: { label: "Event booking update", icon: CalendarClock, color: "var(--accent-blue)" },
+  event_cancelled: { label: "Event booking cancelled", icon: XCircle, color: "#dc2626" },
 };
 
 const targetFor = (n) => {

@@ -21,6 +21,7 @@ import CookProfile from "./pages/CookProfile";
 import CookBooking from "./pages/CookBooking";
 import EventBooking from "./pages/EventBooking";
 import EventBookingDetails from "./pages/EventBookingDetails";
+import EventPayment from "./pages/EventPayment";
 import CustomerEventBookings from "./pages/CustomerEventBookings";
 import CustomerDashboard from "./pages/CustomerDashboard";
 import CustomerProfile from "./pages/CustomerProfile";
@@ -142,14 +143,22 @@ function App() {
                   </NonAdminRoute>
                 }
               />
-              <Route
-                path="/event-bookings/:id"
-                element={
-                  <ProtectedRoute roles={["customer", "cook", "admin"]}>
-                    <EventBookingDetails />
-                  </ProtectedRoute>
-                }
-              />
+                <Route
+                  path="/event-bookings/:id"
+                  element={
+                    <ProtectedRoute roles={["customer", "cook", "admin"]}>
+                      <EventBookingDetails />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/event-bookings/:id/pay"
+                  element={
+                    <ProtectedRoute roles={["customer"]}>
+                      <EventPayment />
+                    </ProtectedRoute>
+                  }
+                />
               <Route
                 path="/dashboard/event-bookings"
                 element={

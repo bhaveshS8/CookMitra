@@ -10,9 +10,11 @@ backend/dist/
 # Environment variables (never commit secrets)
 .env
 .env.local
+.env.production.local
 .env.production
 *.env
 !.env.example
+!frontend/.env.production
 
 # Uploads (runtime user data — do not deploy/commit)
 backend/uploads/
