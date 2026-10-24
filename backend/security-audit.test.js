@@ -118,11 +118,15 @@ async function main() {
     const d = doc({ status: "accepted", payment: { status: "pending" }, date: future, startTime: "10:00" });
     Booking.findById = async () => d;
     Notification.create = async () => ({});
+    const CancellationAudit = require("./models/CancellationAudit");
+    const oAC = CancellationAudit.create;
+    CancellationAudit.create = async () => ({});
     let incArg = null;
     CookProfile.updateOne = async (f, u) => { incArg = u; return {}; };
     const r = makeRes();
-    await bookingCtrl.cancelBooking({ params: { id: "b1" }, user: { id: "cook1", role: "COOK" } }, r, next);
-    check("cook cancel bumps count", r.statusCode === 200 && incArg?.$inc?.cancelledByCookCount === 1, `s=${r.statusCode}`);
+    await bookingCtrl.cancelBooking({ params: { id: "b1" }, body: { reason: "ILLNESS" }, user: { id: "cook1", role: "COOK" } }, r, next);
+    CancellationAudit.create = oAC;
+    check("cook cancel releases to replacement + bumps count", r.statusCode === 200 && r.body?.replacement === true && r.body?.status === "requested" && incArg?.$inc?.cancelledByCookCount === 1, `s=${r.statusCode}`);
   }
 
   console.log("\n═══ rescheduleBooking (customer/admin, no money moves) ═══");

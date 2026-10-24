@@ -127,6 +127,95 @@ const enqueueBookingRequestJob = async (bookingId) => {
 };
 
 // ---------------------------------------------------------------------------
+// Replacement reset (cook-initiated cancellation with automatic
+// replacement). The per-booking job row is unique, and the original request
+// usually left it terminal (completed/skipped/failed) — a plain enqueue
+// ($setOnInsert) would NOT revive it. Reset a non-leased job to pending so
+// the worker re-runs eligibility + fan-out against the fresh booking state
+// (cook released, cancelling cook excluded). An actively leased processing
+// job is left alone: it reloads the booking per recipient and therefore
+// already observes the replacement state.
+// ---------------------------------------------------------------------------
+const resetDispatchJobForReplacement = async (bookingId) => {
+  try {
+    if (!bookingId) return null;
+    if (!dbReady()) return null;
+    const now = new Date();
+    const { maxAttempts } = cfg();
+    const res = await Promise.race([
+      DispatchJob.updateOne(
+        {
+          booking: bookingId,
+          kind: KIND_REQUEST,
+          $or: [
+            { status: { $ne: "processing" } },
+            { leaseExpiresAt: null },
+            { leaseExpiresAt: { $lte: now } },
+          ],
+        },
+        {
+          $set: {
+            status: "pending",
+            attempts: 0,
+            maxAttempts,
+            nextRetryAt: now,
+            lockedBy: "",
+            lockedAt: null,
+            leaseExpiresAt: null,
+            reason: "",
+            error: "",
+          },
+        }
+      ),
+      new Promise((resolve) => setTimeout(() => resolve({ __timeout: true }), 1500)),
+    ]);
+    if (res && res.__timeout) return null;
+    if ((res.modifiedCount ?? res.nModified ?? 0) === 1) {
+      clog(bookingId, null, "reset-for-replacement", "pending");
+    } else {
+      // No resettable row (actively leased, or never created): fall back to the
+      // durable upsert path so a missing job still gets created.
+      await enqueueBookingRequestJob(bookingId);
+    }
+    // New replacement round: reopen per-recipient request outcomes so cooks
+    // notified in the previous round are re-notified. Without this, every
+    // previously-notified cook is skipped as "already-sent" and the
+    // replacement broadcast silently sends nothing (job then completes
+    // with sent=0). The cancelling cook stays excluded via
+    // booking.ignoredBy, which the fan-out checks before sending.
+    // Stale `sending` entries are reopened too — the in-flight reconciler
+    // would otherwise defer the new round on a dead round's ambiguity.
+    let reopened = 0;
+    try {
+      const Booking = require("../models/Booking");
+      const r = await Promise.race([
+        Booking.updateOne(
+          { _id: bookingId },
+          {
+            $set: {
+              "whatsappDispatch.$[e].status": "pending",
+              "whatsappDispatch.$[e].attempts": 0,
+              "whatsappDispatch.$[e].error": "",
+              "whatsappDispatch.$[e].messageId": "",
+            },
+          },
+          { arrayFilters: [{ "e.kind": "request" }] }
+        ),
+        new Promise((resolve) => setTimeout(() => resolve(null), 1500)),
+      ]);
+      reopened = Number(r?.modifiedCount ?? r?.nModified ?? 0);
+    } catch {
+      reopened = 0;
+    }
+    clog(bookingId, null, "reset-for-replacement", "recipients-reopened", `bookings=${reopened}`);
+    return true;
+  } catch (err) {
+    clog(bookingId, null, "reset-for-replacement", "database_error", sanitize(err?.message, 120));
+    return null;
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Atomic claim (cluster-safe: exactly one worker wins)
 // ---------------------------------------------------------------------------
 const claimDueJob = async (workerId) => {
@@ -776,6 +865,7 @@ module.exports = {
   REASONS,
   TERMINAL_STATUSES,
   enqueueBookingRequestJob,
+  resetDispatchJobForReplacement,
   claimDueJob,
   processJob,
   processDueJobsOnce,

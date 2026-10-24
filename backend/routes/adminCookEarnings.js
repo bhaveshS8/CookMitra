@@ -4,35 +4,33 @@ const router = express.Router();
 const { body } = require("express-validator");
 const validate = require("../middleware/validate");
 const { auth, authorize } = require("../middleware/auth");
+const {
+  payoutReceiptUpload,
+  payoutReceiptErrorMapper,
+  validateUploadedContent,
+} = require("../middleware/upload");
 const c = require("../controllers/adminCookEarningsController");
+const w = require("../controllers/adminWeeklyPayoutController");
 
-router.get("/leads", auth, authorize("admin"), c.listAllLeads);
-router.post("/leads/:id/verify", auth, authorize("admin"), c.verifyLead);
+// Weekly payout management (admin): Monday–Sunday earning weeks in the
+// business timezone, settled with mandatory receipt evidence.
+router.get("/weekly/pending", auth, authorize("admin"), w.getWeeklyPending);
+router.get("/weekly/completed", auth, authorize("admin"), w.getWeeklyCompleted);
 router.post(
-  "/leads/:id/reject",
+  "/payouts/:id/settle-weekly",
   auth,
   authorize("admin"),
-  [body("reason").optional().isString()],
-  validate,
-  c.rejectLead
+  (req, res, next) =>
+    payoutReceiptUpload.single("receipt")(req, res, (err) =>
+      err ? payoutReceiptErrorMapper(err, req, res, next) : next()
+    ),
+  validateUploadedContent,
+  w.settleWeeklyPayout
 );
-router.post("/leads/:id/duplicate", auth, authorize("admin"), c.markLeadDuplicate);
 
-router.get("/incentives", auth, authorize("admin"), c.listIncentives);
-router.post("/incentives/:id/approve", auth, authorize("admin"), c.approveIncentive);
-router.post(
-  "/incentives/:id/reject",
-  auth,
-  authorize("admin"),
-  [body("reason").optional().isString()],
-  validate,
-  c.rejectIncentive
-);
-router.post("/incentives/:id/hold", auth, authorize("admin"), c.holdIncentive);
-
-router.get("/referrals", auth, authorize("admin"), c.listReferrals);
-router.post("/referrals/:id/approve", auth, authorize("admin"), c.approveReferral);
-
+// Weekly payout cycles only. Lead, incentive, and referral programs were
+// removed in full (models, handlers, and UI deleted); the old
+// /api/admin/cook-incentives mount is gone — everything lives here.
 router.get("/payouts", auth, authorize("admin"), c.listCookPayouts);
 router.post("/payouts/build", auth, authorize("admin"), c.buildCookPayout);
 router.post("/payouts/:id/approve", auth, authorize("admin"), c.approveCookPayout);

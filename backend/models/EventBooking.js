@@ -49,9 +49,15 @@ const eventBookingSchema = new mongoose.Schema(
       default: null,
     },
     eventType: {
+      // Free-text label validated at creation against the admin-managed
+      // EventType catalogue (active types only). The previous hardcoded enum
+      // blocked newly created types and allowed deactivated ones; it is
+      // intentionally removed. Historical bookings keep their original label
+      // as a plain string, so renames/deletes never corrupt history.
+      // No migration needed: existing values already match seeded names.
       type: String,
-      enum: EVENT_TYPES,
       required: [true, "Event type is required"],
+      trim: true,
     },
     eventDate: {
       type: Date,
@@ -92,7 +98,13 @@ const eventBookingSchema = new mongoose.Schema(
     additionalCook: { type: Number, default: 0, min: 0, max: 10 },
     extraHours: { type: Number, default: 0, min: 0, max: 12 },
     // One-way distance (km) used for the fixed travel-charge table (§8).
+    // CUSTOMER-SUBMITTED ESTIMATE ONLY — never a verified measurement (no
+    // trusted geocoding/routing integration exists). The travel charge derived
+    // from it is PROVISIONAL until an admin verifies the distance (see
+    // distanceVerified + PATCH /:id/verify-distance). Customers cannot bypass
+    // verification by submitting 0: zero is still provisional.
     distanceKm: { type: Number, default: 0, min: 0 },
+    distanceVerified: { type: Boolean, default: false },
     // Price snapshot (server-computed from the admin pricing table).
     serviceAmount: { type: Number, default: 0 },
     additionalCookAmount: { type: Number, default: 0 },
@@ -113,13 +125,19 @@ const eventBookingSchema = new mongoose.Schema(
       },
     ],
   },
-  { timestamps: true }
+  { timestamps: true, optimisticConcurrency: true }
 );
 
 eventBookingSchema.index({ customerId: 1, bookingStatus: 1 });
 eventBookingSchema.index({ cookId: 1, bookingStatus: 1 });
 eventBookingSchema.index({ eventDate: 1, bookingStatus: 1 });
 eventBookingSchema.index({ bookingStatus: 1, createdAt: -1 });
+eventBookingSchema.index({ cookId: 1, eventDate: 1, bookingStatus: 1 });
+
+// Optimistic concurrency safety net: concurrent find-then-save paths throw
+// VersionError instead of silently overwriting (set via schema option above).
+// Controllers additionally use atomic conditional updates (status + __v
+// filter) and map conflicts to 409.
 
 const EventBooking = mongoose.model("EventBooking", eventBookingSchema);
 

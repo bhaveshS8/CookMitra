@@ -1,21 +1,10 @@
 
 const Booking = require("../models/Booking");
-const CookProfile = require("../models/CookProfile");
-const CookLead = require("../models/CookLead");
-const CookIncentive = require("../models/CookIncentive");
-const CookReferral = require("../models/CookReferral");
 const CookPayout = require("../models/CookPayout");
-const User = require("../models/User");
 const cfg = require("../config/cookEarnings");
-const { computeCookPayout, toPaise, fromPaise, normalizePhone, generateReferralCode } = require("../utils/cookEarnings");
+const { computeCookPayout, toPaise, fromPaise } = require("../utils/cookEarnings");
 const {
-  ensureReferralCode,
   ensureBookingPayoutSnapshot,
-  refreshIncentiveEligibility,
-  countVerifiedBookings,
-  referralLinkFor,
-  notifyCook,
-  audit,
 } = require("../utils/cookEarningsService");
 
 const { istDayString, istMidnight, istWeekday } = require("../utils/time");
@@ -134,15 +123,6 @@ exports.getEarnings = async (req, res, next) => {
                 : String(snap.payoutStatus || "pending_weekly").replace("eligible", "pending_weekly"),
       };
     });
-    const incentives = await CookIncentive.find({ cook: cookId, status: { $in: ["approved", "paid"] } })
-      .select("reward status")
-      .lean();
-    const referrals = await CookReferral.find({ referrer: cookId, status: { $in: ["approved", "paid"] } })
-      .select("reward status")
-      .lean();
-    const bonusesP =
-      (incentives || []).reduce((s, i) => s + toPaise(i.reward), 0) +
-      (referrals || []).reduce((s, r) => s + toPaise(r.reward), 0);
     res.json({
       overview: {
         today: fromPaise(todayP),
@@ -150,7 +130,6 @@ exports.getEarnings = async (req, res, next) => {
         pending: fromPaise(pendingP),
         paid: fromPaise(paidP),
         lifetime: fromPaise(lifetimeP),
-        bonuses: fromPaise(bonusesP),
       },
       bookings: bookingEarnings,
       totalBookings,
@@ -179,194 +158,6 @@ exports.getPayoutById = async (req, res, next) => {
       .lean();
     if (!c) return res.status(404).json({ message: "Payout not found" });
     res.json(c);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.getIncentives = async (req, res, next) => {
-  try {
-    const list = await refreshIncentiveEligibility(req.user.id);
-    // Slabs mirror server configuration (never hardcoded) so a configured
-    // incentive change is reflected here and on the client consistently.
-    const slabs = (cfg.incentives || []).map((i) => ({
-      leads: i.targetLeads,
-      reward: i.reward,
-      days: i.days,
-      code: i.code,
-    }));
-    res.json({ incentives: list, slabs });
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.getIncentiveProgress = async (req, res, next) => {
-  try {
-    const list = await refreshIncentiveEligibility(req.user.id);
-    res.json(
-      (list || []).map((i) => ({
-        code: i.code,
-        target: i.target,
-        verifiedLeadCount: i.verifiedLeadCount,
-        remaining: Math.max(0, i.target - i.verifiedLeadCount),
-        startDate: i.startDate,
-        endDate: i.endDate,
-        deadline: i.endDate,
-        status: i.status,
-        eligible: i.eligible,
-        reward: i.reward,
-        approvedAt: i.approvedAt || null,
-        paidAt: i.paidAt || null,
-      }))
-    );
-  } catch (e) {
-    next(e);
-  }
-};
-
-const LEAD_SERVICES = ["cook_for_me", "cook_with_me", "teach_me", "preparation_help", "other"];
-
-exports.createLead = async (req, res, next) => {
-  try {
-    const cookId = req.user.id;
-    const customerName = String(req.body?.customerName || req.body?.name || "").trim().slice(0, 80);
-    const mobileRaw = String(req.body?.mobileNumber || req.body?.mobile || req.body?.phone || "").trim();
-    const location = String(req.body?.location || "").trim().slice(0, 120);
-    const requiredService = LEAD_SERVICES.includes(req.body?.requiredService)
-      ? req.body.requiredService
-      : "other";
-    if (!customerName) return res.status(400).json({ message: "Customer name is required" });
-    if (!location) return res.status(400).json({ message: "Location is required" });
-    const normalized = normalizePhone(mobileRaw);
-    if (!normalized) return res.status(400).json({ message: "Enter a valid 10-digit mobile number" });
-    const clash = await CookLead.findOne({ normalizedPhone: normalized })
-      .select("cook status")
-      .lean();
-    if (clash) {
-      if (String(clash.cook) === String(cookId)) {
-        return res.status(409).json({ message: "You have already submitted this customer lead", code: "DUPLICATE_LEAD" });
-      }
-      return res.status(409).json({ message: "This customer was already referred by another cook", code: "LEAD_ALREADY_CLAIMED" });
-    }
-    const idem = String(req.body?.idempotencyKey || req.body?.clientKey || "").trim().slice(0, 120);
-    let lead;
-    try {
-      lead = await CookLead.create({
-        cook: cookId,
-        customerName,
-        mobileNumber: normalized,
-        normalizedPhone: normalized,
-        location,
-        requiredService,
-        preferredDate: req.body?.preferredDate ? new Date(req.body.preferredDate) : undefined,
-        preferredDuration: req.body?.preferredDuration ? Number(req.body.preferredDuration) : undefined,
-        notes: String(req.body?.notes || "").trim().slice(0, 500),
-        submittedBy: cookId,
-        status: "submitted",
-        verificationStatus: "pending",
-        ...(idem ? { idempotencyKey: `${cookId}:${idem}` } : {}),
-      });
-    } catch (e) {
-      if (e?.code === 11000) {
-        return res.status(409).json({ message: "This lead was already submitted — please refresh", code: "DUPLICATE_LEAD" });
-      }
-      throw e;
-    }
-    await audit({ actor: cookId, actorRole: "COOK", event: "lead_created", cook: cookId, refId: lead._id, refModel: "CookLead", detail: `${customerName} ${normalized}` });
-    await notifyCook({ cookId, type: "lead_submitted", message: `Lead for ${customerName} submitted — our team will verify it shortly.`, link: "/cook/earnings", whatsapp: false });
-    res.status(201).json(lead);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.listLeads = async (req, res, next) => {
-  try {
-    const leads = await CookLead.find({ cook: req.user.id }).sort({ createdAt: -1 }).lean();
-    res.json(leads);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.getLead = async (req, res, next) => {
-  try {
-    const lead = await CookLead.findOne({ _id: req.params.id, cook: req.user.id }).lean();
-    if (!lead) return res.status(404).json({ message: "Lead not found" });
-    res.json(lead);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.getReferralInfo = async (req, res, next) => {
-  try {
-    const me = await User.findById(req.user.id).select("name").lean();
-    const profile = await ensureReferralCode(req.user.id, me?.name);
-    const referrals = await CookReferral.find({ referrer: req.user.id })
-      .populate("referredCook", "name")
-      .sort({ createdAt: -1 })
-      .lean();
-    for (const r of referrals) {
-      try {
-        r.liveVerifiedBookings = await countVerifiedBookings(r.referredCook?._id || r.referredCook);
-      } catch {
-        r.liveVerifiedBookings = r.verifiedBookings;
-      }
-    }
-    const successful = (referrals || []).filter((r) => ["approved", "paid"].includes(r.status)).length;
-    res.json({
-      referralCode: profile?.referralCode || "",
-      referralLink: profile?.referralCode ? referralLinkFor(profile.referralCode) : "",
-      totalReferrals: (referrals || []).length,
-      totalSuccessfulReferrals: successful,
-      reward: cfg.referralReward,
-      bookingTarget: cfg.referralBookingTarget,
-      referrals,
-    });
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.listReferrals = async (req, res, next) => {
-  try {
-    const referrals = await CookReferral.find({ referrer: req.user.id })
-      .populate("referredCook", "name")
-      .sort({ createdAt: -1 })
-      .lean();
-    for (const r of referrals) {
-      try {
-        r.liveVerifiedBookings = await countVerifiedBookings(r.referredCook?._id || r.referredCook);
-      } catch {
-        r.liveVerifiedBookings = r.verifiedBookings;
-      }
-    }
-    res.json(referrals);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.regenerateReferral = async (req, res, next) => {
-  try {
-    const used = await CookReferral.countDocuments({ referrer: req.user.id });
-    if (used > 0) {
-      return res.status(400).json({ message: "Referral code cannot be changed after it has been used" });
-    }
-    const me = await User.findById(req.user.id).select("name").lean();
-    const code = generateReferralCode(me?.name || "COOK");
-    try {
-      const r = await CookProfile.updateOne({ user: req.user.id }, { $set: { referralCode: code } });
-      if ((r?.matchedCount ?? 0) === 0) {
-        return res.status(404).json({ message: "Cook profile not found — complete your profile first" });
-      }
-    } catch (e) {
-      if (e?.code === 11000) return res.status(409).json({ message: "Please try again" });
-      throw e;
-    }
-    res.json({ referralCode: code, referralLink: referralLinkFor(code) });
   } catch (e) {
     next(e);
   }

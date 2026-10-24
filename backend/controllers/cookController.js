@@ -377,29 +377,6 @@ exports.createCookProfile = async (req, res, next) => {
       approvalStatus: "pending",
       ...body,
     });
-    try {
-      const { generateReferralCode } = require("../utils/cookEarnings");
-      const CookReferral = require("../models/CookReferral");
-      const me = await User.findById(req.user.id).select("name").lean();
-      for (let i = 0; i < 3; i++) {
-        try {
-          profile.referralCode = generateReferralCode(me?.name || "COOK");
-          profile.incentiveEnrolledAt = profile.incentiveEnrolledAt || new Date();
-          const ref = await CookReferral.findOne({ referredCook: req.user.id }).select("referrer").lean();
-          if (ref?.referrer) profile.referredBy = ref.referrer;
-          await profile.save();
-          break;
-        } catch (e) {
-          if (e?.code !== 11000) break;
-        }
-      }
-      try {
-        const { ensureIncentives } = require("../utils/cookEarningsService");
-        await ensureIncentives(req.user.id);
-      } catch {
-      }
-    } catch {
-    }
     res.status(201).json(profile);
   } catch (error) {
     next(error);
@@ -620,86 +597,6 @@ exports.toggleAvailability = async (req, res, next) => {
     if (!profile) {
       return res.status(404).json({ message: "Cook profile not found" });
     }
-    res.json(profile);
-  } catch (error) {
-    next(error);
-  }
-};
-
-exports.adminUploadCookDocs = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({ message: "Invalid cook id" });
-    }
-
-    let profile = await CookProfile.findById(id);
-    if (!profile) {
-      const cookUser = await User.findOne({ _id: id, role: "COOK" });
-      if (cookUser) {
-        profile = await CookProfile.findOne({ user: cookUser._id });
-      }
-    }
-    if (!profile) {
-      return res.status(404).json({ message: "Cook profile not found" });
-    }
-
-    const uploaded = [
-      ...(req.files?.aadhar || []),
-      ...(req.files?.pan || []),
-      ...(req.files?.photo || []),
-    ];
-    const reownToCook = (file) => {
-      const fs = require("fs");
-      const path = require("path");
-      const { uploadDir } = require("../utils/storage");
-      const parts = String(file.filename).split("_");
-      parts[1] = String(profile.user);
-      const owned = parts.join("_");
-      if (owned !== file.filename) {
-        fs.renameSync(path.join(uploadDir, file.filename), path.join(uploadDir, owned));
-      }
-      return owned;
-    };
-    const urls = {};
-    try {
-      if (req.files?.aadhar?.[0]) {
-        urls.aadharCardUrl = `/uploads/cook-docs/${reownToCook(req.files.aadhar[0])}`;
-      }
-      if (req.files?.pan?.[0]) {
-        urls.panCardUrl = `/uploads/cook-docs/${reownToCook(req.files.pan[0])}`;
-      }
-      if (req.files?.photo?.[0]) {
-        urls.photoUrl = `/uploads/cook-docs/${reownToCook(req.files.photo[0])}`;
-      }
-    } catch (err) {
-      const fs = require("fs");
-      const path = require("path");
-      const { uploadDir } = require("../utils/storage");
-      for (const f of uploaded) {
-        try {
-          fs.unlinkSync(path.join(uploadDir, f.filename));
-        } catch {
-        }
-      }
-      return res.status(500).json({ message: "Could not store the uploaded documents. Please try again." });
-    }
-    if (!Object.keys(urls).length) {
-      return res.status(400).json({ message: "No files uploaded" });
-    }
-
-    Object.assign(profile, urls);
-    await profile.save();
-
-    try {
-      await Notification.create({
-        user: profile.user,
-        type: "general",
-        message: "An admin added your verification documents. Please check your profile.",
-      });
-    } catch {
-    }
-
     res.json(profile);
   } catch (error) {
     next(error);

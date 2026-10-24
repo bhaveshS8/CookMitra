@@ -71,19 +71,23 @@ const EventTypeManager = () => {
         Occasions customers can book — Birthday, Anniversary, Family Function, Home Celebration, Other.
       </p>
 
-      <form onSubmit={handleSubmit} style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1.25rem" }}>
+      <form onSubmit={handleSubmit} className="event-type-form" style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "1.25rem" }}>
+        <label className="sr-only" htmlFor="event-type-name">Event name</label>
         <input
+          id="event-type-name"
           type="text"
           className="form-control"
-          style={{ maxWidth: 240 }}
+          style={{ flex: "1 1 200px", minWidth: 0 }}
           placeholder="Event name"
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
         />
+        <label className="sr-only" htmlFor="event-type-desc">Short description</label>
         <input
+          id="event-type-desc"
           type="text"
           className="form-control"
-          style={{ maxWidth: 320 }}
+          style={{ flex: "2 1 260px", minWidth: 0 }}
           placeholder="Short description"
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}

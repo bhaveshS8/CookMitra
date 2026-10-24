@@ -28,23 +28,24 @@
 .cp-header-card::before {
   content: "";
   display: block;
-  height: 72px;
+  height: 84px;
   margin: 0 calc(var(--cp-pad-x) * -1);
   border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0;
   background:
-    radial-gradient(circle at 88% 15%, rgba(255, 255, 255, 0.38) 0, rgba(255, 255, 255, 0) 46%),
-    radial-gradient(circle at 8% 90%, rgba(255, 255, 255, 0.16) 0, rgba(255, 255, 255, 0) 40%),
-    linear-gradient(120deg, #ffb020 0%, #f76707 55%, #e8590c 100%);
-  box-shadow: inset 0 -1px 0 rgba(154, 52, 18, 0.22);
+    radial-gradient(circle at 88% 12%, rgba(255, 255, 255, 0.45) 0, rgba(255, 255, 255, 0) 44%),
+    radial-gradient(circle at 12% 95%, rgba(255, 255, 255, 0.2) 0, rgba(255, 255, 255, 0) 42%),
+    radial-gradient(circle at 55% 110%, rgba(154, 52, 18, 0.35) 0, rgba(154, 52, 18, 0) 55%),
+    linear-gradient(115deg, #ff922b 0%, #f76707 52%, #d9480f 100%);
+  box-shadow: inset 0 -1px 0 rgba(154, 52, 18, 0.25);
 }
 .cp-header-main { display: flex; flex-direction: column; align-items: flex-start; gap: 0.7rem; min-width: 0; width: 100%; box-sizing: border-box; }
 .cp-avatar-wrap { position: relative; flex-shrink: 0; margin-top: -28px; z-index: 1; }
 .cp-avatar {
-  width: 56px; height: 56px; min-width: 56px; min-height: 56px;
+  width: 60px; height: 60px; min-width: 60px; min-height: 60px;
   border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
-  font-size: 1.25rem; font-weight: 800; color: #fff; flex-shrink: 0;
+  font-size: 1.3rem; font-weight: 800; color: #fff; flex-shrink: 0;
   background: var(--primary-gradient); overflow: hidden;
-  box-shadow: 0 0 0 3px #fff, 0 6px 16px -6px rgba(15, 23, 42, 0.35);
+  box-shadow: 0 0 0 3px #fff, 0 0 0 5px rgba(247, 103, 7, 0.35), 0 8px 18px -6px rgba(15, 23, 42, 0.4);
 }
 .cp-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* Verification badge: rendered only when the backend confirms verification. */
@@ -55,9 +56,9 @@
   border: 2px solid #fff; box-shadow: var(--shadow-sm);
 }
 .cp-header-text { min-width: 0; width: 100%; max-width: 100%; box-sizing: border-box; }
-.cp-name { font-size: clamp(1.25rem, 5.5vw, 1.6rem); font-weight: 800; letter-spacing: -0.01em; margin: 0; overflow-wrap: anywhere; word-break: break-word; line-height: 1.25; text-wrap: balance; color: var(--slate-900); }
-.cp-contact { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.4rem; min-width: 0; }
-.cp-contact span { display: flex; align-items: center; gap: 0.45rem; font-size: 0.84rem; line-height: 1.45; color: var(--slate-600); min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+.cp-name { font-size: clamp(1.3rem, 6vw, 1.65rem); font-weight: 800; letter-spacing: -0.015em; margin: 0; overflow-wrap: anywhere; word-break: break-word; line-height: 1.2; text-wrap: balance; color: var(--slate-900); }
+.cp-contact { display: flex; flex-direction: column; align-items: stretch; gap: 0.35rem; margin-top: 0.55rem; min-width: 0; }
+.cp-contact span { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.82rem; line-height: 1.45; color: var(--slate-700); min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; background: var(--slate-50); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 0.35rem 0.6rem; box-sizing: border-box; }
 .cp-contact svg { flex-shrink: 0; color: var(--primary-700); }
 .cp-member-since { display: flex; align-items: center; gap: 0.35rem; font-size: 0.78rem; color: var(--slate-500); margin: 0.45rem 0 0; overflow-wrap: break-word; min-width: 0; }
 .cp-meta-row { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem; min-width: 0; }
@@ -66,8 +67,8 @@
 .cp-pill.ok { background: var(--accent-emerald-light); color: #065f46; border-color: rgba(5, 150, 105, 0.25); }
 .cp-pill.info { background: var(--accent-blue-light); color: #1e40af; border-color: rgba(37, 99, 235, 0.25); }
 .cp-pill.warn { background: var(--accent-amber-light); color: #92400e; border-color: rgba(217, 119, 6, 0.3); }
-/* Profile completion as an inset card with contextual CTA. */
-.cp-progress-card { margin-top: 0.65rem; min-width: 0; width: 100%; max-width: 100%; background: var(--slate-50); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 0.7rem 0.8rem; box-sizing: border-box; }
+/* Profile completion as an inset card with contextual CTA and accent edge. */
+.cp-progress-card { margin-top: 0.7rem; min-width: 0; width: 100%; max-width: 100%; background: var(--slate-50); border: 1px solid var(--border-subtle); border-left: 4px solid var(--primary-600, #f76707); border-radius: var(--radius-md); padding: 0.7rem 0.8rem; box-sizing: border-box; }
 .cp-progress-top { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; font-size: 0.78rem; font-weight: 700; color: var(--slate-600); }
 .cp-bar { height: 8px; border-radius: 999px; background: var(--slate-200); overflow: hidden; margin-top: 0.4rem; }
 .cp-bar > span { display: block; height: 100%; background: var(--primary-gradient); border-radius: 999px; transition: width 0.25s ease; }
@@ -81,7 +82,8 @@
 .cp-progress-cta:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
 .cp-progress-done { margin: 0.4rem 0 0; font-size: 0.86rem; font-weight: 700; color: #065f46; }
 .cp-header-actions { display: flex; flex-direction: column; gap: 0.5rem; width: 100%; min-width: 0; box-sizing: border-box; }
-.cp-header-actions .btn { min-height: 44px; width: 100%; min-width: 0; box-sizing: border-box; justify-content: center; }
+.cp-header-actions .btn { min-height: 44px; width: 100%; min-width: 0; box-sizing: border-box; justify-content: center; white-space: normal; text-align: center; line-height: 1.3; }
+.cp-header-actions .btn-primary { background: var(--primary-gradient); border-color: transparent; box-shadow: var(--shadow-sm); }
 
 .cp-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; width: 100%; min-width: 0; box-sizing: border-box; }
 /* Tappable stat cards: real <button> elements, icon + number row on top,
@@ -153,8 +155,11 @@
   background: #fff; border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
   padding: 0.7rem 0.65rem; min-height: 64px; width: 100%; min-width: 0; max-width: 100%;
   box-sizing: border-box; font: inherit; color: inherit; text-align: left; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 12px -4px rgba(15, 23, 42, 0.12);
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
-.cp-manage-btn:hover { border-color: #fed7aa; }
+.cp-manage-btn:hover { border-color: #fed7aa; transform: translateY(-1px); box-shadow: 0 2px 4px rgba(15, 23, 42, 0.07), 0 8px 20px -6px rgba(247, 103, 7, 0.25); }
+.cp-manage-btn:active { transform: none; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); }
 .cp-manage-btn:focus-visible { outline: 3px solid var(--primary-glow); outline-offset: 2px; }
 .cp-manage-icon { width: 34px; height: 34px; min-width: 34px; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .cp-manage-text { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
@@ -197,7 +202,7 @@
 .cp-select-row select { width: 100%; max-width: 100%; box-sizing: border-box; min-height: 44px; font-size: 16px; }
 
 /* 320px tier: tightest page gutters (safe-area aware). Base styles above
-   already target this width: 56px avatar, stacked header actions,
+   already target this width: 60px avatar, stacked header actions,
    two-column stats, no overflow. */
 @media (max-width: 359px) {
   .dashboard-container.cp-page {
@@ -209,10 +214,10 @@
   .cp-stats { grid-template-columns: 1fr 1fr; }
 }
 
-/* 375px tier (360–429px): 64px avatar, roomier cards, side-by-side
+/* 375px tier (360–424px): 64px avatar, roomier cards, side-by-side
    Save/Cancel. Header stays in column layout. Stats stay two per row. */
 @media (min-width: 360px) {
-  .cp-header-card::before { height: 80px; }
+  .cp-header-card::before { height: 92px; }
   .cp-stats { gap: 0.6rem; }
   .cp-stat { padding: 0.85rem 0.85rem; gap: 0.55rem; }
   .cp-stat-num { font-size: 1.35rem; }
@@ -225,15 +230,15 @@
   .cp-addr-btns .btn { flex: 1 1 110px; }
 }
 
-/* 425px tier (430–767px): same hierarchy, better spacing. Actions go
+/* 425px tier (425–767px): same hierarchy, better spacing. Actions go
    horizontal when space permits; no structural change versus 375px. */
-@media (min-width: 430px) and (max-width: 767px) {
+@media (min-width: 425px) and (max-width: 767px) {
   .cp-wrap { gap: 1.25rem; }
   .cp-panel { padding: 1.25rem 1.15rem; }
   .cp-header-card { --cp-pad-x: 1.15rem; padding-bottom: 1.2rem; gap: 0.85rem; }
-  .cp-header-card::before { height: 88px; }
-  .cp-header-actions { flex-direction: row; width: auto; align-self: flex-start; gap: 0.6rem; }
-  .cp-header-actions .btn { width: auto; flex: 0 1 auto; padding-inline: 1.1rem; }
+  .cp-header-card::before { height: 100px; }
+  .cp-header-actions { flex-direction: row; width: 100%; align-self: stretch; gap: 0.6rem; }
+  .cp-header-actions .btn { flex: 1 1 0; width: auto; padding-inline: 1.1rem; }
   .cp-progress-card { padding: 0.8rem 0.9rem; }
   .cp-activity-btns .btn { flex: 1 1 140px; }
 }
@@ -257,7 +262,7 @@
   .cp-manage-title { display: block; }
   .cp-manage-short { display: none; }
   .cp-header-card { --cp-pad-x: 1.3rem; padding-bottom: 1.25rem; gap: 0.85rem; }
-  .cp-header-card::before { height: 96px; }
+  .cp-header-card::before { height: 108px; }
   /* Top-align: the text column is tall (name through progress card), so
      bottom-aligning would pin the avatar beside the progress card instead
      of the name. Overlap keeps the avatar rooted in the cover. */
@@ -282,6 +287,12 @@
   .cp-empty { padding: 2rem 1.5rem; }
 }
 
+/* Tablet only (768–1023px): completion bar spans the full summary
+   content width. Laptop keeps its own capped width below. */
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  .cp-progress-card { width: 100%; max-width: 100%; margin-left: 0; }
+}
+
 /* Laptop (1024px+): professional horizontal header (summary left, actions
    right), four-column statistics grid, constrained completion card.
    Page max-width stays at 1080px. Large desktops keep the same rhythm. */
@@ -290,23 +301,26 @@
   .cp-manage-btn { min-height: 76px; align-items: flex-start; }
   .cp-wrap { gap: 1.25rem; }
   /* Header becomes a true row: summary left, actions right. The cover is
-     a slim absolute 52px strip so it never becomes a flex item; matching
+     a slim absolute 60px strip so it never becomes a flex item; matching
      top padding keeps dark text off the orange while the avatar's -34px
      margin preserves its overlap. */
-  .cp-header-card { --cp-pad-x: 1.5rem; flex-direction: row; align-items: flex-start; gap: 1.5rem; padding: 52px 1.5rem 1.4rem; position: relative; }
+  .cp-header-card { --cp-pad-x: 1.5rem; flex-direction: row; align-items: flex-start; gap: 1.5rem; padding: 60px 1.5rem 1.4rem; position: relative; }
   /* Absolute here: as a row flex item the empty cover would collapse to
-     zero width (and its bleed margins would distort the row). Slim 52px
-     band keeps the hero tight; 52px top padding keeps dark text off the
+     zero width (and its bleed margins would distort the row). Slim 60px
+     band keeps the hero tight; 60px top padding keeps dark text off the
      orange while the avatar's -34px margin preserves its overlap. */
-  .cp-header-card::before { position: absolute; top: 0; left: 0; right: 0; height: 52px; margin: 0; border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0; }
-  .cp-header-main { flex: 1 1 auto; min-width: 0; flex-direction: row; align-items: flex-start; gap: 1.25rem; }
+  .cp-header-card::before { position: absolute; top: 0; left: 0; right: 0; height: 60px; margin: 0; border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0; }
+  .cp-header-main { flex: 1 1 100%; min-width: 0; flex-direction: row; align-items: flex-start; gap: 1.25rem; }
   .cp-avatar { width: 88px; height: 88px; min-width: 88px; min-height: 88px; font-size: 1.8rem; }
   .cp-avatar-wrap { margin-top: -34px; z-index: 1; }
   .cp-name { font-size: 1.75rem; }
   .cp-contact span { font-size: 0.88rem; }
-  .cp-progress-card { max-width: 640px; }
-  .cp-header-actions { width: auto; min-width: 200px; max-width: 230px; margin: 0; flex-direction: column; align-items: stretch; align-self: flex-start; padding-top: 0.25rem; flex-shrink: 0; }
-  .cp-header-actions .btn { width: 100%; flex: none; min-height: 44px; white-space: nowrap; }
+  /* Bottom row: completion bar shares the row with the action buttons
+     (summary spans the full row above). */
+  .cp-header-card { flex-wrap: wrap; }
+  .cp-progress-card { flex: 1 1 0; min-width: 0; max-width: none; align-self: center; }
+  .cp-header-actions { width: auto; min-width: 0; max-width: none; margin: 0; flex-direction: row; align-items: center; align-self: center; padding-top: 0; flex-shrink: 0; gap: 0.6rem; }
+  .cp-header-actions .btn { width: auto; flex: 0 1 auto; min-height: 44px; white-space: nowrap; }
   .cp-panel { padding: 1.4rem 1.35rem; }
   .cp-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.8rem; align-items: stretch; }
   .cp-stat { flex-direction: column; align-items: flex-start; padding: 1.05rem 1rem; gap: 0.6rem; min-width: 0; }
@@ -333,4 +347,6 @@
   .cp-bar > span { transition: none; }
   .cp-stat { transition: none; }
   .cp-stat:hover { transform: none; }
+  .cp-manage-btn { transition: none; }
+  .cp-manage-btn:hover { transform: none; }
 }

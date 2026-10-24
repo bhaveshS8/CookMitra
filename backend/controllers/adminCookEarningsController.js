@@ -1,10 +1,6 @@
 
 const crypto = require("crypto");
 const Booking = require("../models/Booking");
-const CookProfile = require("../models/CookProfile");
-const CookLead = require("../models/CookLead");
-const CookIncentive = require("../models/CookIncentive");
-const CookReferral = require("../models/CookReferral");
 const CookPayout = require("../models/CookPayout");
 const CookEventLog = require("../models/CookEventLog");
 const { paginationParams, applyPagination, sendList } = require("../utils/pagination");
@@ -12,291 +8,12 @@ const { computeCookPayout, round2, toPaise, fromPaise } = require("../utils/cook
 const {
   audit,
   notifyCook,
-  countVerifiedBookings,
-  countVerifiedLeadsInWindow,
 } = require("../utils/cookEarningsService");
 
-exports.listAllLeads = async (req, res, next) => {
-  try {
-    const filter = {};
-    if (req.query.status) filter.status = req.query.status;
-    if (req.query.cook) filter.cook = req.query.cook;
-    const pg = paginationParams(req);
-    const leads = await applyPagination(
-      CookLead.find(filter).sort({ createdAt: -1 }).populate("cook", "name phone"),
-      pg
-    );
-    return sendList(res, leads, pg, () => CookLead.countDocuments(filter));
-  } catch (e) {
-    next(e);
-  }
-};
-
-const setLeadState = async ({ leadId, adminId, status, verificationStatus, reason, verified }) => {
-  // Atomic conditional write: concurrent verify/reject/duplicate actions on
-  // the same lead serialize here; callers distinguish won/lost via the
-  // returned document. Admin override between states is allowed (the admin
-  // panel offers every action on every row for corrections) and audited.
-  const update = { status, verificationStatus };
-  if (reason != null) update.rejectionReason = String(reason).slice(0, 300);
-  if (verified) {
-    update.verifiedAt = new Date();
-    update.verifiedBy = adminId;
-  }
-  const lead = await CookLead.findByIdAndUpdate(leadId, { $set: update }, { new: true });
-  return lead;
-};
-
-exports.verifyLead = async (req, res, next) => {
-  try {
-    const lead = await CookLead.findById(req.params.id);
-    if (!lead) return res.status(404).json({ message: "Lead not found" });
-    if (lead.status === "verified" || lead.status === "converted") return res.json(lead); // idempotent
-    const clash = await CookLead.findOne({
-      _id: { $ne: lead._id },
-      normalizedPhone: lead.normalizedPhone,
-      status: { $in: ["verified", "converted"] },
-    }).select("_id");
-    if (clash) {
-      lead.status = "duplicate";
-      lead.verificationStatus = "rejected";
-      lead.rejectionReason = "Already verified under another cook";
-      await lead.save();
-      return res.status(409).json({ message: "Duplicate: this customer is already verified under another cook", lead });
-    }
-    const updated = await setLeadState({
-      leadId: lead._id, adminId: req.user.id, status: "verified", verificationStatus: "verified", verified: true,
-    });
-    try {
-      const { refreshIncentiveEligibility } = require("../utils/cookEarningsService");
-      await refreshIncentiveEligibility(lead.cook);
-    } catch {
-    }
-    await audit({ actor: req.user.id, actorRole: "ADMIN", event: "lead_verified", cook: lead.cook, refId: lead._id, refModel: "CookLead", detail: `${lead.customerName} verified` });
-    await notifyCook({ cookId: lead.cook, type: "lead_verified", message: `Lead for ${lead.customerName} is verified — it now counts toward your incentives.`, link: "/cook/earnings", whatsapp: false });
-    res.json(updated);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.rejectLead = async (req, res, next) => {
-  try {
-    const reason = String(req.body?.reason || req.body?.rejectionReason || "").trim().slice(0, 300);
-    if (!reason) return res.status(400).json({ message: "A rejection reason is required" });
-    const lead = await CookLead.findById(req.params.id);
-    if (!lead) return res.status(404).json({ message: "Lead not found" });
-    if (lead.status === "rejected") return res.json(lead);
-    const updated = await setLeadState({
-      leadId: lead._id, adminId: req.user.id, status: "rejected", verificationStatus: "rejected", reason,
-    });
-    try {
-      // A rejected lead stops counting toward incentives immediately —
-      // don't wait for the cook's next earnings refresh to recount.
-      const { refreshIncentiveEligibility } = require("../utils/cookEarningsService");
-      await refreshIncentiveEligibility(updated.cook);
-    } catch {
-    }
-    await audit({ actor: req.user.id, actorRole: "ADMIN", event: "lead_rejected", cook: lead.cook, refId: lead._id, refModel: "CookLead", detail: reason });
-    // In-app only — same no-WhatsApp-on-rejection rule as incentives.
-    await notifyCook({ cookId: lead.cook, type: "lead_rejected", message: `Lead for ${lead.customerName} was not approved: ${reason}`, link: "/cook/earnings", whatsapp: false });
-    res.json(updated);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.markLeadDuplicate = async (req, res, next) => {
-  try {
-    const lead = await CookLead.findById(req.params.id);
-    if (!lead) return res.status(404).json({ message: "Lead not found" });
-    const updated = await setLeadState({
-      leadId: lead._id, adminId: req.user.id, status: "duplicate", verificationStatus: "rejected",
-      reason: String(req.body?.reason || "Duplicate lead").slice(0, 300),
-    });
-    try {
-      const { refreshIncentiveEligibility } = require("../utils/cookEarningsService");
-      await refreshIncentiveEligibility(updated.cook);
-    } catch {
-    }
-    await audit({ actor: req.user.id, actorRole: "ADMIN", event: "lead_rejected", cook: lead.cook, refId: lead._id, refModel: "CookLead", detail: "marked duplicate" });
-    res.json(updated);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.listIncentives = async (req, res, next) => {
-  try {
-    const filter = {};
-    if (req.query.status) filter.status = req.query.status;
-    if (req.query.cook) filter.cook = req.query.cook;
-    if (req.query.code) filter.code = String(req.query.code).toUpperCase();
-    const pg = paginationParams(req);
-    const rows = await applyPagination(
-      CookIncentive.find(filter).sort({ createdAt: -1 }).populate("cook", "name phone"),
-      pg
-    );
-    const enriched = await Promise.all(
-      (rows || []).map(async (r) => {
-        const o = r.toObject ? r.toObject() : r;
-        try {
-          o.liveVerifiedCount = await countVerifiedLeadsInWindow(o.cook?._id || o.cook, o.startDate, o.endDate);
-        } catch {
-          o.liveVerifiedCount = o.verifiedLeadCount;
-        }
-        return o;
-      })
-    );
-    return sendList(res, enriched, pg, () => CookIncentive.countDocuments(filter));
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.approveIncentive = async (req, res, next) => {
-  try {
-    const inc = await CookIncentive.findById(req.params.id);
-    if (!inc) return res.status(404).json({ message: "Incentive not found" });
-    if (inc.status === "approved" || inc.status === "paid") return res.json(inc);
-    const live = await countVerifiedLeadsInWindow(inc.cook, inc.startDate, inc.endDate);
-    const expired = new Date() > new Date(inc.endDate);
-    if (live < inc.target || expired) {
-      return res.status(400).json({ message: `Not qualified: ${live}/${inc.target} verified leads${expired ? " (window expired)" : ""}`, code: "INCENTIVE_NOT_QUALIFIED" });
-    }
-    // Atomic approve: concurrent approvals race on this single update and
-    // exactly one winner emits the audit/notification.
-    const now = new Date();
-    const updated = await CookIncentive.findOneAndUpdate(
-      { _id: inc._id, status: { $nin: ["approved", "paid"] } },
-      { $set: { verifiedLeadCount: live, eligible: true, status: "approved", approvedAt: now, approvedBy: req.user.id } },
-      { new: true }
-    );
-    if (!updated) {
-      const current = await CookIncentive.findById(inc._id);
-      if (current && (current.status === "approved" || current.status === "paid")) return res.json(current);
-      return res.status(409).json({ message: "This incentive was just updated — please refresh" });
-    }
-    await audit({ actor: req.user.id, actorRole: "ADMIN", event: "incentive_approved", cook: updated.cook, refId: updated._id, refModel: "CookIncentive", detail: `${updated.code} ₹${updated.reward} approved` });
-    await notifyCook({ cookId: updated.cook, type: "incentive_approved", message: `Incentive approved: ${updated.code} — ₹${updated.reward} will be included in your payout.`, link: "/cook/earnings", whatsapp: false });
-    res.json(updated);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.rejectIncentive = async (req, res, next) => {
-  try {
-    const reason = String(req.body?.reason || "").trim().slice(0, 300);
-    if (!reason) return res.status(400).json({ message: "A rejection reason is required" });
-    const inc = await CookIncentive.findById(req.params.id);
-    if (!inc) return res.status(404).json({ message: "Incentive not found" });
-    if (["paid"].includes(inc.status)) return res.status(400).json({ message: "Paid incentives cannot be rejected" });
-    if (inc.status === "rejected") return res.json(inc); // idempotent: no duplicate cook spam
-    // Atomic reject so concurrent rejects emit exactly one audit/notification.
-    const updated = await CookIncentive.findOneAndUpdate(
-      { _id: inc._id, status: { $nin: ["paid", "rejected"] } },
-      { $set: { status: "rejected", rejectionReason: reason } },
-      { new: true }
-    );
-    if (!updated) {
-      const current = await CookIncentive.findById(inc._id);
-      if (current && current.status === "rejected") return res.json(current);
-      if (current && current.status === "paid") return res.status(400).json({ message: "Paid incentives cannot be rejected" });
-      return res.status(409).json({ message: "This incentive was just updated — please refresh" });
-    }
-    await audit({ actor: req.user.id, actorRole: "ADMIN", event: "incentive_rejected", cook: updated.cook, refId: updated._id, refModel: "CookIncentive", detail: reason });
-    // In-app notification only — notifyCook() deliberately skips WhatsApp
-    // for incentive_rejected (see utils/cookEarningsService.js).
-    await notifyCook({ cookId: updated.cook, type: "incentive_rejected", message: `Incentive ${updated.code} was not approved: ${reason}`, link: "/cook/earnings", whatsapp: false });
-    res.json(updated);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.holdIncentive = async (req, res, next) => {
-  try {
-    const inc = await CookIncentive.findById(req.params.id);
-    if (!inc) return res.status(404).json({ message: "Incentive not found" });
-    // Paid rewards are terminal: holding them would misrepresent settled money.
-    if (inc.status === "paid") return res.status(400).json({ message: "Paid incentives cannot be held" });
-    if (inc.status === "held") return res.json(inc); // idempotent
-    const update = { status: "held" };
-    if (req.body?.reason) update.rejectionReason = String(req.body.reason).slice(0, 300);
-    const updated = await CookIncentive.findOneAndUpdate(
-      { _id: inc._id, status: { $ne: "paid" } },
-      { $set: update },
-      { new: true }
-    );
-    if (!updated) {
-      const current = await CookIncentive.findById(inc._id);
-      if (current && current.status === "paid") return res.status(400).json({ message: "Paid incentives cannot be held" });
-      if (current && current.status === "held") return res.json(current);
-      return res.status(409).json({ message: "This incentive was just updated — please refresh" });
-    }
-    await audit({ actor: req.user.id, actorRole: "ADMIN", event: "incentive_held", cook: updated.cook, refId: updated._id, refModel: "CookIncentive", detail: updated.rejectionReason || "held for review" });
-    await notifyCook({ cookId: updated.cook, type: "incentive_held", message: `Incentive ${updated.code} is on hold — our team will review it shortly.`, link: "/cook/earnings", whatsapp: false });
-    res.json(updated);
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.listReferrals = async (req, res, next) => {
-  try {
-    const filter = {};
-    if (req.query.status) filter.status = req.query.status;
-    const pg = paginationParams(req);
-    const rows = await applyPagination(
-      CookReferral.find(filter).sort({ createdAt: -1 }).populate("referrer", "name").populate("referredCook", "name"),
-      pg
-    );
-    const enriched = await Promise.all(
-      (rows || []).map(async (r) => {
-        const o = r.toObject ? r.toObject() : r;
-        try {
-          o.liveVerifiedBookings = await countVerifiedBookings(o.referredCook?._id || o.referredCook);
-        } catch {
-          o.liveVerifiedBookings = o.verifiedBookings;
-        }
-        return o;
-      })
-    );
-    return sendList(res, enriched, pg, () => CookReferral.countDocuments(filter));
-  } catch (e) {
-    next(e);
-  }
-};
-
-exports.approveReferral = async (req, res, next) => {
-  try {
-    const ref = await CookReferral.findById(req.params.id);
-    if (!ref) return res.status(404).json({ message: "Referral not found" });
-    if (ref.status === "approved" || ref.status === "paid") return res.json(ref);
-    const live = await countVerifiedBookings(ref.referredCook);
-    if (live < ref.bookingTarget) {
-      return res.status(400).json({ message: `Not qualified: ${live}/${ref.bookingTarget} verified bookings`, code: "REFERRAL_NOT_QUALIFIED" });
-    }
-    // Atomic approve: concurrent approvals emit exactly one audit/notification.
-    const now = new Date();
-    const updated = await CookReferral.findOneAndUpdate(
-      { _id: ref._id, status: { $nin: ["approved", "paid"] } },
-      { $set: { verifiedBookings: live, status: "approved", approvedAt: now, approvedBy: req.user.id } },
-      { new: true }
-    );
-    if (!updated) {
-      const current = await CookReferral.findById(ref._id);
-      if (current && (current.status === "approved" || current.status === "paid")) return res.json(current);
-      return res.status(409).json({ message: "This referral was just updated — please refresh" });
-    }
-    await audit({ actor: req.user.id, actorRole: "ADMIN", event: "referral_approved", cook: updated.referrer, refId: updated._id, refModel: "CookReferral", detail: `₹${updated.reward} approved (${live} bookings)` });
-    await notifyCook({ cookId: updated.referrer, type: "referral_approved", message: `Referral reward approved: ₹${updated.reward} — your referred cook completed ${live} verified bookings.`, link: "/cook/earnings", whatsapp: false });
-    res.json(updated);
-  } catch (e) {
-    next(e);
-  }
-};
+// NOTE: lead, incentive, and referral programs were removed in full
+// (models, routes, handlers, and UI deleted). This controller now manages
+// weekly payout cycles only. Historical audit rows keep their old event
+// names; see CookEventLog.
 
 exports.listCookPayouts = async (req, res, next) => {
   try {
@@ -321,13 +38,20 @@ exports.buildCookPayout = async (req, res, next) => {
       return res.status(400).json({ message: "Valid cookId is required" });
     }
     // IST business-week boundaries (matching the cook earnings overview),
-    // never server-local midnight.
-    const weekStart = req.body?.weekStart ? new Date(req.body.weekStart) : weekMondayIST(new Date());
-    const weekEnd = req.body?.weekEnd
+    // never server-local midnight. The stored weekStart is always the
+    // Monday 00:00 IST instant so weekly tabs group cycles deterministically
+    // no matter which weekday the caller passed.
+    let weekStart = req.body?.weekStart ? new Date(req.body.weekStart) : weekMondayIST(new Date());
+    let weekEnd = req.body?.weekEnd
       ? new Date(req.body.weekEnd)
       : new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
     if (Number.isNaN(weekStart.getTime()) || Number.isNaN(weekEnd.getTime())) {
       return res.status(400).json({ message: "Valid weekStart/weekEnd dates are required" });
+    }
+    try {
+      const { parseWeekStartIST } = require("../utils/weeklyPayouts");
+      weekStart = parseWeekStartIST(weekStart) || weekStart;
+    } catch {
     }
     const idem = `cycle:${cookId}:${weekStart.toISOString().slice(0, 10)}:${weekEnd.toISOString().slice(0, 10)}`;
     const existing = await CookPayout.findOne({ idempotencyKey: idem });
@@ -530,6 +254,16 @@ const transitionCycle = async ({ id, adminId, to, allowedFrom, extra = {}, event
   if (to === "paid") {
     set.paidAt = now;
     set.paymentDate = now;
+    // The pre-receipt /pay endpoint never recorded amounts: persist the
+    // full payable + settler so weekly tabs and audits reconcile exactly
+    // like receipt-based settlements. Totals are immutable since build.
+    set.settledBy = adminId;
+    try {
+      const pre = await CookPayout.findById(id).select("totalPayable settledAmount").lean();
+      const full = round2(pre?.totalPayable ?? 0);
+      if (full > 0 && !(Number(pre?.settledAmount) > 0)) set.settledAmount = full;
+    } catch {
+    }
   }
   const bookingStatus = to === "paid" ? "paid" : to === "approved" ? "approved" : to === "held" ? "held" : undefined;
   // Booking-level guards: "paid" is terminal and must never be downgraded
@@ -772,13 +506,19 @@ exports.recordPayoutReference = async (req, res, next) => {
     }
     let updated = null;
     try {
+      // Backfill settledAmount for ambiguous cycles paid before the field
+      // existed: a paid cycle is fully paid by definition.
+      const current = await CookPayout.findById(req.params.id).select("totalPayable settledAmount").lean();
+      const backfill = current && !(Number(current.settledAmount) > 0) && Number(current.totalPayable) > 0
+        ? { settledAmount: round2(current.totalPayable) }
+        : {};
       updated = await CookPayout.findOneAndUpdate(
         {
           _id: req.params.id,
           status: "paid",
           $or: [{ paymentReference: "" }, { paymentReference: { $exists: false } }],
         },
-        { $set: { paymentReference: reference } },
+        { $set: { paymentReference: reference, ...backfill } },
         { new: true }
       );
     } catch (e) {

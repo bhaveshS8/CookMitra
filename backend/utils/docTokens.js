@@ -22,7 +22,10 @@ const isPrivateDocPath = (docPath) => {
   const base = String(docPath || "").split("/").pop().split("?")[0].split("#")[0];
   if (!String(docPath || "").startsWith("/uploads")) return false;
   if (/^photo_/i.test(base)) return false;
-  if (!/^(aadhar_|pan_)/i.test(base)) return false;
+  // aadhar_/pan_ cook verification docs + payout_ weekly-settlement
+  // receipts. Receipts stay admin-only: the signed-URL flow re-checks the
+  // requester (owner or admin) before minting or serving.
+  if (!/^(aadhar_|pan_|payout_)/i.test(base)) return false;
   if (base !== base.trim() || /[\\/]/.test(base)) return false;
   if (base === "." || base === ".." || base.includes("..")) return false;
   return true;

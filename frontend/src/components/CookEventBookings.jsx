@@ -7,7 +7,7 @@ import { CalendarCheck, MapPin, Users, UtensilsCrossed, Wallet } from "lucide-re
 // Cook (§13): event assignments — upcoming / completed / cancelled with full
 // event details + earnings from completed events.
 const CookEventBookings = () => {
-  const { data, loading } = useFetch("/event-bookings/cook");
+  const { data, loading, error, refetch } = useFetch("/event-bookings/cook");
   const bookings = Array.isArray(data) ? data : [];
 
   const upcoming = bookings.filter((b) =>
@@ -18,6 +18,18 @@ const CookEventBookings = () => {
   const earnings = completed.reduce((sum, b) => sum + Number(b.totalAmount || 0), 0);
 
   if (loading) return <p className="cook-loading-text">Loading event assignments...</p>;
+
+  if (error) {
+    return (
+      <div className="empty-state-card">
+        <h3>Could not load event assignments</h3>
+        <p style={{ fontSize: "0.95rem", color: "var(--slate-600)" }}>{error}</p>
+        <button type="button" className="btn btn-outline btn-sm" onClick={refetch}>
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (bookings.length === 0) {
     return (

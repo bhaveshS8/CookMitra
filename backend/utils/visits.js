@@ -87,6 +87,11 @@ const normalizeVisitInput = (body = {}) => {
     area: cleanPlace(src.area),
     state: cleanPlace(src.state),
     country: cleanPlace(src.country),
+    // Provenance of the place labels: "gps" only when the browser already
+    // permits geolocation (device fix + reverse-geocode, suburb-level);
+    // anything else folds to "ip" (coarse network lookup). Raw coordinates
+    // are never accepted here — only area/city labels.
+    source: String(src.source || "").trim().toLowerCase() === "gps" ? "gps" : "ip",
   };
 };
 

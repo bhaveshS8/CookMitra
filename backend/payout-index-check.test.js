@@ -39,9 +39,6 @@ async function freshDb(seed) {
   await Promise.all([
     require("./models/CookPayout").init(),
     require("./models/Booking").init(),
-    require("./models/CookIncentive").init(),
-    require("./models/CookLead").init(),
-    require("./models/CookReferral").init(),
   ]);
   if (seed) await seed(mongoose.connection.db);
   await mongoose.disconnect();

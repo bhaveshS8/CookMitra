@@ -111,16 +111,6 @@ const cut = (s) => (s ? String(s).slice(0, 90) : "");
     const rejected = await api("PATCH", `/bookings/${booking2.data._id}/reject`, { token: admin.token });
     step("admin rejects booking -> 200 rejected", rejected.status === 200 && rejected.data?.status === "rejected", `${rejected.status} ${rejected.data?.status || cut(rejected.data)}`);
 
-    const lead = await api("POST", "/leads", { body: { name: "Test Lead", whatsapp: "9876543210", location: "Mumbai" } });
-    step("public lead capture -> 201", lead.status === 201 && lead.data?.lead, `${lead.status}`);
-    const leadId = lead.data.lead._id;
-    const leads = await api("GET", "/leads", { token: admin.token });
-    step("admin sees lead in enquiries -> 200", leads.status === 200 && (leads.data || []).some((l) => l._id === leadId), `${leads.status}, ${(leads.data || []).length} leads`);
-    const leadUpd = await api("PATCH", `/leads/${leadId}`, { token: admin.token, body: { status: "contacted" } });
-    step("admin updates lead status -> 200", leadUpd.status === 200 && leadUpd.data?.status === "contacted", `${leadUpd.status} ${leadUpd.data?.status || cut(leadUpd.data)}`);
-    const leadDel = await api("DELETE", `/leads/${leadId}`, { token: admin.token });
-    step("admin deletes lead -> 200", leadDel.status === 200, `${leadDel.status}`);
-
     const selfDel = await api("DELETE", `/auth/users/${adminSelf._id}`, { token: admin.token });
     step("admin cannot delete self -> 400", selfDel.status === 400, `${selfDel.status} ${JSON.stringify(selfDel.data)?.slice(0, 80)}`);
 

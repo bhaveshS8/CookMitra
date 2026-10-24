@@ -98,6 +98,20 @@ WHATSAPP_PHONE_NUMBER_ID=<live phone number ID>
 # in backend/whatsapp-channel.test.js. A misconfigured template fails once
 # per fan-out, then remaining cooks skip straight to interactive.
 #
+# Marathi cook messages: ALL cook-facing WhatsApp bodies are Marathi
+# (Devanagari) — builders in backend/utils/whatsappMessages.js. Customer
+# messages keep their existing language.
+# REQUIRED for outside-window delivery: approve a Marathi request template
+# in WhatsApp Manager (e.g. name `new_booking_request`) and set:
+# WHATSAPP_REQUEST_TEMPLATE=new_booking_request
+# WHATSAPP_REQUEST_TEMPLATE_LANG=mr
+# Verify the language code in WhatsApp Manager > Account tools > Message
+# templates (Marathi is `mr`; do not assume — confirm before going live).
+# If no Marathi template is approved, leave WHATSAPP_REQUEST_TEMPLATE unset:
+# cooks then receive the Marathi interactive message (in-window) instead of
+# an English template. Never point the template at an English body — the
+# code will not silently substitute languages.
+#
 # Troubleshooting 401 code 190 "Authentication Error": Meta rejected
 # WHATSAPP_TOKEN (expired temporary token, revoked system-user token, or token
 # from a different app than WHATSAPP_PHONE_NUMBER_ID). Regenerate the token

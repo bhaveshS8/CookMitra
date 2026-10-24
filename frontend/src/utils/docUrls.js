@@ -8,7 +8,9 @@ export const isPrivateDocPath = (url) => {
   if (!url || /^https?:\/\//i.test(url)) return false;
   if (!url.startsWith("/uploads")) return false;
   const base = String(url).split("/").pop().split("?")[0];
-  return /^(aadhar_|pan_)/i.test(base);
+  // Mirrors backend utils/docTokens: cook verification docs + weekly payout
+  // settlement receipts. Receipts stay admin-only via signed URLs.
+  return /^(aadhar_|pan_|payout_)/i.test(base);
 };
 
 export const resolvePublicFileUrl = (url) => {

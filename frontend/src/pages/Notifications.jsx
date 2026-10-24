@@ -157,6 +157,9 @@ const Notifications = () => {
       <div className="dashboard-header-row notif-header">
         <div>
           <h1 className="notif-page-title">Notifications</h1>
+          <p style={{ color: "var(--slate-500)", margin: "0.25rem 0 0", fontSize: "0.85rem" }}>
+            Newest first · items older than 7 days are deleted automatically.
+          </p>
       </div>
       </div>
 

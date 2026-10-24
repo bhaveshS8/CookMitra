@@ -8,7 +8,6 @@ const Review = require("../models/Review");
 const Notification = require("../models/Notification");
 const Coupon = require("../models/Coupon");
 const Complaint = require("../models/Complaint");
-const Lead = require("../models/Lead");
 const { INITIAL_COUPONS, RETIRED_COUPON_CODES } = require("../utils/couponCatalog");
 
 dotenv.config();
@@ -46,7 +45,6 @@ const seedData = async () => {
     await Notification.deleteMany({});
     await Coupon.deleteMany({});
     await Complaint.deleteMany({});
-    await Lead.deleteMany({});
 
     const admin = await User.create({
       name: "Admin",

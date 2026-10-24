@@ -482,19 +482,33 @@ const acceptBookingForCook = async ({ bookingId, cookId, source = "website" } = 
     }
   } catch {
   }
+  // Replacement confirm: a cook-cancelled booking whose payment was already
+  // collected is confirmed the moment a replacement accepts — the customer
+  // is never sent back to the payment page. Claim failures keep today's
+  // behavior (accepted + paid, confirmable via the idempotent pay path).
+  let replacementConfirmed = false;
+  try {
+    const rep = await confirmReplacementIfPaid(booking);
+    booking = rep.booking;
+    replacementConfirmed = rep.confirmed === true;
+  } catch {
+  }
+  const confirmedNow = autoConfirmed || replacementConfirmed;
   try {
     await Notification.create({
       user: booking.customer,
-      type: autoConfirmed ? "booking_confirmed" : "booking_accepted",
+      type: confirmedNow ? "booking_confirmed" : "booking_accepted",
       booking: booking._id,
       message: autoConfirmed
         ? "Booking confirmed — your 100% coupon covered the full fee. No payment needed!"
-        : "Your booking request has been accepted! Complete payment within 5 minutes to confirm your slot.",
+        : replacementConfirmed
+          ? "A replacement cook has accepted your booking — it is confirmed, no further payment needed."
+          : "Your booking request has been accepted! Complete payment within 5 minutes to confirm your slot.",
     });
   } catch {
   }
   try {
-    if (autoConfirmed) {
+    if (confirmedNow) {
       notifyWhatsApp("confirmed", booking);
       // The cook needs the venue job sheet even for WhatsApp-source
       // accepts (the website-only emit below is skipped there).
@@ -693,7 +707,67 @@ const rejectBookingForCook = async ({ bookingId, cookId, source = "website" } = 
   return { booking, ignored: false, refundNote: rejectRefundNote };
 };
 
+// Replacement confirm: runs right after a replacement cook's accept claim.
+// - accepted + already paid  -> promote to confirmed (customer skips the
+//   payment page; the original payment record and money are untouched, so no
+//   ledger entry is written) and clear the marker.
+// - accepted + unpaid, or an already-confirmed (e.g. zero-payable) booking
+//   carrying the marker -> just clear the marker with an audit note; the
+//   normal payment flow continues.
+// Strictly gated on the cookCancel marker, so ordinary accepts are
+// unaffected. Returns { confirmed, booking } and never throws.
+const confirmReplacementIfPaid = async (booking) => {
+  try {
+    const awaitingReplacement = booking?.cookCancel?.cook != null;
+    if (!awaitingReplacement) return { confirmed: false, booking };
+    const alreadyPaid = String(booking?.payment?.status || "").toLowerCase() === "paid";
+    const st = String(booking?.status || "");
+    let update = null;
+    let promotes = false;
+    if (st === "accepted" && alreadyPaid) {
+      promotes = true;
+      update = {
+        $set: { status: "confirmed", paymentExpiresAt: null },
+        $unset: { cookCancel: "" },
+        $push: {
+          statusHistory: {
+            status: "confirmed",
+            note: "Replacement cook accepted — booking confirmed, payment already collected",
+          },
+        },
+      };
+    } else if ((st === "accepted" && !alreadyPaid) || (st === "confirmed" && alreadyPaid)) {
+      update = {
+        $unset: { cookCancel: "" },
+        $push: {
+          statusHistory: {
+            status: st,
+            note: "Replacement cook accepted — replacement search fulfilled",
+          },
+        },
+      };
+    } else {
+      return { confirmed: false, booking };
+    }
+    const filter = { _id: booking._id, status: st };
+    if (promotes) filter["payment.status"] = "paid";
+    const res = await timed(Booking.updateOne(filter, update));
+    if (isTimeout(res)) return { confirmed: false, booking };
+    const n = Number(res?.modifiedCount ?? res?.nModified ?? 0);
+    if (n !== 1) return { confirmed: false, booking };
+    try {
+      const fresh = await loadBooking(booking._id, "website");
+      if (fresh) booking = fresh;
+    } catch {
+    }
+    return { confirmed: promotes, booking };
+  } catch {
+    return { confirmed: false, booking };
+  }
+};
+
 module.exports = {
   acceptBookingForCook,
   rejectBookingForCook,
+  confirmReplacementIfPaid,
 };

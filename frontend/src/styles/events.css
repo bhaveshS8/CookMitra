@@ -1,22 +1,299 @@
 /* ==========================================================================
-   COOKMITRA EVENTS — module styles + responsive pass.
-   Scoped under .events-page (wizard, details, my-events) and .event-admin
-   (admin managers) so the on-demand flow is never affected. Builds on the
-   shared system (booking.css / modern.css / responsive.css) and only adds
-   what the 5-step event flow, price review, and admin controls need.
-   Breakpoints mirror the app: 1024 tablet · 768 small tablet ·
-   640 phones · 560 compact phones · 400 small phones · 360 tiny phones.
+   COOKMITRA EVENTS — module styles (polished pass).
+   Scoped under .events-page (wizard + my-events) and .event-admin so the
+   on-demand flow is never affected. Builds on the shared system
+   (booking.css / modern.css / responsive.css).
+   Breakpoints mirror the app: 1024 · 768 · 640 · 560 · 400 · 360 · 320.
+   Business logic, pricing formulas and payloads are untouched — pure UI.
    ========================================================================== */
+
+/* ---- Page shell: centred column, no horizontal overflow ---- */
+.events-page {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 1.75rem 1.5rem 3rem;
+  min-width: 0;
+  overflow-x: clip;
+}
+.events-page .ondemand-form-card,
+.events-page .od-hero,
+.events-page .od-steps-modern,
+.events-page .od-stickybar,
+.events-page .od-venue-card {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* ---- Hero: compact, consistent with on-demand ---- */
+.events-page .od-hero { align-items: center; }
+.events-page .od-hero .btn { flex-shrink: 0; }
+
+/* ---- Step indicator: clear current / done / upcoming ---- */
+.events-page .od-steps-modern {
+  background: #fff;
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+  padding: 0.65rem 0.8rem;
+}
+.events-page .od-step-item { align-items: center; }
+.events-page .od-step-item .od-step-num { font-variant-numeric: tabular-nums; }
+.events-page .od-step-item.done .od-step-num {
+  background: var(--accent-emerald);
+  border-color: transparent;
+  color: #fff;
+}
+.events-page .od-step-item.active .od-step-text { min-width: 0; }
+.events-page .od-step-item.active .od-step-name { color: var(--primary-700); }
+.events-page .od-step-item:not(.active):not(.done) { opacity: 0.78; }
+.events-page .od-step-link[aria-hidden="true"] { min-width: 8px; }
+
+/* ---- Cards & sections ---- */
+.events-page .ondemand-form-card {
+  border-radius: 18px;
+  box-shadow: var(--shadow-sm);
+}
+.events-page .ondemand-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.02rem;
+  letter-spacing: -0.01em;
+}
+.events-page .ondemand-section-title svg { color: var(--primary); flex-shrink: 0; }
+.events-page .field-hint { font-size: 0.8rem; }
+
+
+/* ---- Event-type catalogue grid (Step 1): equal-height cards ---- */
+.events-page .event-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 0.7rem;
+  align-items: stretch;
+}
+.events-page .event-pick-card {
+  height: 100%;
+  min-height: 118px;
+  align-items: flex-start;
+}
+.events-page .event-pick-card > strong,
+.events-page .event-pick-card > span:not(.service-pick-icon):not(.service-pick-check) {
+  overflow-wrap: anywhere;
+}
+.events-page .event-pick-card > span:not(.service-pick-icon):not(.service-pick-check) {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.events-page .event-pick-empty {
+  border: 1px dashed var(--slate-200);
+  border-radius: 14px;
+  background: var(--slate-50);
+  padding: 1.1rem 1rem;
+  text-align: center;
+  color: var(--slate-500);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+/* ---- Food-type + service grids inherit equal heights ---- */
+.events-page .service-pick-grid { align-items: stretch; }
+.events-page .service-pick-card { height: 100%; }
+.events-page .bk-food-grid .bk-food-btn {
+  min-height: 46px;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Stepper rows (guests / hours / cooks) ---- */
+.events-page .od-stepper { align-items: stretch; }
+.events-page .od-stepper .form-control {
+  min-width: 0;
+  flex: 1 1 auto;
+  font-variant-numeric: tabular-nums;
+}
+.events-page .od-step-btn {
+  flex: 0 0 46px;
+  min-width: 46px;
+  min-height: 46px;
+}
 
 /* ---- Assigned-cook card (details page) ---- */
 .event-cook-card { flex-wrap: nowrap; }
+.event-cook-card .event-cook-meta { min-width: 0; }
+.event-cook-card .event-cook-meta > div { overflow-wrap: anywhere; }
+
+/* ---- Stable error slot: reserves one line so buttons never jump ---- */
+.events-page .event-error-slot {
+  min-height: 1.6em;
+  margin: 0.55rem 0 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent-rose);
+  overflow-wrap: anywhere;
+}
+.events-page .event-error-slot:empty::before { content: "\00a0"; visibility: hidden; }
+.events-page .event-error-slot:not(:empty) {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+}
+
+/* ---- Location row: input + Detect button never squeeze ---- */
+.events-page .event-location-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: stretch;
+}
+.events-page .event-location-row .form-control { flex: 1 1 auto; min-width: 0; }
+.events-page .event-location-row .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  min-height: 48px;
+}
+.events-page .event-locate-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--slate-500);
+  margin: 0.45rem 0 0;
+  line-height: 1.45;
+}
+.events-page .event-locate-note svg { flex-shrink: 0; margin-top: 0.15em; }
+
+/* ---- Live estimate strip ---- */
+.events-page .bk-price-strip {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Sticky action bar: Back / Continue stable, no layout jump ---- */
+.events-page .od-stickybar { gap: 0.6rem; flex-wrap: wrap; }
+.events-page .od-stickybar .od-cta,
+.events-page .event-nav-btn {
+  min-height: 50px;
+  font-variant-numeric: tabular-nums;
+}
+/* (Equal 50/50 nav sizing is defined once in the FINAL override block at the
+   end of this file — see "EVENT NAV 50/50 EQUAL SPLIT".) */
+.events-page .event-nav-row {
+  display: flex;
+  gap: 0.6rem;
+  width: 100%;
+}
+.events-page .od-sticky-note { flex-basis: 100%; }
+.events-page .btn[disabled] { cursor: not-allowed; }
+
+/* ---- Price review (Step 5): clear hierarchy, aligned amounts ---- */
+.events-page .event-price-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--slate-200);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.events-page .event-price-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.92rem;
+  border-bottom: 1px dashed var(--slate-200);
+}
+.events-page .event-price-row:last-child { border-bottom: none; }
+.events-page .event-price-row > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--slate-600);
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.events-page .event-price-row > span:first-child svg { flex-shrink: 0; color: var(--slate-400); }
+.events-page .event-price-row > strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--slate-900);
+}
+.events-page .event-price-row.is-free > strong { color: var(--accent-emerald); }
+.events-page .event-total-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: var(--slate-50);
+  border: 1px solid var(--slate-200);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  margin-top: 0.8rem;
+}
+.events-page .event-total-row > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 800;
+  color: var(--slate-900);
+}
+.events-page .event-total-row > strong {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.events-page .event-context-box {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  margin-top: 0.8rem;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: #92400e;
+  overflow-wrap: anywhere;
+}
+.events-page .event-estimate-note {
+  font-size: 0.8rem;
+  color: var(--slate-500);
+  margin-top: 0.5rem;
+  line-height: 1.5;
+}
 
 /* ---- Admin assign row ---- */
-.event-assign-row .form-control { min-width: 0; }
+.event-admin .event-assign-row .form-control { min-width: 0; }
+.event-admin .event-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.event-admin .event-table-wrap table { min-width: 640px; }
+.event-admin .event-filter-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+
+/* ---- Booking cards (customer / cook / admin): consistent top + meta ---- */
+.booking-item-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.7rem; }
+.booking-item-top > div { min-width: 0; }
+.booking-item-top h3 { overflow-wrap: anywhere; }
+.booking-item-top .badge { flex-shrink: 0; }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* ---- Large tablet ---- */
 @media (max-width: 1024px) {
-  /* 5 steps need more air than the 3-step on-demand flow */
+  .events-page { max-width: 100%; }
   .events-page .od-steps-modern { gap: 0.3rem; }
   .events-page .od-step-desc { font-size: 0.62rem; }
   .events-page .od-step-link { margin: 0 0.35rem; }
@@ -24,75 +301,485 @@
 
 /* ---- Small tablet ---- */
 @media (max-width: 768px) {
-  /* Assign controls take the row — no squeezed select next to buttons */
+  .events-page { padding: 1.1rem 1rem 2rem; }
+  .events-page .event-pick-grid { grid-template-columns: 1fr 1fr; }
   .event-admin .event-assign-row .form-control { max-width: none; width: 100%; flex: 1 1 100%; }
   .event-admin .event-assign-row .btn { flex: 1 1 auto; min-height: 44px; }
-  /* Add/edit event form stacks full-width */
   .event-admin form .form-control { flex: 1 1 200px; }
 }
 
 /* ---- Phones ---- */
 @media (max-width: 640px) {
-  /* 5-step stepper: compact — numbers + names only, no descriptions */
-  .events-page .od-step-desc { display: none; }
-  .events-page .od-steps-modern { gap: 0.1rem; }
+  .events-page .od-steps-modern { gap: 0.1rem; padding: 0.55rem 0.6rem; }
   .events-page .od-step-item { gap: 0.3rem; }
+  .events-page .od-step-desc { display: none; }
   .events-page .od-step-num { width: 24px; height: 24px; font-size: 0.7rem; }
   .events-page .od-step-name { font-size: 0.66rem; }
   .events-page .od-step-link { margin: 0 0.25rem; min-width: 4px; }
-
-  /* Event pick cards already collapse to 1 column via the on-demand rule;
-     keep comfortable thumb targets */
   .events-page .service-pick-card { min-height: 44px; }
-
-  /* Stepper inputs shrink instead of overflowing (guests / hours / cooks) */
+  .events-page .event-pick-grid { grid-template-columns: 1fr 1fr; }
+  .events-page .event-pick-card { min-height: 112px; }
   .events-page .od-stepper .form-control { min-width: 0; flex: 1 1 auto; }
-
-  /* Sticky CTA: full-width, tall thumb target */
   .events-page .od-stickybar .od-cta { min-height: 48px; }
-
-  /* 16px stops iOS Safari zooming the page on focus (all event inputs) */
   .events-page .ondemand-form-card .form-control,
   .event-admin .form-control { font-size: 16px; }
-
-  /* Assigned-cook card wraps instead of squeezing on narrow screens */
   .event-cook-card { flex-wrap: wrap; }
-
-  /* Price-breakdown total row stays readable */
   .events-page .booking-metadata-grid .meta-field span { overflow-wrap: anywhere; }
-
-  /* Admin: add/edit event form buttons go full-width */
   .event-admin form .btn { flex: 1 1 100%; min-height: 44px; }
+  .events-page .event-price-row { padding: 0.55rem 0.75rem; font-size: 0.88rem; }
+  .events-page .event-total-row > strong { font-size: 1.25rem; }
 }
 
-/* ---- Compact phones: hero already pins the price chip (≤560px block in
-   booking.css) — keep the events eyebrow clear of it and stack the
-   my-events hero CTA under the copy ---- */
+/* ---- Compact phones ---- */
 @media (max-width: 560px) {
   .events-page .od-hero .btn { width: 100%; min-height: 46px; }
   .events-page .od-livebar .btn { min-height: 40px; }
+  .events-page .event-pick-grid { grid-template-columns: 1fr; }
+  .events-page .event-location-row { flex-direction: column; }
+  .events-page .event-location-row .btn { width: 100%; min-height: 48px; }
+  /* Nav buttons keep the FINAL 50/50 side-by-side split (see end of file). */
+  .events-page .od-summary { flex-direction: column; align-items: stretch; }
+  .events-page .od-summary-price { margin-left: 0; text-align: left; }
 }
 
-/* ---- Small phones: numbers-only stepper ----
-   5 names no longer fit at 360px — inactive steps collapse to their
-   numbered dots, the active step keeps its label for context. */
+/* ---- Small phones: numbers-only stepper ---- */
 @media (max-width: 400px) {
   .events-page .od-step-item:not(.active) .od-step-text { display: none; }
   .events-page .od-steps-modern { align-items: center; }
   .events-page .od-step-link { margin: 0 0.2rem; }
   .events-page .od-step-num { width: 22px; height: 22px; }
-  /* Active label ("Event" / "Details" / …) must never wrap mid-word */
   .events-page .od-step-item.active .od-step-name { white-space: nowrap; }
+  .events-page .event-total-row { padding: 0.75rem 0.85rem; }
+  .events-page .event-total-row > strong { font-size: 1.15rem; }
 }
 
-/* ---- Tiny phones: never drop tap targets below ~40px ---- */
+/* ---- Tiny phones ---- */
 @media (max-width: 360px) {
+  .events-page { padding: 0.9rem 0.75rem 1.75rem; }
   .events-page .od-stickybar .od-cta,
   .event-admin .event-assign-row .btn { min-height: 44px; }
+  .events-page .od-stepper .od-step-btn { flex-basis: 44px; min-width: 44px; }
+}
+
+/* ---- Very small phones ---- */
+@media (max-width: 320px) {
+  .events-page .event-price-row { gap: 0.6rem; }
+  .events-page .booking-item-top { flex-direction: column; align-items: flex-start; }
+  .events-page .booking-item-top .badge { align-self: flex-start; }
 }
 
 /* ---- Landscape phones: keep the wizard usable in short viewports ---- */
 @media (max-height: 500px) and (orientation: landscape) {
   .events-page .od-hero { padding-top: 0.5rem; padding-bottom: 0.5rem; margin-bottom: 0.6rem; }
   .events-page .od-steps-modern { margin-bottom: 0.6rem; }
+}
+
+/* ==========================================================================
+   STEP 2 — EVENT DETAILS (fixes: alignment/spacing, input consistency,
+   heading/subtitle rhythm, responsive stacking)
+   ========================================================================== */
+
+/* The heading + subtitle follow the same rhythm as Steps 1 and 3. */
+.events-page .od-event-details .ondemand-section-title { margin-bottom: 0.35rem; }
+.events-page .od-event-details .ondemand-form-sub { margin: 0 0 1.1rem; }
+
+/* The subtitle already spaces the first row — don't double the gap. */
+.events-page .od-event-details > .form-row:first-of-type { margin-top: 0; }
+
+/* One shared control height/rhythm for every input in this step. */
+.events-page .od-event-details .form-row { margin-top: 0.85rem; align-items: end; }
+.events-page .od-event-details .form-group { min-width: 0; }
+.events-page .od-event-details .form-group > label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 1.15rem;
+  line-height: 1.25;
+}
+.events-page .od-event-details .form-group > label svg { flex-shrink: 0; }
+
+.events-page .od-event-details .form-control {
+  min-height: 46px;
+  font-size: 0.92rem;
+}
+.events-page .od-event-details input[type="date"].form-control,
+.events-page .od-event-details input[type="time"].form-control,
+.events-page .od-event-details select.form-control {
+  height: 46px;
+  line-height: 1.2;
+  font-family: inherit;
+  color: var(--slate-800);
+}
+.events-page .od-event-details input[type="date"].form-control:hover,
+.events-page .od-event-details input[type="time"].form-control:hover,
+.events-page .od-event-details select.form-control:hover { border-color: var(--slate-300); }
+.events-page .od-event-details input[type="date"].form-control::-webkit-calendar-picker-indicator,
+.events-page .od-event-details input[type="time"].form-control::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.55;
+  margin-left: 0.25rem;
+  padding: 0;
+}
+.events-page .od-event-details input[type="date"].form-control:hover::-webkit-calendar-picker-indicator,
+.events-page .od-event-details input[type="time"].form-control:hover::-webkit-calendar-picker-indicator {
+  opacity: 1;
+}
+.events-page .od-event-details textarea.form-control {
+  min-height: 96px;
+  line-height: 1.5;
+}
+
+/* Stepper: buttons and value share the control height and never squeeze. */
+.events-page .od-event-details .od-stepper { align-items: stretch; }
+.events-page .od-event-details .od-stepper .form-control {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 46px;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.events-page .od-event-details .od-step-btn {
+  flex: 0 0 46px;
+  min-width: 46px;
+  min-height: 46px;
+}
+
+/* Keep focused fields / the validation message clear of the action bar. */
+.events-page .od-event-details .form-group,
+.events-page .od-event-details .event-error-slot { scroll-margin-bottom: 1rem; }
+
+/* Phones: stack the two-column rows and give the stepper the full width. */
+@media (max-width: 640px) {
+  .events-page .od-event-details .form-row { grid-template-columns: 1fr; }
+  .events-page .od-event-details .od-stepper { width: 100%; }
+  .events-page .od-event-details .form-control { font-size: 16px; }
+}
+@media (max-width: 360px) {
+  .events-page .od-event-details .od-step-btn { flex-basis: 44px; min-width: 44px; }
+}
+
+/* ---- Action bar reserves its own space (never floats over fields) ---- */
+.events-page .od-stickybar {
+  position: static;
+  padding: 0.55rem var(--od-pad-x, 1.2rem) calc(0.7rem + env(safe-area-inset-bottom));
+  border-bottom-left-radius: 18px;
+  border-bottom-right-radius: 18px;
+}
+.events-page .od-event-details .od-stickybar { margin-top: 0.2rem; }
+
+/* (Equal 50/50 nav sizing is defined once in the FINAL override block at the
+   end of this file — see "EVENT NAV 50/50 EQUAL SPLIT".) */
+.events-page .event-nav-row { align-items: stretch; }
+.events-page .event-nav-row .btn { min-height: 48px; }
+.events-page .event-nav-btn { min-height: 48px; }
+
+/* No reserved blank line when there is no validation error — the bar sits
+   just under the menu instead of floating 45px below it. */
+.events-page .event-error-slot:empty { min-height: 0; margin: 0; padding: 0; border: 0; background: none; }
+.events-page .event-error-slot:empty::before { content: none; }
+
+@media (max-width: 560px) {
+  /* Nav stays side-by-side 50/50 on mobile too (see FINAL override block). */
+  .events-page .od-stickybar { padding: 0.55rem var(--od-pad-x, 1rem) calc(0.7rem + env(safe-area-inset-bottom)); }
+}
+
+/* ==========================================================================
+   BOOK-AN-EVENT UI FIX (visual only — no logic/touch targets changed)
+   1. od-livebar / od-livechip had NO base styles anywhere, so steps 3–5
+      rendered as one jammed string ("Go BackBirthday2026-10-15…₹1,649").
+   2. Stepper descs were nowrap+ellipsis, truncating to "What are you cel…".
+   3. Every .ondemand-section-title got a dashed top border — including the
+      FIRST title in each card, leaving a stray divider above "Step N".
+   4. Step 3 service grid (exactly 3 cards) sat 2+1 in a 2-col grid.
+   ========================================================================== */
+
+/* ---- 1. Live summary strip: proper bar + spaced, wrapping chips ---- */
+.events-page .od-livebar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  background: #fff;
+  border: 1px solid var(--slate-200);
+  border-radius: 14px;
+  box-shadow: var(--shadow-sm);
+  padding: 0.55rem 0.65rem;
+  margin: 0 0 0.9rem;
+  min-width: 0;
+}
+.events-page .od-livebar .btn {
+  flex: 0 0 auto;
+  min-height: 40px;
+}
+.events-page .od-livechip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--slate-700);
+  background: var(--slate-100);
+  border: 1px solid var(--slate-200);
+  border-radius: 99px;
+  padding: 0.3rem 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.events-page .od-livechip-price {
+  color: #fff;
+  background: var(--primary-gradient);
+  border-color: transparent;
+  box-shadow: var(--shadow-brand);
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+@media (max-width: 560px) {
+  .events-page .od-livebar { gap: 0.4rem; padding: 0.5rem 0.55rem; }
+  .events-page .od-livebar .btn { flex: 1 1 100%; }
+  .events-page .od-livechip { white-space: normal; }
+  .events-page .od-livechip-price { margin-left: 0; }
+}
+
+/* ---- 2. Stepper: never truncate descs to "cel…"/"m…" on desktop ---- */
+.events-page .od-step-item { flex: 1 1 0; min-width: 0; }
+.events-page .od-step-text { flex: 1 1 auto; min-width: 0; }
+.events-page .od-step-name { overflow-wrap: anywhere; }
+.events-page .od-step-desc {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.35;
+}
+.events-page .od-step-link { flex: 0 1 28px; min-width: 10px; }
+@media (max-width: 1024px) {
+  .events-page .od-step-desc { font-size: 0.6rem; }
+  .events-page .od-step-link { flex-basis: 16px; }
+}
+
+/* ---- 3. No stray dashed divider above the FIRST section title ---- */
+.events-page .ondemand-form-card > .ondemand-section-title:first-child,
+.events-page .ondemand-form-card > .ondemand-section-title:first-of-type {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+}
+@media (max-width: 480px) {
+  .events-page .ondemand-form-card > .ondemand-section-title:first-child,
+  .events-page .ondemand-form-card > .ondemand-section-title:first-of-type {
+    margin-top: 0;
+    padding-top: 0;
+  }
+}
+
+/* ---- 4. Step 3 services: 3-up on desktop (not 2+1 orphan) ---- */
+@media (min-width: 768px) {
+  .events-page .service-pick-grid:not(.event-pick-grid) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ---- 5. Footer contact links: wrap cleanly, never "gmail.c om" ---- */
+.footer-modern a,
+.footer-links-list a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* (Step-2-only nav rules removed - FINAL 50/50 block below covers every step.) */
+/* ==========================================================================
+   EVENT NAV 50/50 EQUAL SPLIT — FINAL override (placed LAST so it wins).
+   Back + Continue are exactly equal halves on EVERY step, desktop + mobile.
+   Scoped to the event wizard only (.events-page .event-nav-row).
+   No logic/pricing/validation touched — pure sizing + alignment.
+   ========================================================================== */
+.events-page .event-nav-row {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+  gap: 0.75rem !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+.events-page .event-nav-row .btn,
+.events-page .event-nav-row .event-back-btn,
+.events-page .event-nav-row .event-nav-btn,
+.events-page .od-event-details .event-nav-row .btn,
+.events-page .od-event-details .event-nav-row .event-back-btn,
+.events-page .od-event-details .event-nav-row .event-nav-btn,
+.events-page .od-event-details .event-nav-row .btn:not(.event-back-btn) {
+  flex: 1 1 0 !important;
+  flex-basis: 0 !important;
+  flex-grow: 1 !important;
+  width: auto !important;
+  max-width: none !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  min-height: 52px !important;
+  height: auto !important;
+  padding: 0.7rem 0.75rem !important;
+  border-radius: 14px !important;
+  font-size: 0.92rem !important;
+  font-weight: 800 !important;
+  line-height: 1.25 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0.5rem !important;
+  box-sizing: border-box !important;
+  white-space: normal !important;
+  text-align: center !important;
+  overflow-wrap: anywhere !important;
+  order: unset !important;
+}
+/* Icons inside the nav buttons must not change button size. */
+.events-page .event-nav-row .btn svg {
+  flex: 0 0 auto !important;
+  width: 16px !important;
+  height: 16px !important;
+  transform: none !important;
+}
+
+/* ---- Stepper: scroll on small screens instead of squashing text ---- */
+.events-page .od-steps-modern {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+}
+.events-page .od-step-item {
+  scroll-snap-align: start;
+}
+.events-page .od-step-item .od-step-num { flex-shrink: 0; }
+
+/* ---- Card lift + selected ring ---- */
+.events-page .event-pick-card,
+.events-page .service-pick-card {
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+.events-page .event-pick-card:hover,
+.events-page .service-pick-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.events-page .event-pick-card.selected,
+.events-page .service-pick-card.selected {
+  box-shadow: 0 0 0 3px var(--primary-glow), var(--shadow-sm);
+}
+.events-page .bk-food-btn {
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.events-page .bk-food-btn:hover:not(:disabled) { transform: translateY(-1px); }
+.events-page .bk-food-btn.active { box-shadow: 0 0 0 3px var(--primary-glow); }
+.events-page .od-step-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ---- Location row: never overflow, stack on mobile ---- */
+.events-page .event-location-row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: stretch;
+  min-width: 0;
+  max-width: 100%;
+}
+.events-page .event-location-row .form-control {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.events-page .event-location-row .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* ---- Price block polish + safe wrapping ---- */
+.events-page .event-total-row {
+  background: linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%);
+  border: 1px solid #fed7aa;
+}
+.events-page .event-context-box,
+.events-page .event-estimate-note {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.events-page .od-livebar { flex-wrap: wrap; row-gap: 0.5rem; }
+.events-page .od-livechip { min-width: 0; overflow-wrap: anywhere; }
+
+/* ---- Validation error: visible alert box, not a bare red line ---- */
+.events-page .event-error-slot:not(:empty) {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #b91c1c;
+  border-radius: 12px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.45;
+  margin: 0.15rem 0 0.9rem;
+}
+.events-page .event-error-slot:not(:empty)::before {
+  content: "!";
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.1rem;
+}
+
+/* ---- Mobile: nav stays side-by-side 50/50 (equal halves, never stacked) ---- */
+@media (max-width: 560px) {
+  .events-page .event-nav-row {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 0.6rem;
+  }
+  .events-page .event-location-row { flex-direction: column; }
+  .events-page .event-location-row .btn { width: 100%; }
+  .events-page .od-step-item { min-width: 132px; }
+  .events-page .bk-food-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 360px) {
+  .events-page .bk-food-grid { gap: 0.45rem; }
+  .events-page .bk-food-btn { font-size: 0.78rem; padding: 0.5rem 0.4rem; }
+  .events-page .od-step-item { min-width: 118px; }
+  /* Keep 50/50 halves on 360px phones: tighter gap + smaller label size. */
+  .events-page .event-nav-row { gap: 0.5rem; }
+  .events-page .event-nav-row .btn { font-size: 0.85rem !important; padding: 0.65rem 0.4rem !important; }
+}
+
+/* ---- Focus + reduced motion ---- */
+.events-page .event-pick-card:focus-visible,
+.events-page .bk-food-btn:focus-visible {
+  outline: 3px solid var(--primary-glow);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .events-page .event-pick-card,
+  .events-page .service-pick-card,
+  .events-page .bk-food-btn { transition: none; }
+  .events-page .event-pick-card:hover,
+  .events-page .service-pick-card:hover,
+  .events-page .bk-food-btn:hover:not(:disabled) { transform: none; }
 }

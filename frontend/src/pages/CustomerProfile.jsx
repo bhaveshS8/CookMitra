@@ -237,9 +237,9 @@ const CustomerProfile = () => {
                   <span key={key} className={`cp-pill ${cls}`}><Icon size={12} /> {text}</span>
                 ))}
               </div>
-              <ProfileCompletion profile={profile} addresses={addresses} onGo={goSection} />
             </div>
           </div>
+          <ProfileCompletion profile={profile} addresses={addresses} onGo={goSection} />
           <div className="cp-header-actions">
             <button type="button" className="btn btn-primary btn-sm" onClick={() => goSection("/dashboard/profile/personal")}><Pencil size={14} /> Edit profile</button>
             <button type="button" className="btn btn-outline btn-sm" onClick={() => goSection("/dashboard/profile/activity")}><CalendarCheck size={14} /> My bookings</button>

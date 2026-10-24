@@ -14,6 +14,20 @@ const CUSTOMER_CANCELLATION_REASONS = [
   "OTHER",
 ];
 
+// Cook-initiated cancellation (automatic-replacement flow). Stable
+// machine-readable codes — never persist translated labels. OTHER requires
+// a free-text explanation (cancellationReasonNote).
+const COOK_CANCELLATION_REASONS = [
+  "MEDICAL_EMERGENCY",
+  "ILLNESS",
+  "PERSONAL_UNAVAILABILITY",
+  "TRANSPORT_ISSUE",
+  "LOCATION_UNREACHABLE",
+  "SCHEDULING_CONFLICT",
+  "CUSTOMER_REQUESTED",
+  "OTHER",
+];
+
 const CUSTOMER_COMPLAINT_REASONS = [
   "COOK_DID_NOT_ARRIVE",
   "MAJOR_SERVICE_DEVIATION",
@@ -198,6 +212,7 @@ module.exports = {
   MS_6H,
   TERMINAL_STATUSES,
   CUSTOMER_CANCELLATION_REASONS,
+  COOK_CANCELLATION_REASONS,
   CUSTOMER_COMPLAINT_REASONS,
   NOT_AUTO_REFUNDABLE,
   computeRefund,

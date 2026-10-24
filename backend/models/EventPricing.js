@@ -19,11 +19,14 @@ const SERVICE_KEYS = ["cooking_only", "preparation_cooking", "cooking_serving"];
 const eventPricingSchema = new mongoose.Schema(
   {
     key: { type: String, unique: true, default: "default", trim: true },
-    // servicePrices[service][durationKey] = price in ₹ (§6).
+    // servicePrices[service][durationKey] = price in ₹ (§6). Map-of-Maps:
+    // NOTE the inner `of` must describe a Map — a duplicate `of:` key here
+    // previously collapsed to `of: Number`, which made EVERY nested write
+    // (admin PUT, seed) fail validation while reads silently fell back to
+    // defaults. Stored BSON is unchanged (nested objects), so no migration.
     servicePrices: {
       type: Map,
-      of: Map,
-      of: Number,
+      of: { type: Map, of: Number },
       default: undefined,
     },
     // ₹ per additional cook (§7).
@@ -43,7 +46,7 @@ const eventPricingSchema = new mongoose.Schema(
     ],
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   },
-  { timestamps: true }
+  { timestamps: true, optimisticConcurrency: true }
 );
 
 const EventPricing = mongoose.model("EventPricing", eventPricingSchema);

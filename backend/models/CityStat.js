@@ -8,6 +8,10 @@ const cityStatSchema = new mongoose.Schema(
     state: { type: String, default: "" },
     country: { type: String, default: "" },
     visits: { type: Number, default: 0, min: 0 },
+    // How many of those visits carried GPS-verified (device-fix) place
+    // labels vs coarse IP estimates. Old rows predate the field and read
+    // as 0 via $ifNull in the aggregation.
+    gpsVisits: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );

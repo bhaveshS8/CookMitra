@@ -12,6 +12,7 @@ const {
   assignCook,
   updateEventBookingStatus,
   cancelEventBooking,
+  verifyTravelDistance,
   getEventStats,
 } = require("../controllers/eventBookingController");
 
@@ -76,6 +77,16 @@ router.patch(
     .withMessage("Valid status is required")],
   validate,
   updateEventBookingStatus
+);
+// Admin verifies/corrects the provisional travel distance (see
+// distanceVerified in the model). Recomputes travel + total server-side.
+router.patch(
+  "/:id/verify-distance",
+  auth,
+  authorize("admin"),
+  [body("distanceKm").isFloat({ min: 0, max: 100000 }).withMessage("Distance must be between 0 and 100000 km")],
+  validate,
+  verifyTravelDistance
 );
 // Customer (own) or admin cancels.
 router.post("/:id/cancel", auth, cancelEventBooking);

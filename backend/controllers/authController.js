@@ -228,44 +228,6 @@ exports.register = async (req, res, next) => {
 
     await sendWelcomeNotification(user);
 
-    if (String(role).toUpperCase() === "COOK") {
-      const refCode = String(req.body.referralCode || req.body.ref || "").trim().toUpperCase();
-      if (refCode) {
-        try {
-          const CookProfile = require("../models/CookProfile");
-          const CookReferral = require("../models/CookReferral");
-          const ownerProfile = await CookProfile.findOne({ referralCode: refCode }).populate("user", "email");
-          const ownerId = ownerProfile?.user?._id || ownerProfile?.user;
-          if (
-            ownerProfile &&
-            ownerId &&
-            String(ownerId) !== String(user._id) &&
-            String(ownerProfile?.user?.email || "").toLowerCase() !== String(email).toLowerCase()
-          ) {
-            const already = await CookReferral.findOne({ referredCook: user._id }).select("_id");
-            if (!already) {
-              await CookReferral.create({
-                referrer: ownerId,
-                referredCook: user._id,
-                referralCode: refCode,
-              });
-              try {
-                const Notification = require("../models/Notification");
-                await Notification.create({
-                  user: ownerId,
-                  type: "referral_registered",
-                  message: `${user.name} joined Cook Mitra with your referral — ₹250 unlocks after their 10th verified booking.`,
-                  link: "/cook/earnings",
-                });
-              } catch {
-              }
-            }
-          }
-        } catch {
-        }
-      }
-    }
-
     setSessionCookie(res, token, true);
     res.status(201).json({
       token,
@@ -418,27 +380,6 @@ exports.googleAuth = async (req, res, next) => {
 
     if (isNewGoogleUser) {
       await sendWelcomeNotification(user);
-      if (String(user.role).toUpperCase() === "COOK") {
-        const refCode = String(req.body.referralCode || req.body.ref || "").trim().toUpperCase();
-        if (refCode) {
-          try {
-            const CookProfile = require("../models/CookProfile");
-            const CookReferral = require("../models/CookReferral");
-            const ownerProfile = await CookProfile.findOne({ referralCode: refCode }).populate("user", "email");
-            const ownerId = ownerProfile?.user?._id || ownerProfile?.user;
-            if (
-              ownerProfile && ownerId && String(ownerId) !== String(user._id) &&
-              String(ownerProfile?.user?.email || "").toLowerCase() !== String(user.email || "").toLowerCase()
-            ) {
-              const already = await CookReferral.findOne({ referredCook: user._id }).select("_id");
-              if (!already) {
-                await CookReferral.create({ referrer: ownerId, referredCook: user._id, referralCode: refCode });
-              }
-            }
-          } catch {
-          }
-        }
-      }
     }
 
     const token = generateToken(user);
@@ -1019,9 +960,70 @@ exports.adminDeleteUser = async (req, res, next) => {
       return res.status(403).json({ message: "Admin accounts cannot be deleted" });
     }
 
+    const Booking = require("../models/Booking");
+    // Financial-history guard: any booking row (as customer or cook) is an
+    // audit record linked to payment/refund/payout trails (Booking.payment,
+    // Booking.payout, LedgerEntry.booking, CancellationAudit.bookingId).
+    // This read runs BEFORE any destructive write, so a rejected deletion
+    // performs zero deletes. LedgerEntry/CancellationAudit/Complaint rows
+    // are never deleted by this controller in any path.
+    //
+    // Product policy (Option A, approved): hard deletion stays blocked
+    // whenever history exists, but an explicit `{ anonymize: true }`
+    // request scrubs direct identifiers, suspends the account, and
+    // invalidates sessions while preserving EVERY financial/audit record
+    // (bookings, payouts, refunds, ledger, audits) and the cook profile
+    // (needed to settle pending earnings). See the anonymize branch below.
+    const historyCount = await Booking.countDocuments({
+      $or: [{ customer: target._id }, { cook: target._id }],
+    });
+    const wantsAnonymize = req.body?.anonymize === true;
+    if (historyCount > 0 && !wantsAnonymize) {
+      return res.status(400).json({
+        message: "This account has booking or financial history and cannot be permanently deleted.",
+        code: "ACCOUNT_HAS_FINANCIAL_HISTORY",
+      });
+    }
+
+    if (historyCount > 0) {
+      // Anonymize-with-history: irreversible scrub of direct identifiers.
+      // Referential integrity is kept (same _id), so bookings, payouts,
+      // refunds, ledger entries, and audits stay intact and attributable
+      // to an anonymous record. Only availability is removed (no future
+      // matching); the cook profile — including payout details required
+      // to settle pending earnings — is retained as a financial record.
+      const Availability = require("../models/Availability");
+      target.name = "Deleted User";
+      // Email is unique + required: per-account placeholder, never "".
+      target.email = `deleted-${String(target._id).toLowerCase()}@deleted.local`;
+      // Clear BOTH: the pre-save hook mirrors phone<->mobile when one side
+      // is set, so clearing only one would resurrect the other.
+      target.phone = "";
+      target.mobile = "";
+      target.address = "";
+      target.avatar = "";
+      // Sparse-unique: must be undefined ("" would be indexed and collide
+      // across anonymized accounts).
+      target.googleId = undefined;
+      target.emailVerified = false;
+      target.phoneVerified = false;
+      target.savedAddresses = [];
+      target.resetPasswordToken = "";
+      target.resetPasswordExpires = null;
+      if (target.authProvider && target.authProvider !== "local") target.authProvider = "local";
+      target.status = "suspended";
+      target.tokenVersion = Number(target.tokenVersion || 0) + 1;
+      await target.save();
+      await Availability.deleteMany({ cook: target._id });
+      return res.json({
+        message: `Account anonymized and suspended — ${historyCount} booking record(s) preserved for audit`,
+        id: target._id,
+        anonymized: true,
+      });
+    }
+
     const CookProfile = require("../models/CookProfile");
     const Availability = require("../models/Availability");
-    const Booking = require("../models/Booking");
     const Review = require("../models/Review");
     const Notification = require("../models/Notification");
 

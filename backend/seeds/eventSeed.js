@@ -17,6 +17,8 @@ const EVENT_CATALOGUE = [
   { name: "Other", description: "Any other home event", icon: "calendar" },
 ];
 
+const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 const seedEvents = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI);
@@ -24,10 +26,22 @@ const seedEvents = async () => {
 
     let created = 0;
     for (const evt of EVENT_CATALOGUE) {
-      const existing = await EventType.findOne({ name: evt.name });
+      // Case-insensitive lookup matches the controller's duplicate guard
+      // (the unique index itself is case-sensitive, so an exact-match check
+      // would seed "Birthday" alongside an existing "birthday").
+      const existing = await EventType.findOne({
+        name: { $regex: `^${escapeRegExp(evt.name)}$`, $options: "i" },
+      });
       if (!existing) {
-        await EventType.create({ ...evt, active: true });
-        created += 1;
+        try {
+          await EventType.create({ ...evt, active: true });
+          created += 1;
+        } catch (e) {
+          // Concurrent seed runs (or a concurrent admin create) may win the
+          // check-then-insert race — the 11000 backstop means "already present".
+          if (e && e.code === 11000) continue;
+          throw e;
+        }
       }
     }
     console.log(`Event catalogue: ${created} created, ${EVENT_CATALOGUE.length - created} already present`);

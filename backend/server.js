@@ -211,6 +211,19 @@ if (process.env.NODE_ENV !== "test" && String(process.env.EXPIRED_BOOKING_SWEEP 
   }
 }
 
+// Durable event-notification outbox worker (in-process; atomic leases make it
+// safe with any number of instances/cluster workers). Retries event
+// notifications left pending by a crash or failed delivery — without it (or a
+// cron `npm run outbox:worker`), those would wait forever. Disabled in tests
+// and when EVENT_OUTBOX_WORKER=false (manual/cron runs still work).
+if (process.env.NODE_ENV !== "test" && String(process.env.EVENT_OUTBOX_WORKER || "").toLowerCase() !== "false") {
+  try {
+    require("./utils/eventOutbox").startOutboxWorker();
+  } catch (err) {
+    console.error("Event outbox worker failed to start (bookings unaffected):", err?.message || err);
+  }
+}
+
 process.on("unhandledRejection", (reason) => {
   console.error("Unhandled promise rejection (server kept alive):", reason);
 });
@@ -338,12 +351,10 @@ app.use("/api/complaints", require("./routes/complaints"));
 app.use("/api/notifications", require("./routes/notifications"));
 app.get("/api/realtime/stream", require("./utils/realtime").sseHandler);
 app.use("/api/whatsapp", require("./routes/whatsapp"));
-app.use("/api/leads", require("./routes/leads"));
 app.use("/api/coupons", require("./routes/coupons"));
 app.use("/api/analytics", require("./routes/analytics"));
 app.use("/api/payouts", strictLimiter, require("./routes/payouts"));
 app.use("/api/cook", require("./routes/cookEarnings"));
-app.use("/api/admin/cook-incentives", require("./routes/adminCookEarnings"));
 app.use("/api/admin/cook-payouts", require("./routes/adminCookEarnings"));
 app.use("/api/stats/public/visit", visitLimiter);
 app.use("/api/stats/public", require("./routes/stats"));
@@ -422,6 +433,10 @@ const shutdown = (signal) => {
   }
   try {
     require("./services/bookingTransitions").stopExpiredBookingSweeper();
+  } catch {
+  }
+  try {
+    require("./utils/eventOutbox").stopOutboxWorker();
   } catch {
   }
   server.close(() => {

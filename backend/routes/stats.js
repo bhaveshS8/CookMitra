@@ -102,7 +102,10 @@ router.post("/visit", async (req, res, next) => {
       visitWrites.push(
         CityStat.updateOne(
           { day, city: parsed.city, state: parsed.state, area: parsed.area || "" },
-          { $inc: { visits: 1 }, $setOnInsert: { country: parsed.country } },
+          {
+            $inc: { visits: 1, gpsVisits: parsed.source === "gps" ? 1 : 0 },
+            $setOnInsert: { country: parsed.country },
+          },
           { upsert: true }
         )
       );
@@ -150,6 +153,7 @@ router.get("/visits", auth, authorize("admin"), async (req, res, next) => {
           $group: {
             _id: { city: "$city", area: "$area", state: "$state", country: "$country" },
             visits: { $sum: "$visits" },
+            gpsVisits: { $sum: { $ifNull: ["$gpsVisits", 0] } },
           },
         },
         { $sort: { visits: -1 } },
@@ -162,6 +166,7 @@ router.get("/visits", auth, authorize("admin"), async (req, res, next) => {
             state: "$_id.state",
             country: "$_id.country",
             visits: 1,
+            gpsVisits: 1,
           },
         },
       ]),

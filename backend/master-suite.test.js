@@ -65,7 +65,7 @@ async function testAuth() {
 
   { const oF = User.findById; const doc = { ...mu, password: "secret-hash" }; User.findById = async () => doc; const r = makeRes(); try { await authCtrl.getMe({ user: { id: mu._id.toString() } }, r, next); check("1.6 getMe -> 200", r.statusCode === 200 && r.body?.email === "t@e.com", `s=${r.statusCode}`); check("1.6 getMe omits password", r.body.password === undefined, JSON.stringify(r.body)); } catch (e) { check("1.6 getMe", false, e.message); } finally { User.findById = oF; } }
 
-  { const oF = User.findByIdAndUpdate; User.findByIdAndUpdate = async () => ({ ...mu, name: "Upd" }); const r = makeRes(); try { await authCtrl.updateProfile({ user: { id: mu._id.toString() }, body: { name: "Upd" } }, r, next); check("1.7 updateProfile -> 200", r.statusCode === 200 && r.body?.name === "Upd", `s=${r.statusCode}`); } catch (e) { check("1.7 updateProfile", false, e.message); } finally { User.findByIdAndUpdate = oF; } }
+  { const oF = User.findByIdAndUpdate, oFB = User.findById; User.findById = () => ({ select: async () => ({ email: "t@e.com", phone: "9876543210", mobile: "9876543210" }) }); User.findByIdAndUpdate = async () => ({ ...mu, name: "Upd" }); const r = makeRes(); try { await authCtrl.updateProfile({ user: { id: mu._id.toString() }, body: { name: "Upd" } }, r, next); check("1.7 updateProfile -> 200", r.statusCode === 200 && r.body?.name === "Upd", `s=${r.statusCode}`); } catch (e) { check("1.7 updateProfile", false, e.message); } finally { User.findByIdAndUpdate = oF; User.findById = oFB; } }
 }
 
 async function testAdmin() {

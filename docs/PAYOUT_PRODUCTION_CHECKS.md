@@ -28,7 +28,7 @@ aggregations):
 1. Server version supports partial indexes (>= 3.2); prints replica-set
    vs standalone (standalone ⇒ transaction fallback applies to payout
    transitions).
-2. All **11 required unique indexes** exist with exact key, `unique: true`,
+2. All **8 required unique indexes** exist with exact key, `unique: true`,
    and exact partial filter:
    - `cookpayouts.uniq_cookpayout_payref` `{ paymentReference: 1 }`
      partial `{ paymentReference: { $exists: true, $gt: "" } }`
@@ -40,9 +40,9 @@ aggregations):
    - `bookings.uniq_refund_reference_key` `{ "payment.refundReferenceKey": 1 }` + partial
    - `bookings.uniq_booking_clientKey` `{ clientKey: 1 }` + partial
    - `bookings.uniq_payment_razorpayPaymentId` `{ "payment.razorpayPaymentId": 1 }` + partial
-   - `cookincentives.uniq_cookincentive_idem` `{ idempotencyKey: 1 }` + partial
-   - `cookleads.uniq_cook_lead_phone` `{ cook: 1, normalizedPhone: 1 }` (plain unique)
-   - `cookreferrals.uniq_referral_referred` `{ referredCook: 1 }` (plain unique)
+   (Lead, incentive, and referral collections were removed with those
+   programs; their old indexes may linger in the database harmlessly —
+   the checklist no longer requires them. Historical rows are preserved.)
 3. **Zero duplicate non-empty `paymentReference`** values in `cookpayouts`.
 4. **No paid cycle with unsynchronized bookings** (each paid cycle's
    `bookings[]` must all read `payoutInfo.payoutStatus: "paid"`).

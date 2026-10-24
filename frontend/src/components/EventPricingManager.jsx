@@ -48,14 +48,22 @@ const EventPricingManager = () => {
   };
 
   const handleSave = async () => {
+    if (saving) return;
     setSaving(true);
     try {
-      // Coerce to numbers before sending.
+      // Coerce to numbers before sending — reject empty/invalid cells instead
+      // of silently saving them as ₹0 (Number("") === 0).
       const servicePrices = {};
       for (const svc of SERVICES) {
         servicePrices[svc] = {};
         for (const dk of Object.keys(DURATION_LABELS)) {
-          const v = Number(pricing?.servicePrices?.[svc]?.[dk]);
+          const raw = pricing?.servicePrices?.[svc]?.[dk];
+          if (raw === "" || raw == null) {
+            showToast(`Missing price: ${EVENT_SERVICE_LABEL(svc)} / ${DURATION_LABELS[dk]}`, "error");
+            setSaving(false);
+            return;
+          }
+          const v = Number(raw);
           if (!Number.isFinite(v) || v < 0) {
             showToast(`Invalid price: ${EVENT_SERVICE_LABEL(svc)} / ${DURATION_LABELS[dk]}`, "error");
             setSaving(false);
@@ -66,7 +74,13 @@ const EventPricingManager = () => {
       }
       const extraHourPrices = {};
       for (const svc of SERVICES) {
-        const v = Number(pricing?.extraHourPrices?.[svc]);
+        const raw = pricing?.extraHourPrices?.[svc];
+        if (raw === "" || raw == null) {
+          showToast(`Missing extra-hour price: ${EVENT_SERVICE_LABEL(svc)}`, "error");
+          setSaving(false);
+          return;
+        }
+        const v = Number(raw);
         if (!Number.isFinite(v) || v < 0) {
           showToast(`Invalid extra-hour price: ${EVENT_SERVICE_LABEL(svc)}`, "error");
           setSaving(false);
@@ -74,20 +88,52 @@ const EventPricingManager = () => {
         }
         extraHourPrices[svc] = Math.round(v);
       }
+      if (pricing?.additionalCookPrice === "" || pricing?.additionalCookPrice == null) {
+        showToast("Missing additional-cook price", "error");
+        setSaving(false);
+        return;
+      }
+      const addCook = Number(pricing.additionalCookPrice);
+      if (!Number.isFinite(addCook) || addCook < 0) {
+        showToast("Invalid additional-cook price", "error");
+        setSaving(false);
+        return;
+      }
       const travelSlabs = (pricing?.travelSlabs || []).map((s) => ({
-        maxKm: s.maxKm == null || s.maxKm === "" ? 999999 : Number(s.maxKm),
+        // Empty "up to" on the last row means unlimited — send a large
+        // sentinel the backend accepts as the final slab (>= 1000000).
+        maxKm: s.maxKm == null || s.maxKm === "" ? 999999999 : Number(s.maxKm),
         charge: Number(s.charge),
       }));
+      for (const s of travelSlabs) {
+        if (!Number.isFinite(s.maxKm) || !Number.isFinite(s.charge) || s.charge < 0) {
+          showToast("Each travel slab needs a valid maxKm and non-negative charge", "error");
+          setSaving(false);
+          return;
+        }
+      }
       const res = await API.put("/event-pricing", {
         servicePrices,
-        additionalCookPrice: Number(pricing.additionalCookPrice),
+        additionalCookPrice: Math.round(addCook),
         extraHourPrices,
         travelSlabs,
       });
       setPricing(res.data);
       showToast("Event pricing updated!", "success");
     } catch (err) {
-      showToast(err.response?.data?.message || "Save failed", "error");
+      // 409 = another admin saved concurrently (optimistic concurrency) —
+      // reload so the next edit starts from the latest table.
+      if (err.response?.status === 409) {
+        showToast(`${err.response?.data?.message || "Conflict"} Reloading latest pricing…`, "error");
+        try {
+          const fresh = await API.get("/event-pricing");
+          setPricing(fresh.data);
+        } catch {
+          // keep current table on refetch failure
+        }
+      } else {
+        showToast(err.response?.data?.message || "Save failed", "error");
+      }
     } finally {
       setSaving(false);
     }
@@ -112,29 +158,30 @@ const EventPricingManager = () => {
       </p>
 
       <h3 style={{ fontSize: "1.05rem" }}>Hourly Service Prices (₹)</h3>
-      <div style={{ overflowX: "auto", marginBottom: "1.25rem" }}>
+      <div className="event-table-wrap" style={{ marginBottom: "1.25rem" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem", background: "#fff", borderRadius: 10, overflow: "hidden", border: "1px solid var(--border-subtle)" }}>
           <thead style={{ background: "var(--slate-50)" }}>
             <tr>
-              <th style={{ padding: "0.7rem", textAlign: "left" }}>Duration</th>
+              <th scope="col" style={{ padding: "0.7rem", textAlign: "left" }}>Duration</th>
               {SERVICES.map((s) => (
-                <th key={s} style={{ padding: "0.7rem", textAlign: "left" }}>{EVENT_SERVICE_LABEL(s)}</th>
+                <th scope="col" key={s} style={{ padding: "0.7rem", textAlign: "left" }}>{EVENT_SERVICE_LABEL(s)}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {Object.entries(DURATION_LABELS).map(([dk, label]) => (
               <tr key={dk} style={{ borderTop: "1px solid var(--slate-100)" }}>
-                <td style={{ padding: "0.6rem", fontWeight: 700 }}>{label}</td>
+                <th scope="row" style={{ padding: "0.6rem", fontWeight: 700, textAlign: "left", fontSize: "0.85rem" }}>{label}</th>
                 {SERVICES.map((s) => (
                   <td key={s} style={{ padding: "0.4rem" }}>
                     <input
                       type="number"
                       min={0}
                       className="form-control"
-                      style={{ maxWidth: 120 }}
+                      style={{ minWidth: 110 }}
                       value={pricing?.servicePrices?.[s]?.[dk] ?? ""}
                       onChange={(e) => setServicePrice(s, dk, e.target.value)}
+                      aria-label={`${EVENT_SERVICE_LABEL(s)} price for ${label}`}
                     />
                   </td>
                 ))}
@@ -216,7 +263,7 @@ const EventPricingManager = () => {
         </div>
       ))}
 
-      <button className="btn btn-primary" disabled={saving} onClick={handleSave} style={{ marginTop: "1rem" }}>
+      <button type="button" className="btn btn-primary" disabled={saving} onClick={handleSave} style={{ marginTop: "1rem" }}>
         {saving ? "Saving..." : "Save Event Pricing"}
       </button>
     </div>

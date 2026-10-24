@@ -2,8 +2,11 @@
 // Isolated: runs against an in-memory MongoDB, never production records.
 // Covers: snapshot idempotency + stale-status preservation, earnings
 // eligibility/totals/service-date bucketing, payout double-claim + illegal
-// transitions + duplicate references, incentive exactly-once qualification,
-// referral eligibility, regenerateReferral, config sanitization.
+// transitions + duplicate references, partial-failure divergence + repair,
+// payment-evidence gating, HTTP authorization, paise reconciliation,
+// config sanitization.
+// (Lead, incentive, and referral programs were removed in full; their
+// regression blocks were deleted with them.)
 process.env.JWT_SECRET = process.env.JWT_SECRET || "test-secret";
 process.env.NODE_ENV = "test";
 
@@ -49,18 +52,14 @@ async function main() {
   const User = require("./models/User");
   const Booking = require("./models/Booking");
   const CookProfile = require("./models/CookProfile");
-  const CookLead = require("./models/CookLead");
-  const CookIncentive = require("./models/CookIncentive");
-  const CookReferral = require("./models/CookReferral");
   const CookPayout = require("./models/CookPayout");
   const CookEventLog = require("./models/CookEventLog");
   // Ensure indexes (incl. new uniq_cookpayout_payref) exist before racing.
-  await Promise.all([Booking.init(), CookProfile.init(), CookLead.init(), CookIncentive.init(), CookReferral.init(), CookPayout.init(), CookEventLog.init()]);
+  await Promise.all([Booking.init(), CookProfile.init(), CookPayout.init(), CookEventLog.init()]);
 
   const svc = require("./utils/cookEarningsService");
   const earnCtrl = require("./controllers/cookEarningsController");
   const adminCtrl = require("./controllers/adminCookEarningsController");
-  const { incentiveProgress } = require("./utils/cookEarnings");
 
   const adminId = new Types.ObjectId().toString();
   const mkUser = async (role, name) => User.create({
@@ -297,91 +296,7 @@ async function main() {
     check("reference settles exactly one cycle", refCount === 1, `n=${refCount}`);
   }
 
-  // ── 5. Incentives: exactly-once qualification under concurrency ───────
-  {
-    const cook = await mkUser("cook");
-    await CookProfile.create({ user: cook._id, incentiveEnrolledAt: new Date("2026-10-01T00:00:00Z") });
-    const incs = await svc.refreshIncentiveEligibility(cook._id, new Date("2026-10-02T00:00:00Z"));
-    check("four incentives created idempotently", incs.length === 4, `n=${incs.length}`);
-    const again = await svc.refreshIncentiveEligibility(cook._id, new Date("2026-10-02T00:00:00Z"));
-    check("second refresh creates no duplicates", (await CookIncentive.countDocuments({ cook: cook._id })) === 4, `n=${again.length}`);
-    // 10 verified leads inside the 7-day JOINING window.
-    const joining = await CookIncentive.findOne({ cook: cook._id, code: "JOINING" });
-    for (let k = 0; k < 10; k++) {
-      await CookLead.create({
-        cook: cook._id,
-        customerName: `Cust ${k}`,
-        mobileNumber: `98765${String(10000 + k)}`,
-        normalizedPhone: `98765${String(10000 + k)}`,
-        location: "Pune",
-        submittedBy: cook._id,
-        status: "verified",
-        verificationStatus: "verified",
-        verifiedAt: new Date("2026-10-03T00:00:00Z"),
-      });
-    }
-    const [q1, q2] = await Promise.all([
-      svc.refreshIncentiveEligibility(cook._id, new Date("2026-10-04T00:00:00Z")),
-      svc.refreshIncentiveEligibility(cook._id, new Date("2026-10-04T00:00:00Z")),
-    ]);
-    const j1 = q1.find((i) => String(i.code) === "JOINING");
-    check("JOINING qualified at 10/10", j1?.status === "qualified" && j1?.eligible === true, JSON.stringify(j1));
-    const qEvents = await CookEventLog.countDocuments({ event: "incentive_qualified", refId: joining._id });
-    check("exactly one qualified audit under concurrency", qEvents === 1, `events=${qEvents}`);
-    // held/paid guards
-    const held = await CookIncentive.findOne({ cook: cook._id, code: "PERFORMANCE" });
-    {
-      const r = makeRes();
-      await adminCtrl.holdIncentive({ body: { reason: "review" }, user: { id: adminId }, params: { id: held._id.toString() } }, r, captureNext().next);
-      check("hold incentive + audit", r.statusCode === 200 && r.body?.status === "held" && (await CookEventLog.countDocuments({ event: "incentive_held", refId: held._id })) === 1, `s=${r.statusCode}`);
-    }
-    {
-      await CookIncentive.updateOne({ _id: held._id }, { $set: { status: "paid" } });
-      const r = makeRes();
-      await adminCtrl.holdIncentive({ body: { reason: "x" }, user: { id: adminId }, params: { id: held._id.toString() } }, r, captureNext().next);
-      check("hold of paid incentive blocked", r.statusCode === 400, `s=${r.statusCode}`);
-    }
-  }
-
-  // ── 6. Referrals: eligibility + approval guards ───────────────────────
-  {
-    const referrer = await mkUser("cook", "Referrer");
-    const referred = await mkUser("cook", "Referred");
-    // refunded booking must NOT count
-    const cust = await mkUser("customer");
-    await mkBooking(referred._id, cust._id, { payment: { status: "paid", paidAmount: 349, refundStatus: "processed" } });
-    const n0 = await svc.countVerifiedBookings(referred._id);
-    check("refunded booking excluded from referral count", n0 === 0, `n=${n0}`);
-    await mkBooking(referred._id, cust._id, {});
-    const n1 = await svc.countVerifiedBookings(referred._id);
-    check("genuine booking counts", n1 === 1, `n=${n1}`);
-    const ref = await CookReferral.create({ referrer: referrer._id, referredCook: referred._id, referralCode: "CM-TEST-0000", bookingTarget: 10, reward: 250 });
-    {
-      const r = makeRes();
-      await adminCtrl.approveReferral({ user: { id: adminId }, params: { id: ref._id.toString() } }, r, captureNext().next);
-      check("unqualified referral approval blocked", r.statusCode === 400 && r.body?.code === "REFERRAL_NOT_QUALIFIED", `s=${r.statusCode}`);
-    }
-  }
-
-  // ── 7. regenerateReferral works (was a ReferenceError) ────────────────
-  {
-    const cook = await mkUser("cook", "Regen Cook");
-    await CookProfile.create({ user: cook._id });
-    const r = makeRes();
-    const { box, next } = captureNext();
-    await earnCtrl.regenerateReferral({ user: { id: cook._id.toString() } }, r, next);
-    check("regenerateReferral 200 with shaped code", r.statusCode === 200 && /^CM-[A-Z]{1,12}-[0-9A-F]{4}$/.test(r.body?.referralCode || ""), `s=${r.statusCode} ${JSON.stringify(r.body)} err=${box.error?.message || ""}`);
-    // used code cannot be regenerated
-    const cook2 = await mkUser("cook", "Used Cook");
-    const prof2 = await CookProfile.create({ user: cook2._id, referralCode: "CM-USED-0000" });
-    await CookReferral.create({ referrer: cook2._id, referredCook: (await mkUser("cook"))._id, referralCode: "CM-USED-0000" });
-    const r2 = makeRes();
-    await earnCtrl.regenerateReferral({ user: { id: cook2._id.toString() } }, r2, captureNext().next);
-    check("regenerate blocked after code used", r2.statusCode === 400, `s=${r2.statusCode}`);
-    void prof2;
-  }
-
-  // ── 8. Config sanitization + incentive edge guards (subprocess) ───────
+  // ── 8. Config sanitization (subprocess) ────────────────────────────
   {
     const out = execSync(
       `node -e "process.env.COOK_DEDUCTION_PERCENT='abc'; delete require.cache[require.resolve('./config/cookEarnings')]; const c=require('./config/cookEarnings'); const u=require('./utils/cookEarnings'); const t=u.computeCookPayout(199); console.log(JSON.stringify({d:c.deductionPercentage,payout:t.cookPayoutAmount,ded:t.platformDeductionAmount}));"`,
@@ -389,7 +304,6 @@ async function main() {
     );
     const got = JSON.parse(out.trim().split("\n").pop());
     check("invalid COOK_DEDUCTION_PERCENT falls back to 15", got.d === 15 && got.payout === 169.15 && got.ded === 29.85, out.trim());
-    check("zero-target incentive never eligible", incentiveProgress({ incentive: { target: 0, startDate: new Date(), endDate: new Date(Date.now() + 86400000), status: "in_progress", reward: 1 }, verifiedLeadCount: 0 }).eligible === false);
   }
 
   // ── 9. Financial reconciliation in integer paise ──────────────────────
@@ -695,50 +609,24 @@ async function main() {
     }
   }
 
-  // ── 11. Bonus-reporting contract: booking-only cycles, separate bonuses
-  // Contract (matches Finance expectation): cycle totals carry booking
-  // earnings ONLY (bonuses/referralEarnings stay 0); approved+paid
-  // incentive and referral rewards surface in overview.bonuses; lifetime
-  // never includes rewards (no double-count, no omission).
+  // ── 11. Booking-only earnings: no bonuses anywhere ────────────────
+  // (Lead, incentive, and referral programs were removed: overview carries
+  // booking earnings only, and cycle totals reconcile with earnings.)
   {
     const cook = await mkUser("cook");
     const cust = await mkUser("customer");
     await mkBooking(cook._id, cust._id, {}); // 296.65 booking earnings
-    // Live window (relative to wall-clock): approveIncentive enforces real
-    // expiry, so the JOINING 7-day window must contain right now.
-    const enrollAt = new Date(Date.now() - 24 * 3600 * 1000);
-    await CookProfile.create({ user: cook._id, incentiveEnrolledAt: enrollAt });
-    await svc.refreshIncentiveEligibility(cook._id);
-    const joining = await CookIncentive.findOne({ cook: cook._id, code: "JOINING" });
-    for (let k = 0; k < 10; k++) {
-      await CookLead.create({
-        cook: cook._id, customerName: `B ${k}`, mobileNumber: `97654${String(30000 + k)}`,
-        normalizedPhone: `97654${String(30000 + k)}`, location: "Pune", submittedBy: cook._id,
-        status: "verified", verificationStatus: "verified", verifiedAt: new Date(),
-      });
-    }
-    await svc.refreshIncentiveEligibility(cook._id);
-    const rA = makeRes();
-    await adminCtrl.approveIncentive({ user: { id: adminId }, params: { id: joining._id.toString() } }, rA, captureNext().next);
-    check("incentive approved for bonus test", rA.statusCode === 200, `s=${rA.statusCode}`);
-    // Referral reward for the same cook as referrer.
-    const referred = await mkUser("cook");
-    const ref = await CookReferral.create({ referrer: cook._id, referredCook: referred._id, referralCode: "CM-BONUS-1", bookingTarget: 1, reward: 250 });
-    for (let k = 0; k < 1; k++) await mkBooking(referred._id, cust._id, {});
-    const rR = makeRes();
-    await adminCtrl.approveReferral({ user: { id: adminId }, params: { id: ref._id.toString() } }, rR, captureNext().next);
-    check("referral approved for bonus test", rR.statusCode === 200, `s=${rR.statusCode}`);
     const rE = makeRes();
     await earnCtrl.getEarnings({ user: { id: cook._id.toString() }, query: {} }, rE, captureNext().next);
     const ov = rE.body?.overview || {};
-    check("overview.bonuses = incentive 500 + referral 250", ov.bonuses === 750, `bonuses=${ov.bonuses}`);
-    check("lifetime excludes rewards (booking earnings only)", ov.lifetime === 296.65, `lifetime=${ov.lifetime}`);
+    check("overview has no bonuses field", ov.bonuses === undefined, `bonuses=${ov.bonuses}`);
+    check("lifetime is booking earnings only", ov.lifetime === 296.65, `lifetime=${ov.lifetime}`);
     const rB = makeRes();
     await adminCtrl.buildCookPayout({ body: { cookId: cook._id.toString() }, user: { id: adminId }, params: {} }, rB, captureNext().next);
     check(
-      "cycle totals booking-only (bonuses 0, total == earnings)",
-      rB.statusCode === 201 && rB.body?.bonuses === 0 && rB.body?.referralEarnings === 0 && rB.body?.totalPayable === rB.body?.cookEarnings && rB.body?.cookEarnings === 296.65,
-      `s=${rB.statusCode} ${JSON.stringify({ t: rB.body?.totalPayable, e: rB.body?.cookEarnings, b: rB.body?.bonuses })}`
+      "cycle totals booking-only (total == earnings)",
+      rB.statusCode === 201 && rB.body?.totalPayable === rB.body?.cookEarnings && rB.body?.cookEarnings === 296.65,
+      `s=${rB.statusCode} ${JSON.stringify({ t: rB.body?.totalPayable, e: rB.body?.cookEarnings })}`
     );
   }
 

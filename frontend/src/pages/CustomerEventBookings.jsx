@@ -5,7 +5,7 @@ import { formatCurrency, EVENT_SERVICE_LABEL, eventStatusLabel } from "../utils/
 import { CalendarCheck, ShieldCheck, PartyPopper, ChevronRight } from "lucide-react";
 
 const CustomerEventBookings = () => {
-  const { data, loading } = useFetch("/event-bookings/my");
+  const { data, loading, error, refetch } = useFetch("/event-bookings/my");
   const navigate = useNavigate();
   const bookings = Array.isArray(data) ? data : [];
 
@@ -19,6 +19,13 @@ const CustomerEventBookings = () => {
     navigate(`/event-bookings/${id}`);
   };
 
+  const openBookingKey = (e, id) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      navigate(`/event-bookings/${id}`);
+    }
+  };
+
   const renderCard = (b) => {
     const cook = b.cookId && typeof b.cookId === "object" ? b.cookId : null;
     return (
@@ -28,9 +35,7 @@ const CustomerEventBookings = () => {
         onClick={(e) => openBooking(e, b._id)}
         role="button"
         tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") navigate(`/event-bookings/${b._id}`);
-        }}
+        onKeyDown={(e) => openBookingKey(e, b._id)}
         aria-label={`Open ${b.eventType} booking details`}
         style={{ cursor: "pointer" }}
       >
@@ -78,6 +83,17 @@ const CustomerEventBookings = () => {
       <div className="loading-spinner-wrapper">
         <div className="spinner"></div>
         <p>Loading your event bookings...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="dashboard-container my-bookings-page">
+        <div className="error-alert-banner">{error}</div>
+        <button type="button" className="btn btn-outline btn-sm" style={{ marginTop: "1rem" }} onClick={refetch}>
+          Retry
+        </button>
       </div>
     );
   }

@@ -43,12 +43,16 @@ exports.getPayoutQueue = async (req, res, next) => {
     const byUser = new Map(profiles.map((p) => [String(p.user), p.payoutDetails || null]));
     const enriched = (bookings || []).map((b) => {
       const plain = b.toObject ? b.toObject() : b;
-      const { eligible, reasons } = payoutEligibility(b);
+      const { eligible, reasons, verificationOnly } = payoutEligibility(b);
       return {
         ...plain,
         cookPayoutDetails: byUser.get(String(b.cook?._id || b.cook)) || null,
         payoutEligible: eligible,
         payoutBlockers: eligible ? [] : reasons,
+        // Lets the admin UI offer an audited override for rows blocked
+        // ONLY by attendance-proof gaps (legacy auto-completes). Money
+        // blockers are never overridable.
+        payoutOverrideAllowed: !eligible && verificationOnly === true,
       };
     });
     return sendList(res, enriched, pg, () => Booking.countDocuments(pendingFilter()));
@@ -93,9 +97,34 @@ exports.settlePayout = async (req, res, next) => {
     if (existing.payout?.status === "not_applicable") {
       return res.status(400).json({ message: "This booking has no cook payout" });
     }
-    const { eligible, reasons } = payoutEligibility(existing);
+    // Weekly-cycle rail guard: bookings claimed into (or paid through) a
+    // weekly CookPayout cycle must never be settled individually — the
+    // cycle settlement is the sole payment path for them.
+    const cycleStatus = existing.payoutInfo?.payoutStatus;
+    if (cycleStatus === "paid") {
+      return res.status(409).json({ message: "This booking was already paid through a weekly payout — settling it again would pay the cook twice", code: "PAYOUT_ALREADY_SETTLED_WEEKLY" });
+    }
+    if (cycleStatus && cycleStatus !== "eligible") {
+      return res.status(409).json({ message: `This booking is ${cycleStatus} in a weekly payout cycle — settle it there, not individually`, code: "PAYOUT_IN_WEEKLY_CYCLE" });
+    }
+    const { eligible, reasons, verificationOnly } = payoutEligibility(existing);
+    // Audited override for legacy auto-completed services: the platform
+    // itself finished these without an OTP trail, so no attendance proof
+    // can ever appear and the row would otherwise sit unpayable forever.
+    // The admin must explicitly assert verification out-of-band with a
+    // written reason; the assertion is stored in the status history and
+    // the ledger. Money blockers (unpaid/test/refund/settled/amounts)
+    // can never be overridden.
+    let overrideReason = null;
     if (!eligible) {
-      return res.status(400).json({ message: reasons[0], reasons, code: "PAYOUT_NOT_ELIGIBLE" });
+      const wantsOverride = req.body?.verificationOverride === true;
+      if (!wantsOverride || verificationOnly !== true) {
+        return res.status(400).json({ message: reasons[0], reasons, code: "PAYOUT_NOT_ELIGIBLE" });
+      }
+      overrideReason = String(req.body?.overrideReason || "").trim().slice(0, 500);
+      if (overrideReason.length < 10) {
+        return res.status(400).json({ message: "Describe how the service was verified (min 10 characters) — the note is kept on the payout record", code: "OVERRIDE_REASON_REQUIRED" });
+      }
     }
     const refKey = normalizePayoutReference(reference);
     const dup = await Booking.findOne({
@@ -127,8 +156,21 @@ exports.settlePayout = async (req, res, next) => {
       booking = await Booking.findOneAndUpdate(
         {
           _id: existing._id,
-          ...PAYOUT_PENDING_OR_MISSING,
           "payment.refundStatus": { $in: ["none", "rejected"] },
+          // Atomic guards: the legacy pending state AND freedom from the
+          // weekly-cycle rail. A booking claimed into a weekly cycle after
+          // our read must not match here — the update loses the race
+          // instead of double-paying. ($and because both guards contain
+          // an $or and would otherwise overwrite each other.)
+          $and: [
+            { ...PAYOUT_PENDING_OR_MISSING },
+            {
+              $or: [
+                { "payoutInfo.payoutStatus": { $exists: false } },
+                { "payoutInfo.payoutStatus": "eligible" },
+              ],
+            },
+          ],
         },
         {
           $set: {
@@ -143,7 +185,7 @@ exports.settlePayout = async (req, res, next) => {
           $push: {
             statusHistory: {
               status: existing.status,
-              note: `Cook payout ₹${existing.cookPayout} settled (ref: ${reference}) by admin`,
+              note: `Cook payout ₹${existing.cookPayout} settled (ref: ${reference}) by admin${overrideReason ? ` — verification override: ${overrideReason}` : ""}`,
             },
           },
         },
@@ -158,6 +200,9 @@ exports.settlePayout = async (req, res, next) => {
     if (!booking) {
       const fresh = await Booking.findById(req.params.id);
       if (fresh?.payout?.status === "settled") return res.json(fresh);
+      if (fresh?.payoutInfo?.payoutStatus && fresh.payoutInfo.payoutStatus !== "eligible") {
+        return res.status(409).json({ message: `This booking is ${fresh.payoutInfo.payoutStatus} in a weekly payout cycle — settle it there, not individually`, code: "PAYOUT_IN_WEEKLY_CYCLE" });
+      }
       return res.status(409).json({ message: "Payout is already being processed — please refresh.", code: "PAYOUT_ALREADY_PROCESSED" });
     }
     await recordLedger({
@@ -170,7 +215,7 @@ exports.settlePayout = async (req, res, next) => {
       actor: `admin:${req.user.id}`,
       source: "admin",
       payoutReference: reference,
-      reason: `Cook share settled to ${recipient?.upiId || recipient?.accountLast4 || "recorded destination"}`,
+      reason: `Cook share settled to ${recipient?.upiId || recipient?.accountLast4 || "recorded destination"}${overrideReason ? ` (attendance unverified — admin override: ${overrideReason})` : ""}`,
     });
 
     try {

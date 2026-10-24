@@ -15,7 +15,7 @@ import EventTypeManager from "../components/EventTypeManager";
 import VisitStats from "../components/VisitStats";
 import AnalyticsPanel from "../components/AnalyticsPanel";
 import AdminPayoutsPanel from "../components/AdminPayoutsPanel";
-import AdminIncentivesPanel from "../components/AdminIncentivesPanel";
+import AdminWeeklyPayouts from "../components/AdminWeeklyPayouts";
 import ConfirmDialog from "../components/ConfirmDialog";
 import {
   ShieldAlert,
@@ -26,7 +26,6 @@ import {
   X,
   CheckCircle2,
   AlertCircle,
-  MessageCircle,
   Tag,
   Trash2,
   Plus,
@@ -71,7 +70,7 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("book
         </div>
         <div>
           <Link to="/admin/complaints" className="btn btn-outline btn-sm">
-            <ShieldAlert size={15} /> Cook Complaints
+            <ShieldAlert size={15} /> Complaints
           </Link>
         </div>
       </div>
@@ -120,12 +119,6 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("book
           <ShieldCheck size={17} /> Admins
         </button>
         <button
-          className={`tab-btn ${activeTab === "leads" ? "active" : ""}`}
-          onClick={() => setActiveTab("leads")}
-        >
-          <MessageCircle size={17} /> WhatsApp Enquiries
-        </button>
-        <button
           className={`tab-btn ${activeTab === "coupons" ? "active" : ""}`}
           onClick={() => setActiveTab("coupons")}
         >
@@ -144,16 +137,22 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("book
           <Banknote size={17} /> Cook Payouts
         </button>
         <button
+          className={`tab-btn ${activeTab === "pending-payouts" ? "active" : ""}`}
+          onClick={() => setActiveTab("pending-payouts")}
+        >
+          <Clock3 size={17} /> Pending Payouts
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "completed-payments" ? "active" : ""}`}
+          onClick={() => setActiveTab("completed-payments")}
+        >
+          <CheckCircle2 size={17} /> Completed Payments
+        </button>
+        <button
           className={`tab-btn ${activeTab === "refunds" ? "active" : ""}`}
           onClick={() => setActiveTab("refunds")}
         >
           <Wallet size={17} /> Refunds
-        </button>
-        <button
-          className={`tab-btn ${activeTab === "incentives" ? "active" : ""}`}
-          onClick={() => setActiveTab("incentives")}
-        >
-          <Star size={17} /> Cook Incentives
         </button>
         <button
           className={`tab-btn ${activeTab === "analytics" ? "active" : ""}`}
@@ -170,11 +169,11 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("book
       {activeTab === "event-pricing" && <EventPricingManager />}
       {activeTab === "users" && <UserManagement />}
       {activeTab === "admins" && <AdminManagement />}
-      {activeTab === "leads" && <LeadManagement />}
       {activeTab === "coupons" && <CouponManagement />}
       {activeTab === "payouts" && <AdminPayoutsPanel view="payouts" />}
+      {activeTab === "pending-payouts" && <AdminWeeklyPayouts mode="pending" />}
+      {activeTab === "completed-payments" && <AdminWeeklyPayouts mode="completed" />}
       {activeTab === "refunds" && <AdminPayoutsPanel view="refunds" />}
-      {activeTab === "incentives" && <AdminIncentivesPanel />}
       {activeTab === "visits" && <VisitStats />}
       {activeTab === "analytics" && <AnalyticsPanel />}
     </div>
@@ -487,11 +486,23 @@ const BookingManagement = () => {
         d.bookingId ? "This request expired — the slot was released." : null
       );
     };
+    const onReplacementNeeded = (e) => {
+      const d = e?.detail || {};
+      const ref = d.bookingId ? String(d.bookingId).slice(-6) : "";
+      showToast(
+        `Replacement cook needed${ref ? ` — booking #${ref}` : ""}. Open the request to assign an eligible cook.`,
+        "warning",
+        9000
+      );
+      refetch();
+    };
     window.addEventListener("realtime-booking-request", onRequest);
+    window.addEventListener("realtime-booking-replacement-needed", onReplacementNeeded);
     window.addEventListener("realtime-booking-assigned", onAssigned);
     window.addEventListener("realtime-booking-expired", onExpired);
     return () => {
       window.removeEventListener("realtime-booking-request", onRequest);
+      window.removeEventListener("realtime-booking-replacement-needed", onReplacementNeeded);
       window.removeEventListener("realtime-booking-assigned", onAssigned);
       window.removeEventListener("realtime-booking-expired", onExpired);
     };
@@ -1306,131 +1317,6 @@ const AdminManagement = () => {
           </p>
         </div>
       </div>
-    </div>
-  );
-};
-
-const LeadManagement = () => {
-  const { data: leads, loading, refetch } = useFetch("/leads");
-  const showToast = useShowToast();
-  const [pendingDelete, setPendingDelete] = useState(null);
-
-  const handleStatus = async (id, status) => {
-    try {
-      await API.patch(`/leads/${id}`, { status });
-      showToast(`Enquiry marked as ${status}`, "success");
-      refetch();
-    } catch (err) {
-      showToast(err.response?.data?.message || "Update failed", "error");
-    }
-  };
-
-  const handleDelete = async () => {
-    const lead = pendingDelete;
-    if (!lead) return;
-    setPendingDelete(null);
-    try {
-      await API.delete(`/leads/${lead._id}`);
-      showToast("Enquiry deleted", "success");
-      refetch();
-    } catch (err) {
-      showToast(err.response?.data?.message || "Delete failed", "error");
-    }
-  };
-
-  return (
-    <div>
-      <h2 style={{ fontSize: "1.4rem", marginBottom: "1.5rem" }}>WhatsApp Enquiries</h2>
-      {loading ? (
-        <div className="loading-spinner-wrapper">
-          <div className="spinner"></div>
-          <p>Loading enquiries...</p>
-        </div>
-      ) : leads && leads.length > 0 ? (
-        <div style={{ background: "white", borderRadius: "var(--radius-lg)", border: "1px solid var(--border-subtle)", overflow: "hidden" }}>
-          <div className="admin-table-wrapper">
-          <table style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "0.95rem" }}>
-            <thead style={{ background: "var(--slate-50)", borderBottom: "1px solid var(--slate-200)" }}>
-              <tr>
-                <th style={{ padding: "1rem" }}>Name</th>
-                <th style={{ padding: "1rem" }}>WhatsApp</th>
-                <th style={{ padding: "1rem" }}>Location</th>
-                <th style={{ padding: "1rem" }}>Status</th>
-                <th style={{ padding: "1rem" }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {leads.map((lead) => (
-                <tr key={lead._id} style={{ borderBottom: "1px solid var(--slate-100)" }}>
-                  <td style={{ padding: "1rem", fontWeight: 700 }}>{lead.name}</td>
-                  <td style={{ padding: "1rem" }}>
-                    <a
-                      href={`https://wa.me/91${lead.whatsapp}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: "#16a34a", fontWeight: 600 }}
-                    >
-                      +91 {lead.whatsapp}
-                    </a>
-                  </td>
-                  <td style={{ padding: "1rem", color: "var(--slate-600)" }}>
-                    {lead.location}
-                    {lead.coords?.lat != null && lead.coords?.lng != null && (
-                      <>
-                        <br />
-                        <a
-                          href={`https://www.google.com/maps/dir/?api=1&destination=${lead.coords.lat},${lead.coords.lng}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ color: "#1D4ED8", fontWeight: 600, fontSize: "0.85rem" }}
-                        >
-                          Open pinned location in Maps
-                        </a>
-                      </>
-                    )}
-                  </td>
-                  <td style={{ padding: "1rem" }}>
-                    <span className="badge badge-festive" style={{ textTransform: "capitalize" }}>
-                      {lead.status}
-                    </span>
-                  </td>
-                  <td style={{ padding: "1rem" }}>
-                    <select
-                      value={lead.status}
-                      onChange={(e) => handleStatus(lead._id, e.target.value)}
-                      style={{ padding: "0.4rem", borderRadius: "6px" }}
-                    >
-                      <option value="new">New</option>
-                      <option value="contacted">Contacted</option>
-                      <option value="converted">Converted</option>
-                      <option value="closed">Closed</option>
-                    </select>
-                    <button
-                      className="btn btn-danger-outline btn-sm"
-                      style={{ marginLeft: "0.5rem" }}
-                      onClick={() => setPendingDelete(lead)}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-        </div>
-      ) : (
-        <p style={{ color: "var(--slate-500)" }}>No enquiries yet.</p>
-      )}
-      <ConfirmDialog
-        open={!!pendingDelete}
-        title={`Delete enquiry from ${pendingDelete?.name}?`}
-        message="This cannot be undone."
-        confirmLabel="Delete enquiry"
-        tone="danger"
-        onCancel={() => setPendingDelete(null)}
-        onConfirm={handleDelete}
-      />
     </div>
   );
 };

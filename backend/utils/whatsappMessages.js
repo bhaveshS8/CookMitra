@@ -143,19 +143,20 @@ const formatAddress = (booking) => {
   return joined || "—";
 };
 
-// Tappable Google Maps route to the venue — the cook taps and follows
-// navigation directly. Prefers the stored GPS pin, falls back to an
-// address search when no coordinates exist.
+// Tappable Google Maps link to the venue — the cook taps and follows
+// navigation directly. Prefers the stored GPS pin (exact coordinates),
+// falls back to an address search when no coordinates exist. Only uses
+// the booking's own saved location — never invents coordinates/address.
 const mapsDirLink = (booking) => {
   try {
     const lat = booking?.location?.lat;
     const lng = booking?.location?.lng;
     if (lat != null && lng != null && String(lat) !== "" && String(lng) !== "") {
-      return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+      return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
     }
     const addr = formatAddress(booking);
     if (addr && addr !== "—") {
-      return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`;
+      return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
     }
     return null;
   } catch {
@@ -228,10 +229,18 @@ const buildBookingRequestMessage = ({ booking, customerName } = {}) => {
     booking?.notes != null && String(booking.notes).trim() !== ""
       ? String(booking.notes).trim()
       : "";
+  const bookingId =
+    booking?._id != null && String(booking._id).trim() !== ""
+      ? String(booking._id).trim()
+      : "";
+  const isPaid = String(booking?.payment?.status || "").toLowerCase() === "paid";
   return [
     "🍳 नवीन Cook Mitra बुकिंग विनंती",
     "",
     `👤 ग्राहक: ${name}`,
+    "",
+    `📋 बुकिंग क्रमांक: ${bookingId || NOT_AVAILABLE}`,
+    `🍽️ सेवा: ${serviceTypeMarathi(booking?.serviceType)}`,
     "",
     `📅 तारीख: ${serviceDate}`,
     `📆 वार: ${weekday}`,
@@ -247,17 +256,29 @@ const buildBookingRequestMessage = ({ booking, customerName } = {}) => {
     notes ? "📝 सूचना:" : "📝 सूचना: नाही",
     ...(notes ? [notes] : []),
     "",
+    ...(isPaid
+      ? [
+          "💳 पेमेंट स्थिती: ग्राहकाने आधीच पेमेंट केले आहे.",
+          "स्वीकारल्यास पुन्हा पेमेंटची आवश्यकता नाही.",
+          "",
+        ]
+      : []),
     "कृपया खालील पर्याय निवडा:",
   ].join("\n");
 };
 
 const buildCookBookingScheduledMessage = ({ booking, cookName, customerName, bookingUrl } = {}) => {
   const dirLink = mapsDirLink(booking);
+  const bookingId =
+    booking?._id != null && String(booking._id).trim() !== ""
+      ? String(booking._id).trim()
+      : "";
   return [
     `नमस्कार ${cookName || "कुक"} 🙏`,
     "",
     "तुमची बुकिंग यशस्वीपणे निश्चित झाली आहे.",
     "",
+    `📋 बुकिंग क्रमांक: ${bookingId || NOT_AVAILABLE}`,
     `👤 ग्राहक: ${customerName || "ग्राहक"}`,
     `📅 तारीख: ${formatServiceDate(booking)}`,
     `⏰ वेळ: ${slotRange(booking?.startTime, booking?.endTime) || "माहिती उपलब्ध नाही"}`,
@@ -271,6 +292,8 @@ const buildCookBookingScheduledMessage = ({ booking, cookName, customerName, boo
     "",
     "📝 अतिरिक्त माहिती:",
     formatNotes(booking),
+    "",
+    "💳 पेमेंट स्थिती: ग्राहकाने आधीच पेमेंट केले आहे. पुन्हा पेमेंट घेऊ नका.",
     "",
     "कृपया दिलेल्या वेळेवर ग्राहकाच्या पत्त्यावर पोहोचा.",
     "",
@@ -342,6 +365,68 @@ const buildBookingAlreadyAcceptedMessage = ({ booking } = {}) =>
 const buildBookingCancelledMessage = ({} = {}) =>
   ["Cook Mitra", "", "ग्राहकाने ही बुकिंग रद्द केली आहे."].join("\n");
 
+// Cook-side cancellation notice (Marathi). Variants:
+//   cook     = assigned cook cancelled → replacement search is on
+//   customer = customer cancelled
+//   admin    = support team cancelled
+// Anything else falls back to the customer-cancelled line. Only depends on
+// live booking fields; missing date shows NOT_AVAILABLE, never a guess.
+const buildCookCancelledMessage = ({ booking, cancelledBy } = {}) => {
+  const by = String(cancelledBy || "").toLowerCase();
+  const who =
+    by === "cook"
+      ? "कुकने हे बुकिंग रद्द केले आहे."
+      : by === "admin"
+        ? "आमच्या सपोर्ट टीमने हे बुकिंग रद्द केले आहे."
+        : "ग्राहकाने ही बुकिंग रद्द केली आहे.";
+  const bookingId =
+    booking?._id != null && String(booking._id).trim() !== ""
+      ? String(booking._id).trim()
+      : "";
+  const lines = [
+    "🍳 Cook Mitra — बुकिंग रद्द",
+    "",
+    who,
+    "",
+    `📋 बुकिंग क्रमांक: ${bookingId || NOT_AVAILABLE}`,
+    `📅 तारीख: ${booking?.date ? formatMarathiDate(booking.date) : NOT_AVAILABLE}`,
+  ];
+  if (by === "cook") {
+    const isPaid = String(booking?.payment?.status || "").toLowerCase() === "paid";
+    lines.push(
+      "",
+      "आम्ही बदली कुक शोधत आहोत — कृपया तुमच्या कुक डॅशबोर्डवर लक्ष ठेवा."
+    );
+    if (isPaid) {
+      lines.push(
+        "",
+        "💳 या बुकिंगचे पेमेंट आधीच झाले आहे; पुन्हा पेमेंटची आवश्यकता नाही."
+      );
+    }
+  }
+  return lines.join("\n");
+};
+
+// Cook-side acceptance acknowledgement (Marathi): the cook just accepted;
+// the customer completes payment within minutes. Used for the admin
+// accept-on-behalf cook copy.
+const buildCookAcceptedMessage = ({ booking, customerName } = {}) => {
+  const bookingId =
+    booking?._id != null && String(booking._id).trim() !== ""
+      ? String(booking._id).trim()
+      : "";
+  return [
+    "✅ Cook Mitra — तुम्ही बुकिंग स्वीकारले आहे",
+    "",
+    `👤 ग्राहक: ${customerName || "ग्राहक"}`,
+    `🍽️ सेवा: ${serviceTypeMarathi(booking?.serviceType)}`,
+    `📅 तारीख: ${booking?.date ? formatMarathiDate(booking.date) : NOT_AVAILABLE}`,
+    `📋 बुकिंग क्रमांक: ${bookingId || NOT_AVAILABLE}`,
+    "",
+    "ग्राहक ५ मिनिटांत पेमेंट पूर्ण करेल. कृपया हा वेळ राखून ठेवा.",
+  ].join("\n");
+};
+
 const buildBookingRejectedMessage = ({ booking } = {}) =>
   [
     "Cook Mitra",
@@ -373,6 +458,8 @@ module.exports = {
   buildBookingExpiredMessage,
   buildBookingAlreadyAcceptedMessage,
   buildBookingCancelledMessage,
+  buildCookCancelledMessage,
+  buildCookAcceptedMessage,
   buildBookingRejectedMessage,
   buildPaymentExpiredMessage,
   bookingUrlFor,

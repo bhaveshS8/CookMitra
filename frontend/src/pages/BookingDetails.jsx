@@ -7,6 +7,7 @@ import ReviewForm, { ReviewStars } from "../components/ReviewForm";
 import ComplaintForm from "../components/ComplaintForm";
 import CookAvatar from "../components/CookAvatar";
 import CancelBookingModal, { NoShowModal } from "../components/CancelBookingModal";
+import CookCancelModal from "../components/CookCancelModal";
 import RescheduleModal from "../components/RescheduleModal";
 import RefundRequestModal from "../components/RefundRequestModal";
 import {
@@ -256,12 +257,16 @@ const BookingDetails = () => {
   const serviceWindow = effectiveServiceWindow(booking);
   const remainingLabel = end ? formatRemaining(end, now) : null;
   const isActive = ["requested", "accepted", "confirmed", "in_progress"].includes(booking.status);
+  const isOwnCookBooking =
+    String(booking.cook?._id || booking.cook || "") !== "" &&
+    String(booking.cook?._id || booking.cook) === String(user?._id || user?.id);
   const canCancel =
     isActive &&
     !serviceStarted &&
     user?.role !== "admin" &&
     booking.status !== "in_progress" &&
-    !cancelLocked;
+    !cancelLocked &&
+    (user?.role !== "cook" || isOwnCookBooking);
   const sessionLive = ["accepted", "confirmed", "in_progress"].includes(booking.status);
   const showOtpForm =
     user?.role === "cook" && sessionLive && !booking.serviceStartedAt;
@@ -875,6 +880,15 @@ const BookingDetails = () => {
         </div>
       )}
 
+      {booking.status === "requested" && !booking.cook && booking.cookCancel?.cook && (
+        <div className="info-alert-banner" role="status">
+          <AlertCircle size={16} />{" "}
+          {user?.role === "cook"
+            ? "You are no longer assigned to this booking — a replacement cook is being searched."
+            : "Your cook had to cancel — we are finding you a replacement cook now. No action needed; we will notify you as soon as one accepts."}
+        </div>
+      )}
+
       {(canCancel ||
         canReschedule ||
         showRescheduleLockedNote ||
@@ -985,7 +999,14 @@ const BookingDetails = () => {
           )}
         </div>
       )}
-      {confirmCancel && (
+      {confirmCancel && user?.role === "cook" && (
+        <CookCancelModal
+          bookingId={booking._id}
+          onClose={() => setConfirmCancel(false)}
+          onCancelled={handleCancelled}
+        />
+      )}
+      {confirmCancel && user?.role !== "cook" && (
         <CancelBookingModal
           bookingId={booking._id}
           onClose={() => setConfirmCancel(false)}

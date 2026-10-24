@@ -214,6 +214,13 @@ const installFakes = () => {
     return doc;
   };
   try {
+    // Cook-cancel replacement flow re-arms the dispatch job; keep unit
+    // tests hermetic (no live Mongo) with recording no-op stubs.
+    const dispatchJobs = require("./services/bookingDispatchJobs");
+    dispatchJobs.resetDispatchJobForReplacement = async () => true;
+    dispatchJobs.kickWorker = () => {};
+  } catch { /* ignore */ }
+  try {
     const Coupon = require("./models/Coupon");
     Coupon.updateOne = async () => ({ modifiedCount: 0 });
   } catch { /* ignore */ }
@@ -255,6 +262,12 @@ const defaultClaim = (filter, update) => {
   const filterOk = !filter.status || (filter.status.$in ? filter.status.$in.includes(storeDoc.status) : true);
   if (live && unstarted && filterOk && (!filter["payment.refundStatus"] || true)) {
     applySet(storeDoc, update.$set);
+    if (update.$addToSet) {
+      for (const [k, v] of Object.entries(update.$addToSet)) {
+        if (!Array.isArray(storeDoc[k])) storeDoc[k] = [];
+        if (!storeDoc[k].map(String).includes(String(v))) storeDoc[k].push(v);
+      }
+    }
     if (update.$push?.statusHistory) storeDoc.statusHistory.push(update.$push.statusHistory);
     return { modifiedCount: 1 };
   }
@@ -388,11 +401,39 @@ const runCancel = async (user, body) => {
 
   storeDoc = mkDoc();
   {
-    const r = await runCancel(COOK, {});
-    const ci = r.body.cancellationInfo || {};
-    check("cook cancel → COOK_CANCELLED 100%", r.statusCode === 200 && ci.cancellationCategory === "COOK_CANCELLED" && ci.finalRefundAmount === 1000, ci.cancellationCategory);
+    // Cook-initiated cancellation releases the booking to automatic
+    // replacement search (same booking, fresh window) instead of
+    // terminally cancelling it.
+    const r = await runCancel(COOK, { reason: "MEDICAL_EMERGENCY", reasonNote: "Family emergency" });
+    check("cook cancel releases to replacement search", r.statusCode === 200 && r.body.replacement === true && r.body.status === "requested" && r.body.cook == null, `s=${r.statusCode} st=${r.body?.status}`);
+    check("cookCancel marker persisted", r.body.cookCancel?.reasonCode === "MEDICAL_EMERGENCY" && String(r.body.cookCancel?.cook) === "cook1" && r.body.cookCancel?.priorStatus === "confirmed" && String(r.body.cookCancel?.note || "") === "Family emergency");
+    check("fresh request window issued", new Date(r.body.requestExpiresAt).getTime() > Date.now());
+    check("cancelling cook excluded from re-accept", (r.body.ignoredBy || []).map(String).includes("cook1"));
+    check("payment and schedule preserved", r.body.payment?.status === "paid" && r.body.payment?.paidAmount === 1000);
     check("COOK_CANCELLED audited", audits.some((a) => a.event === "COOK_CANCELLED"));
-    check("customer told a replacement is attempted", notifications.some((n) => /alternative cook/i.test(n.message || "")));
+    check("customer told a replacement is attempted", notifications.some((n) => /replacement cook/i.test(n.message || "")));
+    check("cancelling cook confirmed release", notifications.some((n) => String(n.user) === "cook1" && /no longer assigned/i.test(n.message || "")));
+  }
+
+  storeDoc = mkDoc();
+  {
+    const r = await runCancel(COOK, {});
+    check("cook cancel requires a reason", r.statusCode === 400);
+  }
+  storeDoc = mkDoc();
+  {
+    const r = await runCancel(COOK, { reason: "BOGUS" });
+    check("cook cancel rejects invalid reason", r.statusCode === 400);
+  }
+  storeDoc = mkDoc();
+  {
+    const r = await runCancel(COOK, { reason: "OTHER" });
+    check("cook OTHER without explanation refused", r.statusCode === 400);
+  }
+  storeDoc = mkDoc();
+  {
+    const r = await runCancel({ id: "cook2", role: "COOK" }, { reason: "ILLNESS" });
+    check("another cook cannot cancel", r.statusCode === 403);
   }
 
   storeDoc = mkDoc();

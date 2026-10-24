@@ -403,7 +403,7 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
     finalize("T03", "2x accept same booking", oneWinner, ok,
       `responses=${r1.status},${r2.status} acceptedEntries=${acceptedEntries} status=${after?.status}`,
       { responses: [r1.status, r2.status], history: (after?.statusHistory || []).map((h) => h.status) });
-    await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: {} });
+    await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: { reason: "SCHEDULING_CONFLICT" } });
   }
 
   {
@@ -490,7 +490,7 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
       oneWinner && [200, 400, 409].includes(ra.status) && [200, 400, 409, 410].includes(rc.status) && valid && an.out.length === 0, valid && an.out.length === 0,
       `accept=${ra.status} cancel=${rc.status} final=${after?.status} anomalies=${an.out.join(";") || "none"}`,
       { responses: [ra.status, rc.status], history: (after?.statusHistory || []).map((h) => h.status) });
-    if (after?.status === "accepted") await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: {} });
+    if (after?.status === "accepted") await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: { reason: "SCHEDULING_CONFLICT" } });
   }
 
   {
@@ -515,7 +515,7 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
       `create=${rCreate.status} accept=${rAccept.status} activeOverlaps=${overs.length} holdVsActive=${holdOvers.length}`,
       { responses: [rCreate.status, rAccept.status] });
     const a = await fetchBooking(idA);
-    if (a?.status === "accepted") await api("PATCH", `/bookings/${idA}/cancel`, { token: cook.token, body: {} });
+    if (a?.status === "accepted") await api("PATCH", `/bookings/${idA}/cancel`, { token: cook.token, body: { reason: "SCHEDULING_CONFLICT" } });
     else await api("DELETE", `/bookings/${idA}`, { token: customers[3].token });
     if ([200, 201].includes(rCreate.status) && rCreate.data?._id) {
       try { await api("DELETE", `/bookings/${rCreate.data._id}`, { token: customers[4].token }); } catch { /* ignore */ }
@@ -557,7 +557,7 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
       oneWinner, after?.status === "accepted" && acceptedEntries === 1,
       `responses=${r1.status},${r2.status} acceptedEntries=${acceptedEntries}`,
       { responses: [r1.status, r2.status] });
-    await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: {} });
+    await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: { reason: "SCHEDULING_CONFLICT" } });
   }
 
   if (!RUN_SLOW) {
@@ -697,7 +697,7 @@ const bookPayload = (cookId, date, s, e, extra = {}) => ({
       badId.status === 404 && wrongOwner.status === 403 && good.status === 200, ok,
       `badId=${badId.status} wrongOwner=${wrongOwner.status} good=${good.status} final=${after?.status}`,
       { responses: [badId.status, wrongOwner.status, good.status] });
-    await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: {} });
+    await api("PATCH", `/bookings/${id}/cancel`, { token: cook.token, body: { reason: "SCHEDULING_CONFLICT" } });
   }
 
   {
