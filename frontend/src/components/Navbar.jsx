@@ -176,6 +176,15 @@ const Navbar = () => {
                 <ChefHat size={16} />
                 Book a Cook
               </NavLink>
+              {/* Guests browse event booking; customers reach it from their
+                  Events dashboard page (nav-link below) to avoid two "Events"
+                  buttons side by side. */}
+              {!user && (
+                <NavLink to="/events" className="btn btn-outline btn-sm">
+                  <Calendar size={17} />
+                  Events
+                </NavLink>
+              )}
 
               <div className="nav-divider"></div>
             </>
@@ -192,6 +201,18 @@ const Navbar = () => {
                 >
                   <Calendar size={17} />
                   My Bookings
+                </NavLink>
+              )}
+
+              {user.role === "customer" && (
+                <NavLink
+                  to="/dashboard/event-bookings"
+                  className={({ isActive }) =>
+                    isActive ? "nav-link active" : "nav-link"
+                  }
+                >
+                  <Calendar size={17} />
+                  Events
                 </NavLink>
               )}
 
@@ -330,6 +351,26 @@ const Navbar = () => {
       {mobileMenuOpen && (
         <div className="mobile-menu open">
           <LocationPicker />
+          {!hideCustomerPages && (
+            <>
+              <NavLink
+                to="/cook-on-demand"
+                className="btn btn-primary btn-block"
+                onClick={closeMobile}
+              >
+                <ChefHat size={18} />
+                Book a Cook
+              </NavLink>
+              <NavLink
+                to="/events"
+                className="btn btn-outline btn-block"
+                onClick={closeMobile}
+              >
+                <Calendar size={18} />
+                {user ? "Book an Event Cook" : "Events"}
+              </NavLink>
+            </>
+          )}
 
           {user ? (
             <>
@@ -343,6 +384,19 @@ const Navbar = () => {
                 >
                   <Calendar size={18} />
                   My Bookings
+                </NavLink>
+              )}
+
+              {user.role === "customer" && (
+                <NavLink
+                  to="/dashboard/event-bookings"
+                  className={({ isActive }) =>
+                    isActive ? "nav-link active" : "nav-link"
+                  }
+                  onClick={closeMobile}
+                >
+                  <Calendar size={18} />
+                  Events
                 </NavLink>
               )}
 

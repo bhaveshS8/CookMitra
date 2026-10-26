@@ -25,6 +25,7 @@ const Notification = require("../models/Notification");
 const realtime = require("../utils/realtime");
 const slots = require("../utils/slots");
 const { istDayString } = require("../utils/time");
+const { findEventConflict } = require("./schedulingConflicts");
 const { notifyWhatsApp } = require("../utils/whatsappApi");
 const {
   dbReady,
@@ -159,6 +160,21 @@ const assertBroadcastEligible = async (booking, cookId) => {
   }
 };
 
+const findEventRivals = async (booking, cookId) => {
+  if (!dbReady()) return [];
+  try {
+    const conflict = await findEventConflict({
+      cookId,
+      date: booking.date,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+    });
+    return conflict ? [conflict] : [];
+  } catch {
+    return fail(500, "Could not verify slot availability right now. Please try again.");
+  }
+};
+
 const findRivals = async (booking, cookId) => {
   try {
     const { start: dayStart, end: dayEnd } = slots.dayBounds(booking.date);
@@ -171,7 +187,8 @@ const findRivals = async (booking, cookId) => {
       }).select("startTime endTime status")
     );
     if (isTimeout(r)) return fail(500, "Could not verify slot availability right now. Please try again.");
-    return r || [];
+    const eventRivals = await findEventRivals(booking, cookId);
+    return [...(r || []), ...eventRivals];
   } catch (e) {
     if (e?.statusCode) throw e;
     return fail(500, "Could not verify slot availability right now. Please try again.");
@@ -183,8 +200,8 @@ const assertSlotFree = async (booking, cookId) => {
   const s = slots.timeToMinutes(booking.startTime);
   const e = slots.timeToMinutes(booking.endTime);
   const overlaps = (rivals || []).some((r) => {
-    const rs = slots.timeToMinutes(r.startTime);
-    const re = slots.timeToMinutes(r.endTime);
+    const rs = r.window ? r.window.start : slots.timeToMinutes(r.startTime);
+    const re = r.window ? r.window.end : slots.timeToMinutes(r.endTime);
     return rs != null && re != null && slots.intervalsOverlap(s, e, rs, re);
   });
   if (overlaps) {
@@ -373,8 +390,8 @@ const acceptBookingForCook = async ({ bookingId, cookId, source = "website" } = 
     const myStart = slots.timeToMinutes(booking.startTime);
     const myEnd = slots.timeToMinutes(booking.endTime);
     acceptClash = (postRivals || []).some((r) => {
-      const rs = slots.timeToMinutes(r.startTime);
-      const re = slots.timeToMinutes(r.endTime);
+      const rs = r.window ? r.window.start : slots.timeToMinutes(r.startTime);
+      const re = r.window ? r.window.end : slots.timeToMinutes(r.endTime);
       return rs != null && re != null && slots.intervalsOverlap(myStart, myEnd, rs, re);
     });
   } catch (e) {

@@ -20,6 +20,10 @@ import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import CookProfile from "./pages/CookProfile";
 import CookBooking from "./pages/CookBooking";
+import EventBooking from "./pages/EventBooking";
+import EventBookingDetails from "./pages/EventBookingDetails";
+import EventPayment from "./pages/EventPayment";
+import CustomerEventBookings from "./pages/CustomerEventBookings";
 import CustomerDashboard from "./pages/CustomerDashboard";
 import CustomerProfile from "./pages/CustomerProfile";
 import {
@@ -128,6 +132,40 @@ function App() {
                   <NonAdminRoute>
                     <CookBooking />
                   </NonAdminRoute>
+                }
+              />
+              {/* COOKMITRA EVENTS (MVP): guests + customers browse; cooks ->
+                  cook dashboard, admins -> /admin (same guard as Book a Cook). */}
+              <Route
+                path="/events"
+                element={
+                  <NonAdminRoute>
+                    <EventBooking />
+                  </NonAdminRoute>
+                }
+              />
+                <Route
+                  path="/event-bookings/:id"
+                  element={
+                    <ProtectedRoute roles={["customer", "cook", "admin"]}>
+                      <EventBookingDetails />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/event-bookings/:id/pay"
+                  element={
+                    <ProtectedRoute roles={["customer"]}>
+                      <EventPayment />
+                    </ProtectedRoute>
+                  }
+                />
+              <Route
+                path="/dashboard/event-bookings"
+                element={
+                  <ProtectedRoute roles={["customer"]}>
+                    <CustomerEventBookings />
+                  </ProtectedRoute>
                 }
               />
               <Route

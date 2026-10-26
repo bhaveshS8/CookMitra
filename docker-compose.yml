@@ -42,9 +42,14 @@ services:
       RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
       RAZORPAY_CURRENCY: ${RAZORPAY_CURRENCY:-INR}
       RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+      # Payment policy. Event bookings inherit REQUIRE_PAYMENTS unless set.
+      REQUIRE_PAYMENTS: ${REQUIRE_PAYMENTS:-false}
+      EVENT_PAYMENTS_REQUIRED: ${EVENT_PAYMENTS_REQUIRED:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      # Frontend origin for CORS — empty when served same-origin by this app.
+      # Frontend origin for CORS - empty when served same-origin by this app.
       CLIENT_URL: ${CLIENT_URL:-}
+      # Persistent upload mount (defaults to /app/backend/uploads in-container).
+      UPLOAD_DIR: ${UPLOAD_DIR:-}
       # Password-reset email (SMTP) — without these the forgot-password API
       # answers generically and no reset link is ever emailed.
       SMTP_HOST: ${SMTP_HOST:-}
@@ -53,6 +58,7 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      REQUIRE_SMTP: ${REQUIRE_SMTP:-false}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-}
       FRONTEND_URL: ${FRONTEND_URL:-${FRONTEND_BASE_URL:-}}
       # WhatsApp Cloud API (Meta) — REQUIRED for webhook verification.
@@ -74,6 +80,8 @@ services:
       WHATSAPP_DISPATCH_MAX_ATTEMPTS: ${WHATSAPP_DISPATCH_MAX_ATTEMPTS:-}
       WHATSAPP_DISPATCH_LEASE_MS: ${WHATSAPP_DISPATCH_LEASE_MS:-}
       WHATSAPP_DISPATCH_WORKER: ${WHATSAPP_DISPATCH_WORKER:-}
+      EVENT_OUTBOX_WORKER: ${EVENT_OUTBOX_WORKER:-}
+      EXPIRED_BOOKING_SWEEP: ${EXPIRED_BOOKING_SWEEP:-}
     # No depends_on: the backend retries the DB connection in the background,
     # so startup order doesn't matter (Atlas or local mongo alike).
     volumes:

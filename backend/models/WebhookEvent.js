@@ -7,6 +7,7 @@ const webhookEventSchema = new mongoose.Schema(
     orderId: { type: String, default: "", trim: true },
     paymentId: { type: String, default: "", trim: true },
     booking: { type: mongoose.Schema.Types.ObjectId, ref: "Booking", default: null },
+    eventBooking: { type: mongoose.Schema.Types.ObjectId, ref: "EventBooking", default: null },
     receivedAt: { type: Date, default: Date.now, expires: 30 * 24 * 60 * 60 },
   },
   { timestamps: false }

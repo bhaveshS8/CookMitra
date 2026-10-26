@@ -8,6 +8,12 @@ export const LOCATION_FRESH_MS = 2 * 3600 * 1000;
 // Bounded network budgets so a stalled provider can never hang detection.
 export const GEOCODE_TIMEOUT_MS = 7000;
 export const IP_TIMEOUT_MS = 6000;
+// IP bootstrap is a best-effort convenience. Cache successes for a session-ish
+// window and failures for a short cooldown so a rate-limited provider (the
+// audit observed HTTP 429 from ipwho.is) is not retried on every mount.
+export const IP_SUCCESS_TTL_MS = 6 * 3600 * 1000;
+export const IP_FAILURE_TTL_MS = 5 * 60 * 1000;
+let ipLocationCache = null; // { at, value } — value null means "no result"
 
 // Bounded race: rejects after ms so a hung operation can never stall its
 // caller forever. The timer is always cleared on settle; never unref'd.
@@ -179,7 +185,25 @@ export const formatLocationLabel = ({ area, city, state } = {}) => {
   return c || a || s || "";
 };
 
+const cacheIpLocation = (value) => {
+  ipLocationCache = { at: Date.now(), value };
+  return value;
+};
+
+// Test-only: clear the module-level IP cache between assertions.
+export const resetIpLocationCache = () => {
+  ipLocationCache = null;
+};
+
+// Optional IP bootstrap. Never blocks the booking flow (callers treat null as
+// "ask the user"), and failures are cached briefly so a rate-limited provider
+// is not hammered. Only coarse city/state labels are kept; the IP address is
+// never stored, logged, or sent to the backend.
 export const fetchIpLocation = async ({ timeoutMs = IP_TIMEOUT_MS } = {}) => {
+  if (ipLocationCache) {
+    const ttl = ipLocationCache.value ? IP_SUCCESS_TTL_MS : IP_FAILURE_TTL_MS;
+    if (Date.now() - ipLocationCache.at < ttl) return ipLocationCache.value;
+  }
   try {
     const r = await fetchWithTimeout("https://ipwho.is/", timeoutMs);
     if (r.ok) {
@@ -189,23 +213,37 @@ export const fetchIpLocation = async ({ timeoutMs = IP_TIMEOUT_MS } = {}) => {
         const area = d.district || d.suburb || d.locality || "";
         const state = d.region || "";
         const country = d.country || "";
-        if (city || state || area) return { city, area, state, country, label: formatLocationLabel({ area, city, state }) };
+        if (city || state || area) {
+          return cacheIpLocation({
+            city,
+            area,
+            state,
+            country,
+            label: formatLocationLabel({ area, city, state }),
+          });
+        }
       }
     }
   } catch {
   }
   try {
     const r2 = await fetchWithTimeout("https://get.geojs.io/v1/ip/geo.json", timeoutMs);
-    if (!r2.ok) return null;
+    if (!r2.ok) return cacheIpLocation(null);
     const d2 = await r2.json();
     const city = d2.city || "";
     const area = d2.district || d2.suburb || d2.locality || "";
     const state = d2.region || "";
     const country = d2.country || d2.country_name || "";
-    if (!city && !state && !area) return null;
-    return { city, area, state, country, label: formatLocationLabel({ area, city, state }) };
+    if (!city && !state && !area) return cacheIpLocation(null);
+    return cacheIpLocation({
+      city,
+      area,
+      state,
+      country,
+      label: formatLocationLabel({ area, city, state }),
+    });
   } catch {
-    return null;
+    return cacheIpLocation(null);
   }
 };
 

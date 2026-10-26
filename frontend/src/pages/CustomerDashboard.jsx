@@ -378,6 +378,36 @@ const CustomerDashboard = () => {
         </div>
       </div>
 
+      {/* COOKMITRA EVENTS cross-link — event bookings live on their own page. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.75rem",
+          background: "linear-gradient(135deg, #fff7ed, #ffedd5)",
+          border: "1px solid #fed7aa",
+          borderRadius: "12px",
+          padding: "0.85rem 1rem",
+          marginBottom: "1.25rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <span style={{ fontSize: "1.3rem" }} aria-hidden="true">
+          🎉
+        </span>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <strong>Celebrating something?</strong>
+          <div style={{ fontSize: "0.88rem", color: "var(--slate-600)" }}>
+            Birthdays, anniversaries & family functions — you celebrate, we cook.
+          </div>
+        </div>
+        <Link to="/events" className="btn btn-primary btn-sm">
+          Book an Event
+        </Link>
+        <Link to="/dashboard/event-bookings" className="btn btn-outline btn-sm">
+          My Events
+        </Link>
+      </div>
       {!loading && refreshing && (
         <span className="dashboard-syncing-pill" aria-live="polite" aria-label="Auto-refreshing bookings">
           <span className="dashboard-syncing-dot" />

@@ -9,6 +9,9 @@ import { formatCurrency, formatDate, formatTimeRange12, playAlarmSound, isUnpaid
 import AddCookModal from "../components/AddCookModal";
 import BookingRequestModal from "../components/BookingRequestModal";
 import CouponManagement from "../components/CouponManagement";
+import EventBookingAdmin from "../components/EventBookingAdmin";
+import EventPricingManager from "../components/EventPricingManager";
+import EventTypeManager from "../components/EventTypeManager";
 import VisitStats from "../components/VisitStats";
 import AnalyticsPanel from "../components/AnalyticsPanel";
 import AdminPayoutsPanel from "../components/AdminPayoutsPanel";
@@ -86,6 +89,24 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("book
           <ChefHat size={17} /> Cook Approvals
         </button>
         <button
+          className={`tab-btn ${activeTab === "event-bookings" ? "active" : ""}`}
+          onClick={() => setActiveTab("event-bookings")}
+        >
+          <Calendar size={17} /> Event Bookings
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "event-types" ? "active" : ""}`}
+          onClick={() => setActiveTab("event-types")}
+        >
+          <ChefHat size={17} /> Events
+        </button>
+        <button
+          className={`tab-btn ${activeTab === "event-pricing" ? "active" : ""}`}
+          onClick={() => setActiveTab("event-pricing")}
+        >
+          <Tag size={17} /> Event Pricing
+        </button>
+        <button
           className={`tab-btn ${activeTab === "users" ? "active" : ""}`}
           onClick={() => setActiveTab("users")}
         >
@@ -143,6 +164,9 @@ const AdminDashboard = () => {  const [activeTab, setActiveTab] = useState("book
 
       {activeTab === "cooks" && <CookManagement />}
       {activeTab === "bookings" && <BookingManagement />}
+      {activeTab === "event-bookings" && <EventBookingAdmin />}
+      {activeTab === "event-types" && <EventTypeManager />}
+      {activeTab === "event-pricing" && <EventPricingManager />}
       {activeTab === "users" && <UserManagement />}
       {activeTab === "admins" && <AdminManagement />}
       {activeTab === "coupons" && <CouponManagement />}

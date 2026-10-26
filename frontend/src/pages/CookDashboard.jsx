@@ -7,6 +7,7 @@ import { useShowToast } from "../store/hooks";
 import { formatDate, playAlarmSound, localTomorrowStr, mapsNavigateUrl, formatTimeRange12, dayTagLabel, getLocalDateStr, isCancelLocked, isUnpaidCancelled } from "../utils/constants";
 import { useLocalDay } from "../hooks/useLocalDay";
 import CookAvailabilityToggle from "../components/CookAvailabilityToggle";
+import CookEventBookings from "../components/CookEventBookings";
 import { resolveFileUrl } from "../components/CookDocUploads";
 import BookingRequestModal from "../components/BookingRequestModal";
 import CookCancelModal from "../components/CookCancelModal";
@@ -510,6 +511,12 @@ const CookDashboard = () => {
           <History size={15} /> Past <span className="cook-tab-count">{previousCount}</span>
         </button>
         <button
+          className={`cook-tab ${view === "events" ? "active" : ""}`}
+          onClick={() => setView("events")}
+        >
+          <CalendarDays size={15} /> Events
+        </button>
+        <button
           className={`cook-tab ${view === "reports" ? "active" : ""}`}
           onClick={() => setView("reports")}
         >
@@ -521,7 +528,8 @@ const CookDashboard = () => {
         </Link>
       </div>
 
-      {view !== "reports" && (
+      {/* BOOKINGS VIEWS */}
+      {view !== "reports" && view !== "events" && (
         <div>
 
           {loadingBookings && <p className="cook-loading-text">Loading bookings...</p>}
@@ -763,6 +771,22 @@ const CookDashboard = () => {
         </div>
       )}
 
+      {/* EVENTS TAB: CookMitra-assigned event bookings (§13) with full
+          event details + event earnings. */}
+      {view === "events" && (
+        <div>
+          <div className="cev-page-head">
+            <span className="cev-eyebrow">
+              <ChefHat size={13} aria-hidden="true" /> Cook assigned
+            </span>
+            <h3>Event Assignments</h3>
+            <p>Birthdays, anniversaries and family functions CookMitra assigns to you.</p>
+          </div>
+          <CookEventBookings />
+        </div>
+      )}
+
+      {/* REPORTS TAB: complaints the cook filed — status + admin replies. */}
       {view === "reports" && (
         <div>
           <h3 style={{ fontSize: "1.1rem", marginBottom: "0.25rem" }}>My reports to support</h3>

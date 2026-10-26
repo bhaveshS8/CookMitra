@@ -150,17 +150,24 @@ if (process.env.NODE_ENV === "production") {
       "CONFIG NOTICE: RAZORPAY_WEBHOOK_SECRET is not set — POST /api/payments/webhook cannot verify signatures (browser payments still work, webhook reconcile is skipped)."
     );
   }
-  if (process.env.REQUIRE_PAYMENTS === "true") {
+  const flagEnabled = (value) =>
+    ["true", "1", "yes"].includes(String(value || "").trim().toLowerCase());
+  const paymentsRequired =
+    flagEnabled(process.env.REQUIRE_PAYMENTS) || flagEnabled(process.env.EVENT_PAYMENTS_REQUIRED);
+  if (paymentsRequired) {
     let paymentsReady = false;
     try {
+      const razorpayConfig = require("./config/razorpay");
       paymentsReady =
-        require("./config/razorpay").isConfigured && Boolean(process.env.RAZORPAY_WEBHOOK_SECRET);
+        razorpayConfig.isConfigured &&
+        String(razorpayConfig.keyId || "").startsWith("rzp_live_") &&
+        Boolean(process.env.RAZORPAY_WEBHOOK_SECRET);
     } catch {
       paymentsReady = false;
     }
     if (!paymentsReady) {
       console.error(
-        "CONFIG ERROR: REQUIRE_PAYMENTS=true but live Razorpay keys and/or RAZORPAY_WEBHOOK_SECRET are missing. Refusing to start."
+        "CONFIG ERROR: live payments are required (REQUIRE_PAYMENTS/EVENT_PAYMENTS_REQUIRED) but rzp_live_* keys, RAZORPAY_KEY_SECRET, or RAZORPAY_WEBHOOK_SECRET are missing. Refusing to start."
       );
       process.exit(1);
     }
@@ -208,6 +215,19 @@ if (process.env.NODE_ENV !== "test" && String(process.env.EXPIRED_BOOKING_SWEEP 
     require("./services/bookingTransitions").startExpiredBookingSweeper();
   } catch (err) {
     console.error("Expired-booking sweeper failed to start (bookings unaffected):", err?.message || err);
+  }
+}
+
+// Durable event-notification outbox worker (in-process; atomic leases make it
+// safe with any number of instances/cluster workers). Retries event
+// notifications left pending by a crash or failed delivery — without it (or a
+// cron `npm run outbox:worker`), those would wait forever. Disabled in tests
+// and when EVENT_OUTBOX_WORKER=false (manual/cron runs still work).
+if (process.env.NODE_ENV !== "test" && String(process.env.EVENT_OUTBOX_WORKER || "").toLowerCase() !== "false") {
+  try {
+    require("./utils/eventOutbox").startOutboxWorker();
+  } catch (err) {
+    console.error("Event outbox worker failed to start (bookings unaffected):", err?.message || err);
   }
 }
 
@@ -326,6 +346,12 @@ app.use("/api/auth", authLimiter, require("./routes/auth"));
 app.use("/api/docs", require("./routes/docs"));
 app.use("/api/cooks", require("./routes/cooks"));
 app.use("/api/bookings", require("./routes/bookings"));
+// COOKMITRA EVENTS (MVP): event catalogue, event bookings (admin-assigned
+// cooks), and the admin-editable event pricing engine.
+app.use("/api/events", require("./routes/events"));
+app.use("/api/event-bookings", require("./routes/eventBookings"));
+app.use("/api/event-payments", strictLimiter, require("./routes/eventPayments"));
+app.use("/api/event-pricing", require("./routes/eventPricing"));
 app.use("/api/payments", strictLimiter, require("./routes/payments"));
 app.use("/api/availability", require("./routes/availability"));
 app.use("/api/reviews", require("./routes/reviews"));
@@ -415,6 +441,10 @@ const shutdown = (signal) => {
   }
   try {
     require("./services/bookingTransitions").stopExpiredBookingSweeper();
+  } catch {
+  }
+  try {
+    require("./utils/eventOutbox").stopOutboxWorker();
   } catch {
   }
   server.close(() => {

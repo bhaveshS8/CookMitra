@@ -93,6 +93,12 @@ const {
 const { fanOutBookingRequest } = require("../services/whatsappDispatch");
 const dispatchJobs = require("../services/bookingDispatchJobs");
 const {
+  findEventConflict,
+  findEventConflictMap,
+  findEventBusyWindows,
+  findCrossModuleConflict,
+} = require("../services/schedulingConflicts");
+const {
   acceptBookingForCook,
   rejectBookingForCook,
   confirmReplacementIfPaid,
@@ -582,6 +588,7 @@ const findEligibleCooks = async ({ date, startTime, endTime, serviceType, exclud
     unavailable: 0,
     noWindow: 0,
     overlap: 0,
+    eventOverlap: 0,
   };
   const done = (eligible) =>
     diagnostics
@@ -596,6 +603,7 @@ const findEligibleCooks = async ({ date, startTime, endTime, serviceType, exclud
             unavailable: diag.unavailable,
             noWindow: diag.noWindow,
             overlap: diag.overlap,
+            eventOverlap: diag.eventOverlap,
           },
         }
       : eligible;
@@ -663,6 +671,17 @@ const findEligibleCooks = async ({ date, startTime, endTime, serviceType, exclud
   } catch {
     byCook = new Map();
   }
+  let eventClashes = new Map();
+  try {
+    eventClashes = await findEventConflictMap({
+      cookIds: live.map((c) => c.userId),
+      date,
+      startTime,
+      endTime,
+    });
+  } catch {
+    eventClashes = new Map();
+  }
   const eligible = [];
   for (const { profile, userId } of live) {
     let windows = [];
@@ -677,6 +696,10 @@ const findEligibleCooks = async ({ date, startTime, endTime, serviceType, exclud
     }
     if (findOverlapBooking(byCook.get(userId) || [], startTime, endTime)) {
       diag.overlap += 1;
+      continue;
+    }
+    if (eventClashes.has(String(userId))) {
+      diag.eventOverlap += 1;
       continue;
     }
     eligible.push({ profile, userId });
@@ -1889,25 +1912,21 @@ exports.acceptBooking = async (req, res, next) => {
       }
     }
     try {
-      const { start: dayStart, end: dayEnd } = dayBounds(booking.date);
-      const rivals = await Booking.find({
-        cook: cookIdForCheck,
-        _id: { $ne: booking._id },
-        date: { $gte: dayStart, $lte: dayEnd },
-        status: { $in: ["accepted", "confirmed", "in_progress"] },
-      }).select("startTime endTime status");
-      const s = timeToMinutes(booking.startTime);
-      const e = timeToMinutes(booking.endTime);
-      const overlaps = (rivals || []).some((r) => {
-        const rs = timeToMinutes(r.startTime);
-        const re = timeToMinutes(r.endTime);
-        return rs != null && re != null && intervalsOverlap(s, e, rs, re);
+      const conflict = await findCrossModuleConflict({
+        cookId: cookIdForCheck,
+        date: booking.date,
+        startTime: booking.startTime,
+        endTime: booking.endTime,
+        excludeBookingId: booking._id,
       });
-      if (overlaps) {
+      if (conflict) {
         return res.status(409).json({
           success: false,
           code: "SLOT_UNAVAILABLE",
-          message: "This slot has already been booked (another request was accepted). Please decline this request.",
+          message:
+            conflict.kind === "event"
+              ? "This cook already has an event booking at that time. Please choose another cook."
+              : "This slot has already been booked (another request was accepted). Please decline this request.",
         });
       }
     } catch {
@@ -2026,20 +2045,15 @@ exports.acceptBooking = async (req, res, next) => {
 
     let acceptClash = false;
     try {
-      const { start: vStart, end: vEnd } = dayBounds(booking.date);
-      const postRivals = await Booking.find({
-        cook: booking.cook,
-        _id: { $ne: booking._id },
-        date: { $gte: vStart, $lte: vEnd },
-        status: { $in: ["accepted", "confirmed", "in_progress"] },
-      }).select("startTime endTime status");
-      const myStart = timeToMinutes(booking.startTime);
-      const myEnd = timeToMinutes(booking.endTime);
-      acceptClash = (postRivals || []).some((r) => {
-        const rs = timeToMinutes(r.startTime);
-        const re = timeToMinutes(r.endTime);
-        return rs != null && re != null && intervalsOverlap(myStart, myEnd, rs, re);
-      });
+      acceptClash = Boolean(
+        await findCrossModuleConflict({
+          cookId: booking.cook,
+          date: booking.date,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          excludeBookingId: booking._id,
+        })
+      );
     } catch {
       acceptClash = false; // verification unavailable — keep today's behavior
     }
@@ -3284,7 +3298,10 @@ exports.getRescheduleOptions = async (req, res, next) => {
       : (await getDayBookings(booking.cook, dayStr)).filter(
           (b) => String(b._id) !== String(booking._id)
         );
-    const rivals = allRivals;
+    const eventRivals = isBroadcastOptions
+      ? []
+      : await findEventBusyWindows({ cookId: booking.cook, date: dayStr }).catch(() => []);
+    const rivals = [...allRivals, ...eventRivals];
     const slots = computeStartOptions(windows, rivals, durHours).filter((s) => {
       if (isAdmin) return true;
       const instant = istEventInstant(dayStr, s.startTime);
@@ -3416,6 +3433,15 @@ const checkCookForSlot = async (cookUserId, booking, dayStr, startTime, endTime)
   if (clash && String(clash._id) !== String(booking?._id)) {
     return unavailable("This cook was just booked for the selected time. Please choose another cook.", true);
   }
+  const eventClash = await findEventConflict({
+    cookId: cookUserId,
+    date: dayStr,
+    startTime,
+    endTime,
+  }).catch(() => null);
+  if (eventClash) {
+    return unavailable("This cook already has an event booking at that time. Please choose another cook.", true);
+  }
   return { ok: true, profile };
 };
 const findReplacementCooks = async (booking, dayStr, startTime, endTime, excludeCookId, limit = 12) => {
@@ -3461,6 +3487,17 @@ const findReplacementCooks = async (booking, dayStr, startTime, endTime, exclude
   } catch {
     bookingsByCook = new Map();
   }
+  let eventClashes = new Map();
+  try {
+    eventClashes = await findEventConflictMap({
+      cookIds: withService.map((p) => p?.user?._id || p?.user),
+      date: dayStr,
+      startTime,
+      endTime,
+    });
+  } catch {
+    eventClashes = new Map();
+  }
   const out = [];
   for (const p of withService) {
     const uid = String(p?.user?._id || p?.user || "");
@@ -3474,6 +3511,7 @@ const findReplacementCooks = async (booking, dayStr, startTime, endTime, exclude
     })();
     if (!wins || !findContainingWindow(wins, startTime, endTime)) continue;
     if (findOverlapBooking(bookingsByCook.get(uid) || [], startTime, endTime)) continue;
+    if (eventClashes.has(uid)) continue;
     out.push(publicRescheduleCookCard(p, p.user));
     if (out.length >= limit) break;
   }
@@ -3651,6 +3689,18 @@ exports.rescheduleBooking = async (req, res, next) => {
           currentCookAvailable: false,
         });
       }
+      const eventClash = await findEventConflict({
+        cookId: booking.cook,
+        date: dayStr,
+        startTime,
+        endTime,
+      }).catch(() => null);
+      if (eventClash) {
+        return res.status(409).json({
+          message: "Your cook already has an event booking at that time — please pick another slot or cook.",
+          currentCookAvailable: false,
+        });
+      }
     } else {
       const swap = await checkCookForSlot(targetCookId, booking, dayStr, startTime, endTime);
       if (!swap.ok) {
@@ -3806,6 +3856,19 @@ exports.rescheduleBooking = async (req, res, next) => {
             return await rollbackMove("That time just got booked — please pick another start time");
           }
         } else {
+          const eventAfter = await findEventConflict({
+            cookId: targetCookId,
+            date: dayStr,
+            startTime,
+            endTime,
+          }).catch(() => null);
+          if (eventAfter) {
+            return await rollbackMove(
+              cookChanged
+                ? "This cook already has an event booking at that time. Please choose another cook."
+                : "Your cook already has an event booking at that time — please pick another slot."
+            );
+          }
           const after = (await getDayBookings(targetCookId, dayStr)).filter(
             (b) => String(b._id) !== String(booking._id)
           );
@@ -4262,23 +4325,20 @@ exports.payBooking = async (req, res, next) => {
     }
     if (dbReady()) {
       try {
-        const { start: payDayStart, end: payDayEnd } = dayBounds(booking.date);
-        const payRivals = await Booking.find({
-          cook: booking.cook,
-          _id: { $ne: booking._id },
-          date: { $gte: payDayStart, $lte: payDayEnd },
-          status: { $in: ["accepted", "confirmed", "in_progress"] },
-        }).select("startTime endTime status");
-        const payStart = timeToMinutes(booking.startTime);
-        const payEnd = timeToMinutes(booking.endTime);
-        const payClash = (payRivals || []).some((r) => {
-          const rs = timeToMinutes(r.startTime);
-          const re = timeToMinutes(r.endTime);
-          return rs != null && re != null && intervalsOverlap(payStart, payEnd, rs, re);
+        const payClash = await findCrossModuleConflict({
+          cookId: booking.cook,
+          date: booking.date,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          excludeBookingId: booking._id,
         });
         if (payClash) {
           return res.status(409).json({
-            message: "This slot was just confirmed for another booking. Please pick a different time.",
+            message:
+              payClash.kind === "event"
+                ? "This cook already has an event booking at that time. Please pick a different time or contact support."
+                : "This slot was just confirmed for another booking. Please pick a different time.",
+            code: "SLOT_UNAVAILABLE",
           });
         }
       } catch {
@@ -4396,19 +4456,12 @@ exports.payBooking = async (req, res, next) => {
 
     if (dbReady() && !zeroAmount) {
       try {
-        const { start: postDayStart, end: postDayEnd } = dayBounds(booking.date);
-        const postRivals = await Booking.find({
-          cook: booking.cook,
-          _id: { $ne: booking._id },
-          date: { $gte: postDayStart, $lte: postDayEnd },
-          status: { $in: ["confirmed", "in_progress"] },
-        }).select("startTime endTime status");
-        const myStart = timeToMinutes(booking.startTime);
-        const myEnd = timeToMinutes(booking.endTime);
-        const postClash = (postRivals || []).some((r) => {
-          const rs = timeToMinutes(r.startTime);
-          const re = timeToMinutes(r.endTime);
-          return rs != null && re != null && intervalsOverlap(myStart, myEnd, rs, re);
+        const postClash = await findCrossModuleConflict({
+          cookId: booking.cook,
+          date: booking.date,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          excludeBookingId: booking._id,
         });
         if (postClash) {
           try {

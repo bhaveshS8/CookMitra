@@ -258,7 +258,17 @@ exports.createOrder = async (req, res, next) => {
   }
 };
 
+const releaseUnprocessedWebhook = async (key) => {
+  if (!key) return;
+  try {
+    const WebhookEvent = require("../models/WebhookEvent");
+    await WebhookEvent.deleteOne({ key, booking: null, eventBooking: null });
+  } catch {
+  }
+};
+
 exports.handleWebhook = async (req, res) => {
+  let webhookKey = "";
   try {
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET || "";
     const signature = req.headers["x-razorpay-signature"];
@@ -296,7 +306,7 @@ exports.handleWebhook = async (req, res) => {
     if (String(entity.status || "").toLowerCase() !== "captured") {
       return res.status(200).json({ received: true, handled: false });
     }
-    const webhookKey = crypto
+    webhookKey = crypto
       .createHash("sha256")
       .update(`${event?.event || ""}|${orderId}|${paymentId}|${entity.amount ?? ""}`)
       .digest("hex");
@@ -313,6 +323,49 @@ exports.handleWebhook = async (req, res) => {
         return res.status(200).json({ received: true, handled: "duplicate" });
       }
       console.error(`WEBHOOK DEDUP STORE FAILED order=${orderId} pay=${paymentId}: ${e?.message || e}`);
+      return res.status(500).json({ received: true, handled: false, retry: true });
+    }
+
+    const EventBooking = require("../models/EventBooking");
+    const mongoose = require("mongoose");
+    const eventBooking = mongoose.connection?.readyState === 1
+      ? await EventBooking.findOne({
+          $or: [
+            { "payment.razorpayOrderId": orderId },
+            { "payment.razorpayOrderIds": orderId },
+          ],
+        })
+      : null;
+    if (eventBooking) {
+      const wantCurrency = String(process.env.RAZORPAY_CURRENCY || "INR").toUpperCase();
+      const gotCurrency = String(entity.currency || "").toUpperCase();
+      if (gotCurrency && gotCurrency !== wantCurrency) {
+        return res.status(200).json({ received: true, handled: false });
+      }
+      const { finalizeEventPayment } = require("../services/eventPaymentService");
+      const result = await finalizeEventPayment({
+        event: eventBooking,
+        orderId: String(orderId),
+        paymentId: String(paymentId),
+        amountPaise: Number(entity.amount),
+        source: "webhook",
+        webhook: true,
+      });
+      if (result.ok || result.refundQueued) {
+        try {
+          const WebhookEvent = require("../models/WebhookEvent");
+          await WebhookEvent.updateOne(
+            { key: webhookKey },
+            { $set: { eventBooking: (result.event || eventBooking)._id } }
+          );
+        } catch {
+        }
+        return res.status(200).json({ received: true, handled: true });
+      }
+      console.error(
+        `EVENT WEBHOOK NOT APPLIED order=${orderId} pay=${paymentId}: ${String(result.message || "unknown").slice(0, 200)}`
+      );
+      await releaseUnprocessedWebhook(webhookKey);
       return res.status(500).json({ received: true, handled: false, retry: true });
     }
 
@@ -469,8 +522,10 @@ exports.handleWebhook = async (req, res) => {
     } catch {
     }
     return res.status(200).json({ received: true, handled: false });
-  } catch {
-    return res.status(200).json({ received: true, handled: false });
+  } catch (error) {
+    console.error(`WEBHOOK PROCESSING FAILED: ${String(error?.message || error).slice(0, 200)}`);
+    await releaseUnprocessedWebhook(webhookKey);
+    return res.status(500).json({ received: true, handled: false, retry: true });
   }
 };
 

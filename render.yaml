@@ -32,6 +32,11 @@ services:
       # Set "true" for any deployment that takes real payments.
       # - key: REQUIRE_PAYMENTS
       #   value: "true"
+      # Event bookings inherit REQUIRE_PAYMENTS unless this override is set.
+      # Set "true" to require online Event payment without changing the
+      # non-Event payment policy.
+      # - key: EVENT_PAYMENTS_REQUIRED
+      #   value: "true"
       # Mongo: create a free cluster at mongodb.com/atlas and paste the SRV URI,
       # or create a Render MongoDB add-on and reference its internal URI.
       - key: MONGODB_URI
