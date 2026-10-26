@@ -1,14 +1,52 @@
+/* ==========================================================================
+   Festive Offers — die-cut coupon tickets
+   One metaphor at every width, matching the app's HomeScreen coupons:
+
+     [ gradient stub ] │ [ perforation ] │ [ code + copy + terms ]
+
+   The stub is the discount, the perforation is a dashed tear line with two
+   punched notches, and the notches are real elements filled with the band
+   colour. That is why the band below is flattened to exactly #120b18 — a
+   notch only reads as a punched hole if the surface behind it is that colour.
+
+   Wide screens + tablets lay the ticket out horizontally. Phones (≤640px)
+   stack it — stub on top, tear line across — which is the same ticket rotated
+   to fit a narrow column.
+
+   Because the tear line and notches are positioned from the perforation
+   element rather than from a hardcoded offset, changing the stub height needs
+   no other edit.
+   ========================================================================== */
 
 @keyframes couponRise {
   from { opacity: 0; transform: translateY(18px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Band ────────────────────────────────────────────────────────────────
+   Flat #120b18 (the dark end of .band-abyss) plus a warm bloom. Scoped to
+   .home-coupons so the testimonials band, which shares .band-abyss, keeps its
+   full gradient. */
+.home-coupons.home-band.band-abyss {
+  position: relative;
+  background: #120b18;
+}
+.home-coupons.home-band.band-abyss::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 380px;
+  background: radial-gradient(620px 300px at 18% 0%, rgba(255, 176, 32, 0.13), transparent 72%);
+  pointer-events: none;
+}
+.home-coupons > * { position: relative; z-index: 1; }
+
 .home-coupons .section-title {
   color: #fff;
   text-shadow: 0 2px 18px rgba(247, 103, 7, 0.35);
 }
 .home-coupons .section-eyebrow {
+  gap: 0.35rem;
   background: rgba(255, 176, 32, 0.14);
   border: 1px solid rgba(255, 210, 77, 0.4);
   color: #ffd24d;
@@ -17,9 +55,10 @@
   color: rgba(255, 244, 230, 0.78);
 }
 
+/* ── Ticket card ────────────────────────────────────────────────────────── */
 .home-coupons .coupon-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr));
   gap: 1.3rem;
   max-width: 1080px;
   margin: 0 auto;
@@ -28,107 +67,192 @@
 .home-coupons .coupon-card {
   position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-  padding: 1.6rem 1.35rem 1.3rem;
-  border-radius: 20px;
+  flex-direction: row;
+  align-items: stretch;
+  border-radius: 18px;
   background:
-    radial-gradient(420px 200px at 50% -60px, rgba(255, 176, 32, 0.22), transparent 70%),
-    linear-gradient(165deg, rgba(64, 32, 8, 0.92) 0%, rgba(24, 10, 4, 0.96) 100%);
-  border: 1px solid rgba(255, 210, 77, 0.35);
+    radial-gradient(420px 200px at 88% 8%, rgba(255, 176, 32, 0.16), transparent 70%),
+    linear-gradient(160deg, #241820 0%, #1c1219 55%, #150e13 100%);
+  border: 1px solid rgba(255, 210, 77, 0.22);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
   animation: couponRise 0.6s ease both;
   animation-delay: var(--d, 0s);
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
-  overflow: hidden;
-}
-.home-coupons .coupon-card::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 10%;
-  right: 10%;
-  height: 3px;
-  border-radius: 0 0 6px 6px;
-  background: linear-gradient(90deg, transparent, #ffb020 20%, #f76707 50%, #ffb020 80%, transparent);
+  /* Deliberately NOT overflow:hidden — the notch bites have to paint past the
+     card edge. Nothing here needs clipping: the stub clips its own gloss. */
 }
 .home-coupons .coupon-card:hover {
   transform: translateY(-4px);
-  border-color: rgba(255, 210, 77, 0.7);
+  border-color: rgba(255, 210, 77, 0.5);
   box-shadow: 0 22px 48px rgba(0, 0, 0, 0.5), 0 0 32px rgba(255, 176, 32, 0.18);
 }
-
+/* The lead offer gets a warmer border. */
 .home-coupons .coupon-card-top {
-  border-color: rgba(255, 210, 77, 0.75);
+  border-color: rgba(255, 210, 77, 0.5);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45), 0 0 36px rgba(255, 176, 32, 0.16);
 }
 
+/* Straddles the top edge, as on the app's ticket. */
 .home-coupons .coupon-best {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: -0.6rem;
+  right: 0.9rem;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
+  gap: 0.25rem;
+  padding: 0.2rem 0.6rem;
   border-radius: 99px;
-  background: linear-gradient(120deg, #ffb020, #f76707);
-  color: #fff;
-  font-size: 0.66rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
+  background: #ffd24d;
+  color: #2b1405;
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  box-shadow: 0 6px 16px rgba(247, 103, 7, 0.45);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
-.home-coupons .coupon-off {
+/* ── Discount stub ──────────────────────────────────────────────────────── */
+.home-coupons .coupon-stub {
+  position: relative;
+  flex: 0 0 104px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  padding: 1rem 0.6rem;
+  border-radius: 17px 0 0 17px;
+  overflow: hidden; /* clips the gloss sweep */
+  color: #2b1405;
+  background: linear-gradient(135deg, #ffd479 0%, #fcaa2e 50%, #f76707 100%);
+}
+/* Rotated translucent bar clipped by the stub — reads as a light sweep across
+   the gradient. Sits under the text so the numbers stay crisp. */
+.home-coupons .coupon-stub-gloss {
+  position: absolute;
+  top: -30%;
+  left: -12%;
+  width: 46%;
+  height: 160%;
+  background: rgba(255, 255, 255, 0.26);
+  transform: rotate(20deg);
+  pointer-events: none;
+}
+.home-coupons .coupon-stub-icon {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(43, 20, 5, 0.18);
+  margin-bottom: 0.3rem;
+}
+.home-coupons .coupon-stub-value {
+  font-size: 1.7rem;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.home-coupons .coupon-stub-label {
+  font-size: 0.62rem;
   font-weight: 800;
-  font-size: 1.9rem;
-  line-height: 1.1;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.22em;
+  text-indent: 0.22em;
+  color: rgba(43, 20, 5, 0.78);
 }
-.home-coupons .coupon-off svg {
-  color: #ffb020;
-  flex-shrink: 0;
+
+/* ── Perforation + punched notches ──────────────────────────────────────── */
+.home-coupons .coupon-perf {
+  position: relative;
+  flex: 0 0 20px;
+  align-self: stretch;
 }
-.home-coupons .coupon-off span {
-  background: linear-gradient(100deg, #ffe9b0 0%, #ffd24d 45%, #ff9d2e 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  text-shadow: none;
-  filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.45));
+.home-coupons .coupon-perf::before {
+  content: "";
+  position: absolute;
+  top: 0.8rem;
+  bottom: 0.8rem;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 2px dashed rgba(255, 210, 77, 0.32);
+}
+.home-coupons .coupon-notch {
+  position: absolute;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  border-radius: 50%;
+  background: #120b18; /* = the band, so it reads as a hole */
+}
+.home-coupons .coupon-notch-top { top: -9px; }
+.home-coupons .coupon-notch-bottom { bottom: -9px; }
+
+/* ── Body ───────────────────────────────────────────────────────────────── */
+.home-coupons .coupon-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.55rem;
+  padding: 1.15rem 1.2rem;
 }
 
 .home-coupons .coupon-code-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.7rem;
-  padding: 0.55rem 0.6rem 0.55rem 0.85rem;
-  border: 1.5px dashed rgba(255, 210, 77, 0.5);
+  gap: 0.6rem;
+  padding: 0.4rem 0.4rem 0.4rem 0.8rem;
+  border: 1.5px dashed rgba(255, 210, 77, 0.4);
   border-radius: 12px;
-  background: rgba(255, 210, 77, 0.07);
+  background: rgba(255, 210, 77, 0.08);
 }
 .home-coupons .coupon-code {
   margin: 0;
-  font-size: 1.05rem;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 1rem;
   font-weight: 800;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.12em;
   color: #fff;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.home-coupons .coupon-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  min-height: 34px;
+  padding: 0.35rem 0.8rem;
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 0.78rem;
+  color: #2b1405;
+  background: linear-gradient(120deg, #ffd24d, #ffb020);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+.home-coupons .coupon-copy:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: 0 8px 20px rgba(255, 176, 32, 0.4);
+}
+.home-coupons .coupon-copy:active { transform: translateY(0); }
+
 .home-coupons .coupon-desc {
   margin: 0;
   color: #fff4e6;
   opacity: 0.85;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   line-height: 1.5;
 }
 
@@ -140,64 +264,102 @@
   flex-wrap: wrap;
   gap: 0.4rem;
 }
-
 .home-coupons .coupon-meta li {
-  font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
   font-weight: 600;
   color: #ffe08a;
   background: rgba(255, 210, 77, 0.1);
   border: 1px solid rgba(255, 210, 77, 0.25);
-  padding: 2px 9px;
+  padding: 0.2rem 0.6rem;
   border-radius: 99px;
   white-space: nowrap;
 }
-
-.home-coupons .coupon-copy {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem;
-  padding: 0.45rem 0.85rem;
-  border-radius: 9px;
-  border: none;
-  cursor: pointer;
-  font-weight: 800;
-  font-size: 0.82rem;
-  color: #1a0f08;
-  background: linear-gradient(120deg, #ffd24d, #ffb020);
-  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
-  flex-shrink: 0;
-}
-
-.home-coupons .coupon-copy:hover {
-  transform: translateY(-1px);
-  filter: brightness(1.06);
-  box-shadow: 0 8px 20px rgba(255, 176, 32, 0.4);
-}
-.home-coupons .coupon-copy:active { transform: translateY(0); }
+.home-coupons .coupon-meta li svg { flex-shrink: 0; }
 
 .home-coupons .coupon-cta {
   text-align: center;
   margin-top: 2.1rem;
 }
 
+/* ── Phone: the same ticket, stacked (≤640px) ─────────────────────────────
+   Stub across the top, tear line beneath it, and the two notches biting the
+   left and right edges at the tear line. Only the direction changes — every
+   colour, radius and shadow is inherited from above. */
 @media (max-width: 640px) {
-  .home-coupons .coupon-grid { grid-template-columns: 1fr; max-width: 380px; }
-  .home-coupons .coupon-off { font-size: 1.65rem; }
-  .home-coupons .coupon-code { font-size: 0.98rem; }
-  .home-coupons .coupon-best { position: static; margin-bottom: 0.6rem; }
+  .home-coupons .coupon-grid { grid-template-columns: 1fr; max-width: 400px; }
+  .home-coupons .coupon-card { flex-direction: column; }
+
+  .home-coupons .coupon-stub {
+    flex: none;
+    height: 96px;
+    flex-direction: row;
+    gap: 0.6rem;
+    padding: 0 1.15rem;
+    border-radius: 17px 17px 0 0;
+  }
+  .home-coupons .coupon-stub-gloss {
+    top: -70%;
+    left: -8%;
+    width: 26%;
+    height: 240%;
+  }
+  .home-coupons .coupon-stub-icon { margin-bottom: 0; }
+  .home-coupons .coupon-stub-value { font-size: 1.85rem; }
+
+  /* Tear line + notches now run horizontally, positioned from the perforation
+     element itself, so the stub height stays the single source of truth. */
+  .home-coupons .coupon-perf {
+    flex: none;
+    align-self: stretch;
+    height: 0;
+    border-top: 2px dashed rgba(255, 210, 77, 0.4);
+  }
+  .home-coupons .coupon-perf::before { display: none; }
+
+  .home-coupons .coupon-notch {
+    top: -9px;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    margin: 0;
+  }
+  .home-coupons .coupon-notch-top { left: -9px; }
+  .home-coupons .coupon-notch-bottom { right: -9px; }
+
+  .home-coupons .coupon-body { padding: 1.15rem 1.2rem 1.25rem; }
+  .home-coupons .coupon-copy { min-height: 40px; padding: 0.45rem 0.95rem; }
+
+  /* The pill now sits on the gold stub rather than the dark card, so it inverts
+     to dark-on-gold — a gold pill on a gold stub would be invisible. */
+  .home-coupons .coupon-best {
+    top: 0.6rem;
+    right: 0.8rem;
+    background: #1a0f08;
+    color: #ffd24d;
+  }
+}
+
+@media (max-width: 375px) {
+  .home-coupons .coupon-grid { max-width: 100%; }
+  .home-coupons .coupon-stub { height: 88px; }
+  .home-coupons .coupon-stub-value { font-size: 1.6rem; }
+  .home-coupons .coupon-code { font-size: 0.92rem; }
+  .home-coupons .coupon-best { right: 0.6rem; }
+}
+
+@media (max-width: 320px) {
+  .home-coupons .coupon-stub { height: 80px; }
+  .home-coupons .coupon-stub-value { font-size: 1.45rem; }
+  .home-coupons .coupon-stub-label { font-size: 0.56rem; letter-spacing: 0.16em; text-indent: 0.16em; }
+  .home-coupons .coupon-code { font-size: 0.86rem; letter-spacing: 0.08em; }
+  .home-coupons .coupon-copy { font-size: 0.72rem; padding: 0.4rem 0.7rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .home-coupons .coupon-card { animation: none; }
   .home-coupons .coupon-card:hover,
   .home-coupons .coupon-copy:hover { transform: none; }
-}
-@media (max-width: 375px) {
-  .home-coupons .coupon-grid { max-width: 100%; }
-  .home-coupons .coupon-off { font-size: 1.55rem; }
-}
-@media (max-width: 320px) {
-  .home-coupons .coupon-code { font-size: 0.9rem; }
-  .home-coupons .coupon-off { font-size: 1.45rem; }
 }

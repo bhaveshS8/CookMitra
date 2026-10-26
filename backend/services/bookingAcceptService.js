@@ -538,7 +538,13 @@ const acceptBookingForCook = async ({ bookingId, cookId, source = "website" } = 
     }
   } catch {
   }
-  if (source === "website") {
+  if (
+    source === "website" ||
+    // A booking that was already paid before this accept is effectively
+    // confirmed for the cook — send the job sheet whatever channel the
+    // accept came from (the dispatch service dedupes per cook).
+    String(booking?.payment?.status || "").toLowerCase() === "paid"
+  ) {
     // The cook is not looking at WhatsApp — push the Marathi
     // scheduled-booking job sheet proactively (idempotent per cook).
     try {

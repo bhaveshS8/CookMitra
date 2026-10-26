@@ -220,6 +220,7 @@
 
 @media (max-width: 640px) {
   .review-form-container:not(.review-form-container--bare) .review-form { padding: 0.95rem; }
+  .rf-rate-pill--empty { display: none; }
   .rf-star { padding: 0.3rem; }
   .rf-star svg { width: 26px; height: 26px; }
   .rf-actions { flex-direction: column; align-items: stretch; }
@@ -230,7 +231,7 @@
 .hrc-section {
   position: relative;
   max-width: 1200px;
-  margin: 1.75rem auto 0;
+  margin: 1.75rem auto 2rem;
   padding: 1.5rem 1.5rem 1.6rem;
   overflow: hidden;
   border-radius: var(--radius-xl);
@@ -404,7 +405,7 @@
 }
 
 @media (max-width: 640px) {
-  .hrc-section { margin: 1.25rem 0.75rem 0; padding: 1.15rem 1rem 1.25rem; }
+  .hrc-section { margin: 1.25rem 0.75rem 1.5rem; padding: 1.15rem 1rem 1.25rem; }
   .hrc-head { flex-direction: column; }
   .hrc-dismiss { align-self: flex-start; }
   .hrc-card { padding: 1rem 1rem 1.1rem; }
@@ -462,12 +463,12 @@
   .hrc-dismiss, .hrc-x, .rf-tag { transition: none; }
 }
 @media (max-width: 375px) {
-  .hrc-section { margin: 1.1rem 0.6rem 0; padding: 1.05rem 0.9rem 1.15rem; }
+  .hrc-section { margin: 1.1rem 0.6rem 1.35rem; padding: 1.05rem 0.9rem 1.15rem; }
   .hrc-card { padding: 0.9rem 0.85rem 1rem; }
   .rf-rate { flex-wrap: wrap; }
 }
 @media (max-width: 320px) {
-  .hrc-section { margin: 1rem 0.5rem 0; padding: 1rem 0.8rem 1.1rem; }
+  .hrc-section { margin: 1rem 0.5rem 1.25rem; padding: 1rem 0.8rem 1.1rem; }
   .hrc-title { font-size: 1.08rem; }
   .hrc-avatar { width: 38px; height: 38px; font-size: 0.92rem; }
   .rf-tag { padding: 0.4rem 0.7rem; font-size: 0.78rem; }

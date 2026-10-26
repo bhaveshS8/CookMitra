@@ -101,6 +101,16 @@ WHATSAPP_PHONE_NUMBER_ID=<live phone number ID>
 # Marathi cook messages: ALL cook-facing WhatsApp bodies are Marathi
 # (Devanagari) — builders in backend/utils/whatsappMessages.js. Customer
 # messages keep their existing language.
+# Every value a cook reads follows the same rule: date + weekday
+# ("बुधवार, 7 ऑक्टोबर 2026"), time-of-day words instead of AM/PM
+# ("सकाळी 10:00 ते दुपारी 12:00"), and the venue address rendered in
+# Devanagari (Latin input is transliterated for display; the Google Maps
+# link keeps the original text so it still resolves).
+# The customer's name is also rendered in Devanagari (common-name dictionary:
+# backend/utils/marathiNames.js), and cooking notes are translated where known
+# ("less spicy" → "कमी तिखट", "no onion garlic" → "कांदा-लसूण नको") with
+# unknown text transliterated (backend/utils/marathiNotes.js). Booking IDs,
+# phone numbers and Google Maps links are never translated.
 # REQUIRED for outside-window delivery: approve a Marathi request template
 # in WhatsApp Manager (e.g. name `new_booking_request`) and set:
 # WHATSAPP_REQUEST_TEMPLATE=new_booking_request

@@ -7,6 +7,7 @@ import Toasts from "./components/Toasts";
 import NotificationPopup from "./components/NotificationPopup";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
+import MobileTabBar from "./components/MobileTabBar";
 import { useRealtime } from "./hooks/useRealtime";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ScrollToTop from "./components/ScrollToTop";
@@ -307,6 +308,7 @@ function App() {
             </Routes>
           </main>
           <Footer />
+          <MobileTabBar />
         </div>
         <BackToTop />
         <Toasts />

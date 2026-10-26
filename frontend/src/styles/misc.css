@@ -59,9 +59,6 @@ td, th { padding: 0.7rem 0.5rem; }
 
 .hero-v2-float-live-title { font-weight: 800; font-size: 0.9rem; line-height: 1.2; }
 
-.how-card-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.35rem; }
-.how-card-header h3 { margin: 0; }
-
 .lead-copy .section-title { margin-bottom: 0.6rem; }
 
 .login-form { display: flex; flex-direction: column; gap: 0.85rem; }

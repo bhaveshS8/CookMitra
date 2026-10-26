@@ -500,12 +500,22 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     const doc = mkBooking({ _id: "bW", status: "accepted", amount: 349, payment: { status: "pending", razorpayOrderId: "order_w1" } });
     Booking.findOne = makeFindOne(() => doc);
     Booking.findOneAndUpdate = makeClaim(() => doc);
+    const dispatch = require("./services/whatsappDispatch");
+    const oNotifyEvent = dispatch.notifyWhatsAppEvent;
+    const waEvents = [];
+    dispatch.notifyWhatsAppEvent = (...a) => { waEvents.push(a); };
     const w1 = await sendWebhook(capEvent("order_w1", "pay_w1", 34900));
     check("W1 captured webhook confirms", w1.payload?.handled === true && doc.status === "confirmed" &&
       doc.payment.webhookReconciled === true, JSON.stringify(w1.payload));
+    check(
+      "W1 webhook also dispatches the cook confirmation job sheet",
+      waEvents.some((e) => e[0] === "booking.accepted" && String(e[1]?._id) === "bW"),
+      `${waEvents.length} event(s)`
+    );
     const h0 = doc.statusHistory.length;
     const w2 = await sendWebhook(capEvent("order_w1", "pay_w1", 34900));
     check("W2 duplicate webhook deduped", w2.payload?.handled === "duplicate" && doc.statusHistory.length === h0, `hist=${doc.statusHistory.length}/${h0}`);
+    check("W2 duplicate webhook sends no second cook message", waEvents.length === 1, `${waEvents.length} event(s)`);
     const doc3 = mkBooking({ _id: "bW3", status: "accepted", amount: 349, payment: { status: "pending", razorpayOrderId: "order_w3" } });
     Booking.findOne = makeFindOne(() => doc3);
     const w3 = await sendWebhook(capEvent("order_w3", "pay_w3", 34900, "authorized"));
@@ -515,11 +525,13 @@ const snapLeak = (label, status, body) => { leakBodies.push({ label, status, bod
     const w4 = await sendWebhook(capEvent("order_w4", "pay_w4", 100));
     check("W4 amount mismatch: refund queued, not confirmed",
       doc4.status === "accepted" && doc4.payment.refundStatus === "pending", `${doc4.status}/${doc4.payment.refundStatus}`);
+    check("W4 unconfirmed payment sends no cook confirmation", waEvents.length === 1, `${waEvents.length} event(s)`);
     Booking.findOne = makeFindOne(() => null);
     const w5 = await sendWebhook(capEvent("order_unknown", "pay_u", 34900));
     check("W5 unknown order ignored", w5.payload?.handled === false, JSON.stringify(w5.payload));
     const w6 = await sendWebhook(capEvent("order_w1", "pay_w1", 34900), "wrong_secret");
     check("W6 bad signature unactioned", w6.payload?.received === false, JSON.stringify(w6.payload));
+    dispatch.notifyWhatsAppEvent = oNotifyEvent;
   }
 
   console.log("\n═══ shared helper + leak scan ═══");

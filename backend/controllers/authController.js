@@ -22,6 +22,10 @@ const toUserPayload = (user) => {
     avatar: user.avatar,
     authProvider: user.authProvider,
     loginMethod: user.authProvider || "local",
+    hasPassword:
+      Boolean(user.password) ||
+      user.authProvider === "local" ||
+      user.authProvider === "local+google",
     preferredLanguage: user.preferredLanguage || "",
     emailVerified: user.authProvider === "google" || user.authProvider === "local+google" ? true : Boolean(user.emailVerified),
     phoneVerified: Boolean(user.phoneVerified),
@@ -265,7 +269,9 @@ exports.login = async (req, res, next) => {
 
     if (!user.password && user.googleId) {
       return res.status(401).json({
-        message: "This account uses Google sign-in. Please continue with Google.",
+        message:
+          "This account was created with Google. Continue with Google below, or set a password using “Forgot password” to sign in with email.",
+        code: "GOOGLE_SIGN_IN_REQUIRED",
       });
     }
 
@@ -524,6 +530,42 @@ exports.getMyStats = async (req, res, next) => {
   }
 };
 
+exports.setPassword = async (req, res, next) => {
+  try {
+    const newPassword = String(
+      req.body.newPassword || req.body.new_password || req.body.password || ""
+    );
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      return res.status(400).json({ message: "Password must be 8–128 characters" });
+    }
+    const user = await User.findById(req.user.id).select(
+      "+password googleId authProvider"
+    );
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (user.password) {
+      return res.status(400).json({
+        message: "This account already has a password. Use change password instead.",
+        code: "PASSWORD_ALREADY_SET",
+      });
+    }
+    if (!user.googleId) {
+      return res.status(400).json({
+        message: "Password setup is only available for Google accounts without a password.",
+      });
+    }
+    user.password = newPassword; // pre-save hook hashes it
+    user.authProvider = "local+google";
+    await user.save();
+    res.json({
+      message:
+        "Password created. You can now sign in with Google or your email and password.",
+      user: toUserPayload(user),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.changePassword = async (req, res, next) => {
   try {
     const currentPassword = String(req.body.currentPassword || req.body.current_password || req.body.oldPassword || "");
@@ -535,7 +577,10 @@ exports.changePassword = async (req, res, next) => {
     const user = await User.findById(req.user.id).select("+password googleId authProvider tokenVersion");
     if (!user) return res.status(404).json({ message: "User not found" });
     if (!user.password && user.googleId) {
-      return res.status(400).json({ message: "This account uses Google sign-in. Please set a password via password reset." });
+      return res.status(400).json({
+        message:
+          "This account uses Google sign-in. Create a password with set password first.",
+      });
     }
     const ok = await user.comparePassword(currentPassword);
     if (!ok) return res.status(401).json({ message: "Current password is incorrect" });

@@ -54,11 +54,53 @@ const unpaid = { ...booking, payment: { status: "pending", paidAmount: 0 } };
 
 // ---- 2. Scheduled confirmation: ref + paid line ----
 {
-  const body = marathi.buildCookBookingScheduledMessage({ booking, cookName: "Suresh", customerName: "Aditi Rao" });
+  const body = marathi.buildCookBookingScheduledMessage({ booking, cookName: "Suresh", customerName: "Aditi Rao", customerPhone: "9123456780" });
   check("M2 scheduled has booking ref", body.includes("📋 बुकिंग क्रमांक: bk-mr-001"), "ref");
   check("M2 scheduled states paid, no double-charge", body.includes("आधीच पेमेंट केले आहे") && body.includes("पुन्हा पेमेंट घेऊ नका"), "paid");
-  check("M2 scheduled names customer", body.includes("Aditi Rao") && body.includes("Suresh"), "parties");
+  check("M2 scheduled names customer", body.includes("अदिती राव") && body.includes("Suresh"), "parties");
+  check("M2 scheduled gives the cook the customer's contact number", body.includes("📞 ग्राहक संपर्क: 9123456780"), "contact");
   check("M2 scheduled is Devanagari", DEVA.test(body), "mr");
+  // Every visit detail the cook needs is present, on every service type.
+  for (const serviceType of ["cook_for_me", "cook_with_me", "teach_me", "preparation_help"]) {
+    const b = marathi.buildCookBookingScheduledMessage({
+      booking: { ...booking, serviceType },
+      cookName: "Suresh",
+      customerName: "Aditi Rao",
+      customerPhone: "9123456780",
+    });
+    check(
+      `M2 ${serviceType} confirmation has contact/date/time/duration/guests/address/notes`,
+      b.includes("📞 ग्राहक संपर्क: 9123456780") &&
+        b.includes("📅 तारीख: बुधवार, 7 ऑक्टोबर 2026") &&
+        b.includes("⏰ वेळ: सकाळी 10:00 ते दुपारी 12:00") &&
+        b.includes("⏱️ कालावधी: 2 तास") &&
+        b.includes("👥 व्यक्ती: 4") &&
+        b.includes("📍 पत्ता:") &&
+        b.includes("फ्लॅट 7, सनशाईन सोसायटी, पुणे") &&
+        b.includes("🗺️ रस्ता पहा (Google Maps):") &&
+        b.includes("📝 अतिरिक्त माहिती:") &&
+        b.includes("कमी तिखट") &&
+        b.includes("कृपया दिलेल्या वेळेवर ग्राहकाच्या पत्त्यावर पोहोचा."),
+      serviceType
+    );
+    check(
+      `M2 ${serviceType} confirmation has no English date/AM/PM`,
+      !/\bAM\b|\bPM\b|Mon|Tue|Wed|Thu|Fri|Sat|Sun/.test(b.replace(/https?:\/\/\S+/g, "")),
+      "localised"
+    );
+  }
+  const missing = marathi.buildCookBookingScheduledMessage({ booking: { _id: "bk-mr-009" }, cookName: "Suresh" });
+  check(
+    "M2 missing detail values never render blank",
+    missing.includes("📞 ग्राहक संपर्क: माहिती उपलब्ध नाही") &&
+      missing.includes("📅 तारीख: माहिती उपलब्ध नाही") &&
+      missing.includes("⏰ वेळ: माहिती उपलब्ध नाही") &&
+      missing.includes("⏱️ कालावधी: माहिती उपलब्ध नाही") &&
+      missing.includes("👥 व्यक्ती: माहिती उपलब्ध नाही"),
+    "fallbacks"
+  );
+  const badPhone = marathi.buildCookBookingScheduledMessage({ booking, cookName: "Suresh", customerName: "Aditi Rao", customerPhone: "not-a-number" });
+  check("M2 invalid customer number never leaks as a contact", !badPhone.includes("not-a-number") && badPhone.includes("📞 ग्राहक संपर्क: माहिती उपलब्ध नाही"), "invalid");
 }
 
 // ---- 3. Cook cancellation variants ----
@@ -80,7 +122,87 @@ const unpaid = { ...booking, payment: { status: "pending", paidAmount: 0 } };
 {
   const body = marathi.buildCookAcceptedMessage({ booking, customerName: "Aditi Rao" });
   check("M4 accepted is Marathi", DEVA.test(body) && body.includes("स्वीकारले"), "mr");
-  check("M4 accepted has ref + customer + 5-min note", body.includes("bk-mr-001") && body.includes("Aditi Rao") && body.includes("५ मिनिट"), "fields");
+  check("M4 accepted has ref + customer + 5-min note", body.includes("bk-mr-001") && body.includes("अदिती राव") && body.includes("५ मिनिट"), "fields");
+}
+
+// ---- 4b. Marathi date / day / clock / address helpers ----
+{
+  check(
+    "M9 full Marathi date includes weekday",
+    marathi.formatMarathiDateWithWeekday(booking.date) === "बुधवार, 7 ऑक्टोबर 2026",
+    marathi.formatMarathiDateWithWeekday(booking.date)
+  );
+  check(
+    "M9 Marathi time-of-day words replace AM/PM",
+    marathi.formatMarathiTime("08:00") === "सकाळी 8:00" &&
+      marathi.formatMarathiTime("12:30") === "दुपारी 12:30" &&
+      marathi.formatMarathiTime("17:00") === "संध्याकाळी 5:00" &&
+      marathi.formatMarathiTime("20:00") === "रात्री 8:00",
+    [marathi.formatMarathiTime("08:00"), marathi.formatMarathiTime("12:30"), marathi.formatMarathiTime("17:00"), marathi.formatMarathiTime("20:00")].join(" / ")
+  );
+  check(
+    "M9 Marathi slot range",
+    marathi.formatMarathiSlotRange("10:00", "12:00") === "सकाळी 10:00 ते दुपारी 12:00",
+    marathi.formatMarathiSlotRange("10:00", "12:00")
+  );
+  check(
+    "M9 address rendered in Devanagari",
+    marathi.formatAddressMarathi(booking) === "फ्लॅट 7, सनशाईन सोसायटी, पुणे",
+    marathi.formatAddressMarathi(booking)
+  );
+  check(
+    "M9 Devanagari input passes through unchanged",
+    marathi.toDevanagari("फ्लॅट 7, पुणे") === "फ्लॅट 7, पुणे",
+    marathi.toDevanagari("फ्लॅट 7, पुणे")
+  );
+  check(
+    "M9 maps link keeps the original (Latin) address",
+    marathi.mapsDirLink({ address: "Flat 7, Sunshine Society, Pune" }).includes(
+      encodeURIComponent("Flat 7, Sunshine Society, Pune")
+    ),
+    marathi.mapsDirLink({ address: "Flat 7, Sunshine Society, Pune" })
+  );
+  check(
+    "M9 invalid date/time never crash",
+    marathi.formatMarathiDateWithWeekday("not-a-date") === marathi.NOT_AVAILABLE &&
+      marathi.formatMarathiTime("") === "" &&
+      marathi.formatMarathiSlotRange(null, null) === "",
+    "safe"
+  );
+}
+
+// ---- 4c. Cook-facing customer name + note localization ----
+{
+  check(
+    "M10 common customer names render in Devanagari",
+    marathi.toDevanagariName("Suresh Patil") === "सुरेश पाटील" &&
+      marathi.toDevanagariName("Aditi Rao") === "अदिती राव",
+    marathi.toDevanagariName("Suresh Patil")
+  );
+  check(
+    "M10 Devanagari names pass through",
+    marathi.toDevanagariName("सुरेश पाटील") === "सुरेश पाटील",
+    "passthrough"
+  );
+  check(
+    "M10 notes translate common cooking instructions",
+    marathi.toMarathiNote("less spicy") === "कमी तिखट" &&
+      marathi.toMarathiNote("no onion garlic") === "कांदा-लसूण नको" &&
+      marathi.toMarathiNote("no tomato") === "टोमॅटो नको",
+    marathi.toMarathiNote("no onion garlic")
+  );
+  check("M10 empty notes stay empty", marathi.toMarathiNote("") === "", "empty");
+  const req = marathi.buildBookingRequestMessage({
+    booking,
+    customerName: "Suresh Patil",
+  });
+  check(
+    "M10 request uses localized name + notes",
+    req.includes("👤 ग्राहक: सुरेश पाटील") &&
+      req.includes("कमी तिखट") &&
+      !req.includes("less spicy"),
+    "localized"
+  );
 }
 
 // ---- 5. Unicode preservation through transport encoding ----
@@ -104,10 +226,10 @@ const unpaid = { ...booking, payment: { status: "pending", paidAmount: 0 } };
     address: "Flat 7, Sunshine Society, Pune",
   };
   const body = marathi.buildCookBookingScheduledMessage({ booking: withPin, cookName: "Suresh", customerName: "Aditi Rao" });
-  check("M8 confirmation has saved address", body.includes("Flat 7, Sunshine Society, Pune"), "address");
+  check("M8 confirmation has saved address", body.includes("फ्लॅट 7, सनशाईन सोसायटी, पुणे"), "address");
   check(
-    "M8 valid coords produce search link",
-    body.includes("https://www.google.com/maps/search/?api=1&query=18.5204,73.8567"),
+    "M8 valid coords produce directions link",
+    body.includes("https://www.google.com/maps/dir/?api=1&destination=18.5204,73.8567"),
     "pin-link"
   );
   const addrOnly = {
@@ -118,14 +240,14 @@ const unpaid = { ...booking, payment: { status: "pending", paidAmount: 0 } };
   const body2 = marathi.buildCookBookingScheduledMessage({ booking: addrOnly, cookName: "Suresh", customerName: "Aditi Rao" });
   check(
     "M8 missing coords fall back to encoded address link",
-    body2.includes("https://www.google.com/maps/search/?api=1&query=") && body2.includes(encodeURIComponent("Flat 7, Sunshine Society, Pune")),
+    body2.includes("https://www.google.com/maps/dir/?api=1&destination=") && body2.includes(encodeURIComponent("Flat 7, Sunshine Society, Pune")),
     "addr-link"
   );
   const bare = { ...booking, address: "" };
   delete bare.location;
   const body3 = marathi.buildCookBookingScheduledMessage({ booking: bare, cookName: "Suresh", customerName: "Aditi Rao" });
-  check("M8 missing location handled safely", !body3.includes("maps/search") && !body3.includes("undefined"), "nodata");
-  check("M8 never invents coordinates", !/query=-?\d+\.\d+,-?\d+\.\d+/.test(body3), "no-guess");
+  check("M8 missing location handled safely", !body3.includes("maps/dir") && !body3.includes("undefined"), "nodata");
+  check("M8 never invents coordinates", !/destination=-?\d+\.\d+,-?\d+\.\d+/.test(body3), "no-guess");
 }
 
 // ---- 6. Dispatcher split: cook Marathi, customer keeps English ----

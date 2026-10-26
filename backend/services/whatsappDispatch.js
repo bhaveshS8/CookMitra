@@ -14,7 +14,6 @@
 const Booking = require("../models/Booking");
 const User = require("../models/User");
 const { normalizeIndianMobile } = require("../utils/whatsapp");
-const { slotRange } = require("../utils/time");
 const {
   isWhatsAppEnabled,
   sendInteractiveButtons,
@@ -213,8 +212,9 @@ const isRetryableResult = (res) => {
 // customer | date | weekday | time | duration | address.
 // Default matches the approved `new_booking_request` (mr) template whose
 // {{1}}..{{6}} placeholders sit in reading order next to the labels
-// customer, date dd/mm/yyyy, weekday, time-range, duration-hours (" तास"
-// is hardcoded in the template after the duration marker), address.
+// customer, date ("7 ऑक्टोबर 2026"), weekday, time-range
+// ("सकाळी 10:00 ते दुपारी 12:00"), duration-hours (" तास" is hardcoded in
+// the template after the duration marker), address (Devanagari).
 // Verify from ONE live delivery: each label's value must equal the booking
 // field above — e.g. "वार" shows the Marathi weekday, never a number.
 // Override with WHATSAPP_TEMPLATE_PARAM_ORDER only if your template's
@@ -241,29 +241,22 @@ const templateParamOrder = () => {
 
 const templateParamsForBooking = (booking, customerName) => {
   // Param order matches the approved `new_booking_request` (mr) example:
-  // [customer, date dd/mm/yyyy, weekday, time-range, duration-hours, address].
-  // sendTemplateMessage truncates each to 100 chars.
+  // [customer, Marathi date, weekday, Marathi time-range, duration-hours,
+  // Devanagari address]. sendTemplateMessage truncates each to 100 chars.
   try {
-    const d = booking?.date ? new Date(booking.date) : null;
     let dateStr = "";
     try {
-      if (d && !Number.isNaN(d.getTime())) {
-        const parts = new Intl.DateTimeFormat("en-GB", {
-          timeZone: "Asia/Kolkata",
-          day: "2-digit",
-          month: "2-digit",
-          year: "numeric",
-        }).format(d);
-        dateStr = String(parts || "");
-      }
+      const d = marathi.formatMarathiDate(booking?.date);
+      dateStr = d === marathi.NOT_AVAILABLE ? "" : d;
     } catch {
       dateStr = "";
     }
     const start = String(booking?.startTime || "").slice(0, 5);
     const end = String(booking?.endTime || "").slice(0, 5);
-    const timeRange = slotRange(start, end) || start || end || "";
+    const timeRange =
+      marathi.formatMarathiSlotRange(start, end) || start || end || "";
     const duration = booking?.durationHours != null ? String(booking.durationHours) : "";
-    const address = String(booking?.address || "").trim();
+    const address = marathi.toDevanagari(String(booking?.address || "").trim());
     let weekday = "";
     try {
       weekday = marathi.calculateMarathiWeekday(booking?.date) || "";
@@ -272,7 +265,7 @@ const templateParamsForBooking = (booking, customerName) => {
     }
     if (weekday === "माहिती उपलब्ध नाही") weekday = "";
     const byName = {
-      customer: String(customerName || "ग्राहक"),
+      customer: customerName ? marathi.toDevanagariName(customerName) : "ग्राहक",
       date: dateStr,
       weekday,
       time: timeRange,
@@ -281,7 +274,7 @@ const templateParamsForBooking = (booking, customerName) => {
     };
     return templateParamOrder().map((k) => byName[k] ?? "");
   } catch {
-    return [String(customerName || "ग्राहक")];
+    return [customerName ? marathi.toDevanagariName(customerName) : "ग्राहक"];
   }
 };
 
@@ -535,12 +528,16 @@ const sendCookScheduledMessage = async (booking, opts = {}) => {
     if (!contact) return { ok: false, reason: "no-whatsapp-number" };
     let cookName = opts.cookName || contact.name || "";
     let customerName = opts.customerName || "";
+    let customerPhone = opts.customerPhone || "";
     try {
-      if (!customerName && fresh.customer) {
+      if ((!customerName || !customerPhone) && fresh.customer) {
         const customer = await withDbTimeout(
-          User.findById(fresh.customer).select("name").lean()
+          User.findById(fresh.customer).select("name phone mobile").lean()
         );
-        if (customer?.name) customerName = customer.name;
+        if (customer?.name) customerName = customerName || customer.name;
+        // The cook needs the customer's number to coordinate on arrival;
+        // this is the post-confirmation job sheet, not the pre-accept ask.
+        if (!customerPhone) customerPhone = customer?.phone || customer?.mobile || "";
       }
     } catch {
     }
@@ -548,6 +545,7 @@ const sendCookScheduledMessage = async (booking, opts = {}) => {
       booking: fresh,
       cookName,
       customerName,
+      customerPhone,
       bookingUrl: opts.bookingUrl,
     });
     await markDispatch(booking._id, cookId, SCHEDULED_KIND, { status: "sending", attempts: 1 });

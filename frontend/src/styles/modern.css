@@ -64,9 +64,6 @@ body {
 .hero-v2-title { text-wrap: balance; animation: titleUp 0.7s var(--ease-out) both; }
 @keyframes titleUp { from { opacity: 0; transform: translateY(26px); filter: blur(6px);} to { opacity: 1; transform: none; filter: none;} }
 .hero-v2-accent { background: none; -webkit-background-clip: unset; background-clip: unset; color: #F97316; }
-.hero-v2-cook-wrap { transition: transform 0.4s var(--ease-out), box-shadow 0.4s ease; animation: heroFloat 6s ease-in-out infinite; }
-@keyframes heroFloat { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-10px);} }
-.hero-v2-cook-wrap:hover { transform: translateY(-6px) scale(1.01); animation-play-state: paused; }
 .hero-v2-float { animation: floatySoft 4s ease-in-out infinite; box-shadow: 0 16px 34px rgba(124,45,18,0.22); }
 .hero-v2-float-live { animation-delay: -2s; }
 .hero-diyas span { animation: diyaFlicker 1.8s ease-in-out infinite; display: inline-block; }

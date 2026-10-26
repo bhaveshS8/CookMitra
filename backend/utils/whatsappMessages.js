@@ -9,8 +9,10 @@
 // left untouched (older clients/tests depend on them). New WhatsApp
 // interactive flows should use the builders below.
 
-const { FRONTEND_BASE_URL } = require("./whatsapp");
-const { to12h, slotRange } = require("./time");
+const { FRONTEND_BASE_URL, normalizeIndianMobile } = require("./whatsapp");
+const { toDevanagari } = require("./marathiText");
+const { toDevanagariName } = require("./marathiNames");
+const { toMarathiNote } = require("./marathiNotes");
 
 const SERVICE_TYPE_MARATHI = {
   cook_for_me: "माझ्यासाठी स्वयंपाक",
@@ -91,36 +93,51 @@ const calculateMarathiWeekday = (date) => {
   return MARATHI_WEEKDAYS[parts.weekday];
 };
 
-const formatServiceDate = (booking) => {
-  try {
-    if (!booking?.date) return "";
-    return new Date(booking.date).toLocaleDateString("en-IN", {
-      weekday: "short",
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
-  } catch {
-    return "";
-  }
+// "बुधवार, 7 ऑक्टोबर 2026" — Marathi weekday + date in IST. Used wherever a
+// cook needs the full service date (the day must never render in English).
+const formatMarathiDateWithWeekday = (date) => {
+  const day = formatMarathiDate(date);
+  const weekday = calculateMarathiWeekday(date);
+  if (day === NOT_AVAILABLE || weekday === NOT_AVAILABLE) return NOT_AVAILABLE;
+  return `${weekday}, ${day}`;
 };
 
-const formatClock = (value) => {
-  try {
-    if (!value) return "";
-    if (/^\d{1,2}:\d{2}/.test(String(value))) return String(value).slice(0, 5);
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return String(value);
-    return d.toLocaleString("en-IN", {
-      day: "numeric",
-      month: "short",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  } catch {
-    return String(value || "");
+// Marathi time-of-day words. Cooks read "सकाळी 10:00 ते दुपारी 12:00",
+// never "10:00 AM - 12:00 PM".
+const DAY_PERIODS = [
+  { from: 0, to: 5, word: "रात्री" }, // 00:00–04:59
+  { from: 5, to: 12, word: "सकाळी" }, // 05:00–11:59
+  { from: 12, to: 16, word: "दुपारी" }, // 12:00–15:59
+  { from: 16, to: 20, word: "संध्याकाळी" }, // 16:00–19:59
+  { from: 20, to: 24, word: "रात्री" }, // 20:00–23:59
+];
+
+// "15:30" -> "संध्याकाळी 3:30". Unparseable input passes through unchanged.
+const formatMarathiTime = (value) => {
+  const raw = String(value || "").trim();
+  const m = raw.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return raw;
+  const h24 = Number(m[1]);
+  const minutes = Number(m[2]);
+  if (!Number.isInteger(h24) || h24 < 0 || h24 > 23 || minutes < 0 || minutes > 59) {
+    return raw;
   }
+  const period = (DAY_PERIODS.find((p) => h24 >= p.from && h24 < p.to) || DAY_PERIODS[0]).word;
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${period} ${h12}:${m[2]}`;
 };
+
+// "सकाळी 10:00 ते दुपारी 12:00"; an empty side collapses gracefully.
+const formatMarathiSlotRange = (start, end) => {
+  const s = formatMarathiTime(start);
+  const e = formatMarathiTime(end);
+  if (s && e) return `${s} ते ${e}`;
+  return s || e || "";
+};
+
+// "बुधवार, 7 ऑक्टोबर 2026" — always rendered in IST (the business timezone),
+// so the cook never sees a date shifted by the server's local timezone.
+const formatServiceDate = (booking) => formatMarathiDateWithWeekday(booking?.date);
 
 const formatAddress = (booking) => {
   const parts = [
@@ -132,31 +149,38 @@ const formatAddress = (booking) => {
   ]
     .map((part) => String(part).trim())
     .filter(Boolean);
-  // De-dup: detail fields often repeat the full address text verbatim.
+  // De-dup: detail fields often repeat the full address text verbatim, and a
+  // saved address may be in the other script ("Sunshine" vs "सनशाईन"). Compare
+  // the Devanagari display forms so cross-script duplicates collapse too.
   const out = [];
+  const key = (s) => toDevanagari(String(s)).toLowerCase();
   for (const p of parts) {
-    const low = p.toLowerCase();
-    if (out.some((q) => q.toLowerCase().includes(low) || low.includes(q.toLowerCase()))) continue;
+    const low = key(p);
+    if (out.some((q) => key(q).includes(low) || low.includes(key(q)))) continue;
     out.push(p);
   }
   const joined = out.join(", ");
   return joined || "—";
 };
 
-// Tappable Google Maps link to the venue — the cook taps and follows
-// navigation directly. Prefers the stored GPS pin (exact coordinates),
-// falls back to an address search when no coordinates exist. Only uses
-// the booking's own saved location — never invents coordinates/address.
+// Cook-facing display form: the same saved address, rendered in Devanagari.
+// Google Maps still receives the original text via formatAddress().
+const formatAddressMarathi = (booking) => toDevanagari(formatAddress(booking));
+
+// Tappable Google Maps directions link to the venue — the cook taps and
+// starts navigation directly. Prefers the stored GPS pin (exact
+// coordinates), falls back to the address when no coordinates exist. Only
+// uses the booking's own saved location — never invents coordinates/address.
 const mapsDirLink = (booking) => {
   try {
     const lat = booking?.location?.lat;
     const lng = booking?.location?.lng;
     if (lat != null && lng != null && String(lat) !== "" && String(lng) !== "") {
-      return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+      return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
     }
     const addr = formatAddress(booking);
     if (addr && addr !== "—") {
-      return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}`;
+      return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addr)}`;
     }
     return null;
   } catch {
@@ -166,7 +190,7 @@ const mapsDirLink = (booking) => {
 
 const formatNotes = (booking) => {
   const notes = String(booking?.notes || "").trim();
-  return notes || "—";
+  return notes ? toMarathiNote(notes) : "—";
 };
 
 const formatPayout = (booking) => {
@@ -199,17 +223,17 @@ const REJECT_BUTTON_TITLE = "❌ नकार द्या";
 const buildBookingRequestMessage = ({ booking, customerName } = {}) => {
   const name =
     customerName != null && String(customerName).trim() !== ""
-      ? String(customerName).trim()
+      ? toDevanagariName(String(customerName).trim())
       : NOT_AVAILABLE;
   const serviceDate = booking?.date ? formatMarathiDate(booking.date) : NOT_AVAILABLE;
   const weekday = booking?.date ? calculateMarathiWeekday(booking.date) : NOT_AVAILABLE;
   const startTime =
     booking?.startTime != null && String(booking.startTime).trim() !== ""
-      ? to12h(String(booking.startTime).trim().slice(0, 5))
+      ? formatMarathiTime(String(booking.startTime).trim())
       : "";
   const endTime =
     booking?.endTime != null && String(booking.endTime).trim() !== ""
-      ? to12h(String(booking.endTime).trim().slice(0, 5))
+      ? formatMarathiTime(String(booking.endTime).trim())
       : "";
   const timeLine = startTime && endTime ? `${startTime} ते ${endTime}` : NOT_AVAILABLE;
   const durationHours =
@@ -227,7 +251,7 @@ const buildBookingRequestMessage = ({ booking, customerName } = {}) => {
       : NOT_AVAILABLE;
   const notes =
     booking?.notes != null && String(booking.notes).trim() !== ""
-      ? String(booking.notes).trim()
+      ? toMarathiNote(String(booking.notes).trim())
       : "";
   const bookingId =
     booking?._id != null && String(booking._id).trim() !== ""
@@ -249,7 +273,7 @@ const buildBookingRequestMessage = ({ booking, customerName } = {}) => {
     `⏱️ कालावधी: ${durationLine}`,
     "",
     "📍 ठिकाण:",
-    address,
+    toDevanagari(address),
     "",
     `👥 व्यक्ती: ${guests}`,
     "",
@@ -267,27 +291,48 @@ const buildBookingRequestMessage = ({ booking, customerName } = {}) => {
   ].join("\n");
 };
 
-const buildCookBookingScheduledMessage = ({ booking, cookName, customerName, bookingUrl } = {}) => {
+// Cook confirmation (booking is confirmed and paid). This is the single
+// copy used for EVERY service type (cook_for_me, cook_with_me, teach_me,
+// preparation_help) and every confirmation path (customer payment, 100%
+// coupon, replacement cook, admin assignment, gateway webhook):
+//   👤 customer, 📞 customer contact, 📅 date (IST), ⏰ time, ⏱️ duration,
+//   👥 guests, 📍 full address, 🗺️ Google Maps directions, 📝 notes.
+// The customer's number is shared only here (post-confirmation job sheet),
+// never in the pre-accept request. Missing values show NOT_AVAILABLE —
+// never a blank line, never a guess.
+const buildCookBookingScheduledMessage = ({ booking, cookName, customerName, customerPhone, bookingUrl } = {}) => {
   const dirLink = mapsDirLink(booking);
   const bookingId =
     booking?._id != null && String(booking._id).trim() !== ""
       ? String(booking._id).trim()
       : "";
+  const durationHours =
+    booking?.durationHours != null && String(booking.durationHours).trim() !== ""
+      ? String(booking.durationHours).trim()
+      : "";
+  const durationLine = durationHours ? `${durationHours} तास` : NOT_AVAILABLE;
+  const guests =
+    booking?.guests != null && String(booking.guests).trim() !== ""
+      ? String(booking.guests).trim()
+      : NOT_AVAILABLE;
+  const timeLine = formatMarathiSlotRange(booking?.startTime, booking?.endTime) || NOT_AVAILABLE;
+  const contactNumber = normalizeIndianMobile(customerPhone) || NOT_AVAILABLE;
   return [
     `नमस्कार ${cookName || "कुक"} 🙏`,
     "",
     "तुमची बुकिंग यशस्वीपणे निश्चित झाली आहे.",
     "",
     `📋 बुकिंग क्रमांक: ${bookingId || NOT_AVAILABLE}`,
-    `👤 ग्राहक: ${customerName || "ग्राहक"}`,
+    `👤 ग्राहक: ${customerName ? toDevanagariName(customerName) : "ग्राहक"}`,
+    `📞 ग्राहक संपर्क: ${contactNumber}`,
     `📅 तारीख: ${formatServiceDate(booking)}`,
-    `⏰ वेळ: ${slotRange(booking?.startTime, booking?.endTime) || "माहिती उपलब्ध नाही"}`,
-    `⏱️ कालावधी: ${booking?.durationHours ?? ""} तास`,
+    `⏰ वेळ: ${timeLine}`,
+    `⏱️ कालावधी: ${durationLine}`,
     "",
-    `👥 व्यक्ती: ${booking?.guests ?? ""}`,
+    `👥 व्यक्ती: ${guests}`,
     "",
     "📍 पत्ता:",
-    formatAddress(booking),
+    formatAddressMarathi(booking),
     ...(dirLink ? ["", "🗺️ रस्ता पहा (Google Maps):", dirLink] : []),
     "",
     "📝 अतिरिक्त माहिती:",
@@ -313,7 +358,7 @@ const buildCustomerBookingConfirmedMessage = ({ booking, cookName, customerName,
     "",
     `👩‍🍳 कुक: ${cookName || "नियुक्त कुक"}`,
     `📅 तारीख: ${formatServiceDate(booking)}`,
-    `⏰ वेळ: ${slotRange(booking?.startTime, booking?.endTime) || "माहिती उपलब्ध नाही"}`,
+    `⏰ वेळ: ${formatMarathiSlotRange(booking?.startTime, booking?.endTime) || "माहिती उपलब्ध नाही"}`,
     `⏱️ कालावधी: ${booking?.durationHours ?? ""} तास`,
     "",
     "🍽️ सेवा:",
@@ -389,7 +434,7 @@ const buildCookCancelledMessage = ({ booking, cancelledBy } = {}) => {
     who,
     "",
     `📋 बुकिंग क्रमांक: ${bookingId || NOT_AVAILABLE}`,
-    `📅 तारीख: ${booking?.date ? formatMarathiDate(booking.date) : NOT_AVAILABLE}`,
+    `📅 तारीख: ${formatServiceDate(booking)}`,
   ];
   if (by === "cook") {
     const isPaid = String(booking?.payment?.status || "").toLowerCase() === "paid";
@@ -418,9 +463,9 @@ const buildCookAcceptedMessage = ({ booking, customerName } = {}) => {
   return [
     "✅ Cook Mitra — तुम्ही बुकिंग स्वीकारले आहे",
     "",
-    `👤 ग्राहक: ${customerName || "ग्राहक"}`,
+    `👤 ग्राहक: ${customerName ? toDevanagariName(customerName) : "ग्राहक"}`,
     `🍽️ सेवा: ${serviceTypeMarathi(booking?.serviceType)}`,
-    `📅 तारीख: ${booking?.date ? formatMarathiDate(booking.date) : NOT_AVAILABLE}`,
+    `📅 तारीख: ${formatServiceDate(booking)}`,
     `📋 बुकिंग क्रमांक: ${bookingId || NOT_AVAILABLE}`,
     "",
     "ग्राहक ५ मिनिटांत पेमेंट पूर्ण करेल. कृपया हा वेळ राखून ठेवा.",
@@ -450,8 +495,15 @@ module.exports = {
   ACCEPT_BUTTON_TITLE,
   REJECT_BUTTON_TITLE,
   NOT_AVAILABLE,
+  toDevanagariName,
+  toMarathiNote,
   formatMarathiDate,
   calculateMarathiWeekday,
+  formatMarathiDateWithWeekday,
+  formatMarathiTime,
+  formatMarathiSlotRange,
+  formatAddressMarathi,
+  toDevanagari,
   buildBookingRequestMessage,
   buildCookBookingScheduledMessage,
   buildCustomerBookingConfirmedMessage,

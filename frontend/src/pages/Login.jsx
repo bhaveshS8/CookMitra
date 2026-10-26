@@ -34,6 +34,7 @@ const Login = () => {
   const [rememberMe, setRememberMe] = useState(true);
   const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
+  const [googleOnly, setGoogleOnly] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const dispatch = useDispatch();
@@ -49,6 +50,7 @@ const Login = () => {
     setFormData((prev) => ({ ...prev, [name]: value }));
     setFieldErrors((prev) => (prev[name] ? { ...prev, [name]: "" } : prev));
     if (error) setError("");
+    if (googleOnly) setGoogleOnly(false);
   };
 
   const validate = () => {
@@ -97,6 +99,7 @@ const Login = () => {
       if (Object.keys(serverFields).length) setFieldErrors(serverFields);
       const msg = authErrorMessage(err, "Invalid credentials. Please try again.");
       setError(msg);
+      setGoogleOnly(err?.response?.data?.code === "GOOGLE_SIGN_IN_REQUIRED");
       showToast(msg, "error");
     } finally {
       setLoading(false);
@@ -187,6 +190,19 @@ const Login = () => {
           {error && (
             <div className="error-alert-banner login-error" role="alert">
               <AlertCircle size={16} /> {error}
+            </div>
+          )}
+
+          {googleOnly && (
+            <div className="auth-resume-note" role="note">
+              Want to sign in with a password instead?{" "}
+              <Link
+                to={`/forgot-password?email=${encodeURIComponent(normalizeEmail(formData.email))}`}
+              >
+                Set one via email
+              </Link>{" "}
+              — or use the Google button below. After setting a password, both
+              methods will work.
             </div>
           )}
 

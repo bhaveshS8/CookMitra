@@ -540,19 +540,20 @@ export function MyActivityTab({ bookings, reviews, navigate }) {
 }
 
 /* ---------- Tab 4 ---------- */
-export function SecurityPrivacyTab({ profile, showToast }) {
-  const isGoogleOnly = Boolean(profile?.googleId || (profile?.authProvider === "google")) && !profile?.hasPassword;
+export function SecurityPrivacyTab({ profile, setProfile, showToast }) {
+  const googleOnly =
+    !profile?.hasPassword &&
+    (profile?.authProvider === "google" || profile?.loginMethod === "google");
   const [form, setForm] = useState({ current: "", next: "", confirm: "" });
   const [show, setShow] = useState({ c: false, n: false, cf: false });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [ok, setOk] = useState("");
-  const googleOnly = profile?.loginMethod === "google" || profile?.authProvider === "google";
 
   const submit = async (e) => {
     e?.preventDefault();
     const errs = {};
-    if (!form.current) errs.current = "Enter your current password";
+    if (!googleOnly && !form.current) errs.current = "Enter your current password";
     if (!form.next || form.next.length < 8) errs.next = "New password must be at least 8 characters";
     else if (form.next.length > 128) errs.next = "New password must be under 128 characters";
     else if (form.next === form.current) errs.next = "New password must be different";
@@ -561,12 +562,29 @@ export function SecurityPrivacyTab({ profile, showToast }) {
     if (Object.keys(errs).length) return;
     setSaving(true); setOk("");
     try {
-      await API.post("/auth/change-password", { currentPassword: form.current, newPassword: form.next });
-      setOk("Password changed. Other sessions were signed out — use your new password next time.");
+      if (googleOnly) {
+        const res = await API.post("/auth/set-password", { newPassword: form.next });
+        setOk(res.data?.message || "Password created — you can now sign in with email and password, or continue with Google.");
+        setProfile?.((prev) => ({
+          ...(prev || {}),
+          hasPassword: true,
+          authProvider: "local+google",
+          loginMethod: "local+google",
+        }));
+        showToast("Password created. You can now sign in either way.", "success");
+      } else {
+        await API.post("/auth/change-password", { currentPassword: form.current, newPassword: form.next });
+        setOk("Password changed. Other sessions were signed out — use your new password next time.");
+        showToast("Password changed successfully.", "success");
+      }
       setForm({ current: "", next: "", confirm: "" });
-      showToast("Password changed successfully.", "success");
-    } catch (err) { const m = err.response?.data?.message || "Failed to change password"; setErrors({ form: m }); showToast(m, "error"); }
-    finally { setSaving(false); }
+    } catch (err) {
+      const m = err.response?.data?.message || (googleOnly ? "Failed to create password" : "Failed to change password");
+      setErrors({ form: m });
+      showToast(m, "error");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const pwField = (key, label, showKey, id) => (
@@ -584,19 +602,26 @@ export function SecurityPrivacyTab({ profile, showToast }) {
       <p className="cp-panel-desc">Signed in via <strong>{googleOnly ? "Google" : profile?.loginMethod === "local+google" || profile?.authProvider === "local+google" ? "Email + Google" : "Email & password"}</strong>. We never show tokens or password hashes here.</p>
       {errors.form && <div className="cp-alert error" role="alert"><AlertCircle size={15} /> {errors.form}</div>}
       {ok && <div className="cp-alert success" role="status"><CheckCircle2 size={15} /> {ok}</div>}
-      {googleOnly && <div className="cp-alert info" role="note"><ShieldCheck size={15} /> This account uses Google sign-in only. To set a password, use “Forgot password” on the login page — the change-password form below requires a current password.</div>}
-      {!googleOnly && !isGoogleOnly && (
-        <form onSubmit={submit} noValidate>
-          <div className="cp-form-grid">
-            {pwField("current", "Current Password", "c", "cp-cur")}
-            {pwField("next", "New Password (min 8 characters)", "n", "cp-new")}
-            {pwField("confirm", "Confirm New Password", "cf", "cp-cf")}
-          </div>
-          <div className="cp-actions">
-            <button type="submit" className="btn btn-primary" disabled={saving}><ShieldCheck size={15} /> {saving ? "Updating…" : "Change Password"}</button>
-          </div>
-        </form>
+      {googleOnly && (
+        <div className="cp-alert info" role="note">
+          <ShieldCheck size={15} /> You signed up with Google. Create a password below to also sign in with your email and password — Google sign-in will keep working too.
+        </div>
       )}
+      <form onSubmit={submit} noValidate>
+        <div className="cp-form-grid">
+          {!googleOnly && pwField("current", "Current Password", "c", "cp-cur")}
+          {pwField("next", googleOnly ? "Create Password (min 8 characters)" : "New Password (min 8 characters)", "n", "cp-new")}
+          {pwField("confirm", "Confirm Password", "cf", "cp-cf")}
+        </div>
+        <div className="cp-actions">
+          <button type="submit" className="btn btn-primary" disabled={saving}>
+            <ShieldCheck size={15} />{" "}
+            {saving
+              ? googleOnly ? "Creating…" : "Updating…"
+              : googleOnly ? "Create Password" : "Change Password"}
+          </button>
+        </div>
+      </form>
       <div className="cp-alert warn" role="note" style={{ marginTop: "0.9rem" }}><AlertCircle size={15} /> Account deletion is handled by support after verification — there is no self-service delete here by design.</div>
     </section>
   );
