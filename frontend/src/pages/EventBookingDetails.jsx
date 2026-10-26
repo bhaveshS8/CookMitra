@@ -32,6 +32,7 @@ import {
   UserCheck,
   CreditCard,
   ShieldCheck,
+  PartyPopper,
 } from "lucide-react";
 
 const EventBookingDetails = () => {
@@ -481,22 +482,38 @@ const EventBookingDetails = () => {
 
   return (
     <div className="dashboard-container events-page event-detail-page">
-      <div className="dashboard-header-row event-detail-head">
-        <div className="event-detail-headmain">
+      <header className="event-detail-hero">
+        <div className="event-detail-hero-main">
+          <span className="event-detail-eyebrow">
+            <PartyPopper size={13} aria-hidden="true" /> CookMitra Events
+          </span>
           <span className="badge badge-festive event-ref-badge">{booking.bookingId || "Event Booking"}</span>
           <h1 className="event-detail-title">{eventTypeLabel(booking)}</h1>
           <p className="event-detail-sub">
             {formatDate(booking.eventDate) || "—"} · {formatTime12(booking.startTime) || "—"} ·{" "}
             {booking.guestCount ?? "—"} guests
           </p>
+          <div className="event-detail-hero-stats">
+            <span><CalendarCheck size={13} aria-hidden="true" /> {formatDate(booking.eventDate) || "Date TBD"}</span>
+            <span><Clock3 size={13} aria-hidden="true" /> {formatTime12(booking.startTime) || "Time TBD"}</span>
+            <span><Users size={13} aria-hidden="true" /> {booking.guestCount ?? "—"} guests</span>
+            <span><ChefHat size={13} aria-hidden="true" /> {EVENT_SERVICE_LABEL(booking.serviceType) || "Event service"}</span>
+          </div>
         </div>
-        <div className="event-detail-badges">
-          <span className={`event-status-pill event-status-pill--${eventStatusTone(status)}`}>
-            {eventStatusLabel(status)}
-          </span>
-          <span className={`event-pay-badge event-pay-badge--${paymentMeta.tone}`}>{paymentMeta.label}</span>
+        <div className="event-detail-hero-side">
+          <div className="event-detail-badges">
+            <span className={`event-status-pill event-status-pill--${eventStatusTone(status)}`}>
+              {eventStatusLabel(status)}
+            </span>
+            <span className={`event-pay-badge event-pay-badge--${paymentMeta.tone}`}>{paymentMeta.label}</span>
+          </div>
+          <div className="event-detail-hero-total">
+            <span>{distanceVerified ? "Final event total" : "Estimated event total"}</span>
+            <strong>{formatCurrency(booking.totalAmount)}</strong>
+            <em>{distanceVerified ? "Verified" : "Travel pending verification"}</em>
+          </div>
         </div>
-      </div>
+      </header>
 
       {status === "pending" && (
         <div className="event-context-box event-context-box--pending">
@@ -530,7 +547,9 @@ const EventBookingDetails = () => {
         })}
       </ol>
 
-      <section className="event-panel" aria-labelledby="event-price-heading">
+      <div className="event-detail-layout">
+        <div className="event-detail-primary">
+      <section className="event-panel event-panel--price" aria-labelledby="event-price-heading">
         <div className="event-panel-head">
           <h3 id="event-price-heading">
             <BadgeIndianRupee size={18} /> Price summary
@@ -726,7 +745,9 @@ const EventBookingDetails = () => {
           </div>
         )}
       </section>
+        </div>
 
+        <aside className="event-detail-secondary">
       <div className="booking-metadata-grid event-meta-grid">
         {rows.map((r) => (
           <div className="meta-field" key={r.label}>
@@ -890,6 +911,8 @@ const EventBookingDetails = () => {
         <Link to="/events" className="btn btn-outline btn-sm">
           Book another event
         </Link>
+      </div>
+        </aside>
       </div>
     </div>
   );

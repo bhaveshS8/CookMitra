@@ -22,6 +22,7 @@ import {
   Check,
   CheckCircle2,
   PartyPopper,
+  ShieldCheck,
   Sunrise,
   Moon,
   Cookie,
@@ -505,7 +506,29 @@ const EventBooking = () => {
               Celebrate your special moments while we take care of the cooking.
             </span>
           </p>
+          <div className="event-hero-trust" aria-label="Booking benefits">
+            <span><ShieldCheck size={13} aria-hidden="true" /> Verified cooks</span>
+            <span><BadgeIndianRupee size={13} aria-hidden="true" /> Transparent pricing</span>
+            <span><CalendarCheck size={13} aria-hidden="true" /> Free to request</span>
+          </div>
         </div>
+        <aside className="event-hero-side" aria-label="How event booking works">
+          <p className="event-hero-side-title">How it works</p>
+          <ol className="event-hero-steps">
+            <li>
+              <span aria-hidden="true">1</span>
+              Pick your occasion &amp; details
+            </li>
+            <li>
+              <span aria-hidden="true">2</span>
+              We assign a verified cook
+            </li>
+            <li>
+              <span aria-hidden="true">3</span>
+              Pay after the amount is verified
+            </li>
+          </ol>
+        </aside>
       </div>
 
       <ol className="od-steps-modern od-steps-progress" aria-label="Event booking progress">
@@ -530,6 +553,10 @@ const EventBooking = () => {
       {/* STEP 1 — Select event */}
       {step === 1 && (
         <div className="ondemand-form-card">
+          <div className="event-step-head">
+            <span className="event-step-kicker"><span aria-hidden="true">01</span> Step 1 of 5</span>
+            <span className="event-step-tag">Occasion</span>
+          </div>
           <h2 className="ondemand-section-title event-occasion-heading">
             <PartyPopper size={18} aria-hidden="true" /> What are you celebrating?
           </h2>
@@ -626,6 +653,10 @@ const EventBooking = () => {
       {/* STEP 2 — Event details */}
       {step === 2 && (
         <div className="ondemand-form-card od-event-details">
+          <div className="event-step-head">
+            <span className="event-step-kicker"><span aria-hidden="true">02</span> Step 2 of 5</span>
+            <span className="event-step-tag">Date &amp; menu</span>
+          </div>
           <h2 className="ondemand-section-title"><CalendarDays size={17} /> Event details</h2>
           <p className="ondemand-form-sub">Set the date, guest count and the dishes you'd like cooked.</p>
           <div className="form-group od-date-group">
@@ -774,7 +805,11 @@ const EventBooking = () => {
       {/* STEP 3 — Service & hours */}
       {step === 3 && (
         <div className="ondemand-form-card">
-          <h2 className="ondemand-section-title"><Clock3 size={17} /> Service & hours</h2>
+          <div className="event-step-head">
+            <span className="event-step-kicker"><span aria-hidden="true">03</span> Step 3 of 5</span>
+            <span className="event-step-tag">Service</span>
+          </div>
+          <h2 className="ondemand-section-title"><Clock3 size={17} /> Service &amp; hours</h2>
           <p className="ondemand-form-sub">Three simple services — price depends on hours.</p>
           <div className="service-pick-grid">
             {EVENT_SERVICES.map((s) => (
@@ -863,6 +898,10 @@ const EventBooking = () => {
       {/* STEP 4 — Location */}
       {step === 4 && (
         <div className="ondemand-form-card">
+          <div className="event-step-head">
+            <span className="event-step-kicker"><span aria-hidden="true">04</span> Step 4 of 5</span>
+            <span className="event-step-tag">Location</span>
+          </div>
           <h2 className="ondemand-section-title"><MapPin size={17} /> Event location</h2>
           <div className="form-group">
             <label htmlFor="event-address">
@@ -968,6 +1007,10 @@ const EventBooking = () => {
       {/* STEP 5 — Price & request */}
       {step === 5 && (
         <div className="ondemand-form-card">
+          <div className="event-step-head">
+            <span className="event-step-kicker"><span aria-hidden="true">05</span> Step 5 of 5</span>
+            <span className="event-step-tag">Review</span>
+          </div>
           <h2 className="ondemand-section-title"><BadgeIndianRupee size={17} /> Price breakdown</h2>
           {quoting ? (
             <div className="loading-spinner-wrapper">
@@ -1009,6 +1052,10 @@ const EventBooking = () => {
                 <strong>
                   {formatCurrency(shownQuote.totalAmount)}
                 </strong>
+              </div>
+              <div className="event-quote-assurance">
+                <span><ShieldCheck size={14} aria-hidden="true" /> No payment now</span>
+                <span><CheckCircle2 size={14} aria-hidden="true" /> Verified cook assigned after request</span>
               </div>
               {quote?.previewOnly && (
                 <p className="event-estimate-note">

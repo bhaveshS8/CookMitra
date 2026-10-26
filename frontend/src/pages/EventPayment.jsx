@@ -231,12 +231,23 @@ const EventPayment = () => {
         <Link to={`/event-bookings/${id}`} className="event-back-link">
           <ArrowLeft size={16} /> Back to event
         </Link>
+        <span className="event-pay-eyebrow">
+          <ShieldCheck size={13} aria-hidden="true" /> Secure event checkout
+        </span>
         <h1 className="bf-title">Pay for your event</h1>
         <p className="bf-sub">
           {eventTypeLabel(event) || "Event"} · {formatDate(event?.eventDate)}
           {event?.startTime ? ` · ${formatTime12(event.startTime)}` : ""}
           {Number(event?.duration) > 0 ? ` · ${event.duration} hr` : ""}
         </p>
+
+        <div className="event-pay-hero">
+          <div className="event-pay-hero-copy">
+            <span>Amount payable now</span>
+            <p>Final amount after cook assignment and travel verification.</p>
+          </div>
+          <strong className="event-pay-hero-amount">{formatCurrency(amount)}</strong>
+        </div>
 
         {paymentFailed && (
           <div className="event-pay-alert" role="alert">

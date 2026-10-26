@@ -16,13 +16,22 @@ const clean = (v) => {
   return s.replace(/\/$/, "");
 };
 
+const PRODUCTION_BASE_URL = "https://cookmitra.org";
+
 function resolveFrontendBaseUrl(env = process.env) {
   const candidates = [env.FRONTEND_BASE_URL, env.FRONTEND_URL, env.CLIENT_URL]
     .map(clean)
     .filter(Boolean);
+  // In production a reset/booking link must never point at localhost. If the
+  // deployment forgot to set FRONTEND_BASE_URL (or only left a stale dev
+  // CLIENT_URL), fall back to the canonical public web origin instead of
+  // refusing to send the email.
+  if (env.NODE_ENV === "production") {
+    return candidates.find((c) => !isLocalhost(c)) || PRODUCTION_BASE_URL;
+  }
   if (candidates.length === 0) return "";
   // Prefer the first real domain; only fall back to localhost when nothing else exists.
   return candidates.find((c) => !isLocalhost(c)) || candidates[0];
 }
 
-module.exports = { resolveFrontendBaseUrl, isLocalhost };
+module.exports = { resolveFrontendBaseUrl, isLocalhost, PRODUCTION_BASE_URL };

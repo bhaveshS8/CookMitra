@@ -27,21 +27,31 @@ const sendResetEmail = async ({ to, name, token }) => {
     port: Number(process.env.SMTP_PORT || 587),
     secure: String(process.env.SMTP_SECURE || "false") === "true",
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || "" },
+    // A broken/blocked SMTP host must not hang the forgot-password request.
+    // The mobile client gives up after 15s and reports "cannot send".
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
   });
-  await transporter.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to,
-    subject: "Reset your CookMitra password",
-    text: [
-      `Hi ${name || "there"},`,
-      "",
-      "Someone requested a password reset for your CookMitra account.",
-      "If that was you, set a new password within 1 hour:",
-      resetUrl,
-      "",
-      "If you did not request this, just ignore this email.",
-    ].join("\n"),
-  });
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      to,
+      subject: "Reset your CookMitra password",
+      text: [
+        `Hi ${name || "there"},`,
+        "",
+        "Someone requested a password reset for your CookMitra account.",
+        "If that was you, set a new password within 1 hour:",
+        resetUrl,
+        "",
+        "If you did not request this, just ignore this email.",
+      ].join("\n"),
+    });
+  } catch (err) {
+    console.error("Password-reset email failed:", err?.code || err?.name || "unknown");
+    return { delivered: false, reason: "send-failed" };
+  }
   return { delivered: true };
 };
 

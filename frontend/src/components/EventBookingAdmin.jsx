@@ -59,6 +59,14 @@ const EventBookingAdmin = () => {
     return true;
   });
 
+  const counts = {
+    all: bookings.length,
+    pending: bookings.filter((b) => b.bookingStatus === "pending").length,
+    live: bookings.filter((b) => ["cook_assigned", "confirmed", "in_progress"].includes(b.bookingStatus)).length,
+    completed: bookings.filter((b) => b.bookingStatus === "completed").length,
+    refunds: refundRows.length,
+  };
+
   const conflictMessage = (err, fallback) => {
     if (err.response?.status === 409) {
       refetch();
@@ -217,29 +225,58 @@ const EventBookingAdmin = () => {
 
   return (
     <div className="event-admin">
-      <div className="dashboard-header-row event-admin-head">
-        <div>
+      <section className="event-admin-hero">
+        <div className="event-admin-hero-copy">
+          <span className="event-admin-eyebrow">
+            <CalendarCheck size={13} aria-hidden="true" /> Event operations
+          </span>
           <h2>Event Bookings</h2>
-          <p className="event-admin-sub">Assign verified cooks, verify travel and manage the event lifecycle.</p>
+          <p>Assign verified cooks, verify travel and manage every event from request to completion.</p>
         </div>
+        <div className="event-admin-stats" aria-label="Event booking summary">
+          <div className="event-admin-stat event-admin-stat--pending">
+            <span className="event-admin-stat-icon"><Clock3 size={16} /></span>
+            <span className="event-admin-stat-copy"><strong>{counts.pending}</strong><span>Pending</span></span>
+          </div>
+          <div className="event-admin-stat event-admin-stat--live">
+            <span className="event-admin-stat-icon"><ChefHat size={16} /></span>
+            <span className="event-admin-stat-copy"><strong>{counts.live}</strong><span>Live events</span></span>
+          </div>
+          <div className="event-admin-stat event-admin-stat--done">
+            <span className="event-admin-stat-icon"><Check size={16} /></span>
+            <span className="event-admin-stat-copy"><strong>{counts.completed}</strong><span>Completed</span></span>
+          </div>
+          <div className="event-admin-stat event-admin-stat--refund">
+            <span className="event-admin-stat-icon"><RotateCcw size={16} /></span>
+            <span className="event-admin-stat-copy"><strong>{counts.refunds}</strong><span>Refund queue</span></span>
+          </div>
+        </div>
+      </section>
+
+      <div className="event-admin-toolbar">
         <div className="event-filter-row" role="group" aria-label="Filter event bookings">
           {[
-            { id: "all", label: `All (${bookings.length})` },
-            { id: "pending", label: `Pending (${bookings.filter((b) => b.bookingStatus === "pending").length})` },
-            { id: "live", label: "Live" },
-            { id: "past", label: "Past" },
+            { id: "all", label: "All", count: counts.all },
+            { id: "pending", label: "Pending", count: counts.pending },
+            { id: "live", label: "Live", count: counts.live },
+            { id: "past", label: "Past", count: bookings.length - counts.pending - counts.live },
           ].map((f) => (
             <button
               key={f.id}
               type="button"
               onClick={() => setFilter(f.id)}
               aria-pressed={filter === f.id}
-              className={`btn btn-sm ${filter === f.id ? "btn-primary" : "btn-outline"}`}
+              className={`event-filter-pill${filter === f.id ? " is-active" : ""}`}
             >
               {f.label}
+              <span className="event-filter-pill-count">{f.count}</span>
             </button>
           ))}
         </div>
+        <button type="button" className="event-admin-refresh" onClick={() => refetch()} disabled={loading}>
+          <RefreshCw size={14} className={loading ? "is-spinning" : ""} aria-hidden="true" />
+          {loading ? "Refreshing" : "Refresh"}
+        </button>
       </div>
 
       {refundRows.length > 0 && (

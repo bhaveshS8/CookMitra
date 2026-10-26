@@ -502,6 +502,39 @@ const CustomerEventBookings = () => {
         </Link>
       </div>
 
+      {bookings.length > 0 && (
+        <div className="meb-summary" aria-label="Event booking summary">
+          <div className="meb-summary-tile meb-summary-tile--upcoming">
+            <span className="meb-summary-icon" aria-hidden="true"><CalendarDays size={17} /></span>
+            <span className="meb-summary-copy">
+              <strong>{counts.upcoming}</strong>
+              <span>Upcoming</span>
+            </span>
+          </div>
+          <div className="meb-summary-tile meb-summary-tile--completed">
+            <span className="meb-summary-icon" aria-hidden="true"><CheckCircle2 size={17} /></span>
+            <span className="meb-summary-copy">
+              <strong>{counts.completed}</strong>
+              <span>Completed</span>
+            </span>
+          </div>
+          <div className="meb-summary-tile meb-summary-tile--cancelled">
+            <span className="meb-summary-icon" aria-hidden="true"><XCircle size={17} /></span>
+            <span className="meb-summary-copy">
+              <strong>{counts.cancelled}</strong>
+              <span>Cancelled</span>
+            </span>
+          </div>
+          <div className="meb-summary-tile meb-summary-tile--total">
+            <span className="meb-summary-icon" aria-hidden="true"><PartyPopper size={17} /></span>
+            <span className="meb-summary-copy">
+              <strong>{counts.all}</strong>
+              <span>Total events</span>
+            </span>
+          </div>
+        </div>
+      )}
+
       {bookings.length === 0 ? (
         <div className="empty-state-card meb-empty">
           <div className="empty-state-icon">
