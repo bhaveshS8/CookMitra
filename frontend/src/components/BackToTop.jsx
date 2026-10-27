@@ -23,7 +23,23 @@ const BackToTop = () => {
     update();
     window.addEventListener("scroll", update, { passive: true });
     window.addEventListener("resize", update);
+    // Re-evaluate when the page content swaps (e.g. wizard steps) without a
+    // scroll event, so the FAB never sits on top of a freshly rendered bar.
+    let raf = 0;
+    const schedule = () => {
+      if (raf) return;
+      raf = window.requestAnimationFrame(() => {
+        raf = 0;
+        update();
+      });
+    };
+    const observer = new MutationObserver(schedule);
+    if (document.body) {
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
     return () => {
+      observer.disconnect();
+      if (raf) window.cancelAnimationFrame(raf);
       window.removeEventListener("scroll", update);
       window.removeEventListener("resize", update);
     };

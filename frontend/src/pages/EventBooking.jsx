@@ -500,35 +500,7 @@ const EventBooking = () => {
             <PartyPopper size={12} /> CookMitra Events
           </span>
           <h1 className="od-title">Book a Cook for Your Event</h1>
-          <p className="od-sub">
-            <Sparkles size={14} aria-hidden="true" />
-            <span className="od-sub-text">
-              Celebrate your special moments while we take care of the cooking.
-            </span>
-          </p>
-          <div className="event-hero-trust" aria-label="Booking benefits">
-            <span><ShieldCheck size={13} aria-hidden="true" /> Verified cooks</span>
-            <span><BadgeIndianRupee size={13} aria-hidden="true" /> Transparent pricing</span>
-            <span><CalendarCheck size={13} aria-hidden="true" /> Free to request</span>
-          </div>
         </div>
-        <aside className="event-hero-side" aria-label="How event booking works">
-          <p className="event-hero-side-title">How it works</p>
-          <ol className="event-hero-steps">
-            <li>
-              <span aria-hidden="true">1</span>
-              Pick your occasion &amp; details
-            </li>
-            <li>
-              <span aria-hidden="true">2</span>
-              We assign a verified cook
-            </li>
-            <li>
-              <span aria-hidden="true">3</span>
-              Pay after the amount is verified
-            </li>
-          </ol>
-        </aside>
       </div>
 
       <ol className="od-steps-modern od-steps-progress" aria-label="Event booking progress">
@@ -654,12 +626,24 @@ const EventBooking = () => {
       {step === 2 && (
         <div className="ondemand-form-card od-event-details">
           <div className="event-step-head">
+            <button type="button" className="event-topback" onClick={() => setStep(1)}>
+              <ArrowLeft size={15} aria-hidden="true" /> Back
+            </button>
             <span className="event-step-kicker"><span aria-hidden="true">02</span> Step 2 of 5</span>
             <span className="event-step-tag">Date &amp; menu</span>
           </div>
           <h2 className="ondemand-section-title"><CalendarDays size={17} /> Event details</h2>
           <p className="ondemand-form-sub">Set the date, guest count and the dishes you'd like cooked.</p>
-          <div className="form-group od-date-group">
+          <section className="event-form-panel event-panel-schedule">
+            <header className="event-panel-head">
+              <span className="event-panel-icon" aria-hidden="true"><CalendarDays size={18} /></span>
+              <div className="event-panel-copy">
+                <h3>Schedule</h3>
+                <p>Pick the date and the start time that suits you.</p>
+              </div>
+              <span className="event-panel-tag">Date &amp; time</span>
+            </header>
+            <div className="form-group od-date-group">
             <span className="od-field-label">
               <CalendarCheck size={15} aria-hidden="true" /> Preferred Date *
             </span>
@@ -719,7 +703,18 @@ const EventBooking = () => {
                 })}
               </div>
             )}
-          </div>
+            </div>
+          </section>
+
+          <section className="event-form-panel event-panel-guests">
+            <header className="event-panel-head">
+              <span className="event-panel-icon" aria-hidden="true"><Users size={18} /></span>
+              <div className="event-panel-copy">
+                <h3>Guests &amp; menu</h3>
+                <p>Tell us who you're hosting and what you'd like cooked.</p>
+              </div>
+              <span className="event-panel-tag">Details</span>
+            </header>
           <div className="form-row od-details-row">
             <div className="form-group">
               <label htmlFor="event-guests">
@@ -788,12 +783,10 @@ const EventBooking = () => {
               <Sparkles size={13} aria-hidden="true" /> List every dish, separated by commas — you can add as many as you like.
             </p>
           </div>
+          </section>
           <p className="event-error-slot" role={formError ? "alert" : undefined}>{formError}</p>
           <div className="od-stickybar">
             <div className="event-nav-row">
-              <button type="button" className="btn btn-outline event-back-btn" onClick={() => setStep(1)}>
-                <ArrowLeft size={16} /> Back
-              </button>
               <button type="button" className="btn btn-primary event-nav-btn" onClick={() => nextFrom(validateDetails)}>
                 Continue <ArrowRight size={17} />
               </button>
@@ -806,11 +799,23 @@ const EventBooking = () => {
       {step === 3 && (
         <div className="ondemand-form-card">
           <div className="event-step-head">
+            <button type="button" className="event-topback" onClick={() => setStep(2)}>
+              <ArrowLeft size={15} aria-hidden="true" /> Back
+            </button>
             <span className="event-step-kicker"><span aria-hidden="true">03</span> Step 3 of 5</span>
             <span className="event-step-tag">Service</span>
           </div>
           <h2 className="ondemand-section-title"><Clock3 size={17} /> Service &amp; hours</h2>
           <p className="ondemand-form-sub">Three simple services — price depends on hours.</p>
+          <section className="event-form-panel event-panel-service">
+            <header className="event-panel-head">
+              <span className="event-panel-icon" aria-hidden="true"><ChefHat size={18} /></span>
+              <div className="event-panel-copy">
+                <h3>Choose a service</h3>
+                <p>Pick how much help you'd like in the kitchen.</p>
+              </div>
+              <span className="event-panel-tag">Pick one</span>
+            </header>
           <div className="service-pick-grid">
             {EVENT_SERVICES.map((s) => (
               <button
@@ -830,7 +835,18 @@ const EventBooking = () => {
               </button>
             ))}
           </div>
-          <div className="form-row">
+          </section>
+
+          <section className="event-form-panel event-panel-hours">
+            <header className="event-panel-head">
+              <span className="event-panel-icon" aria-hidden="true"><Clock3 size={18} /></span>
+              <div className="event-panel-copy">
+                <h3>Time on site</h3>
+                <p>Base hours plus any extra time you need.</p>
+              </div>
+              <span className="event-panel-tag">Hours</span>
+            </header>
+            <div className="event-hours-grid">
             <div className="form-group">
               <label>
                 <Clock3 size={15} /> Service Hours (1–8) *
@@ -852,8 +868,6 @@ const EventBooking = () => {
                 </button>
               </div>
             </div>
-          </div>
-          <div className="form-row">
             <div className="form-group">
               <label>
                 <Clock3 size={15} /> Extra Hours (beyond the slot above)
@@ -875,7 +889,8 @@ const EventBooking = () => {
                 </button>
               </div>
             </div>
-          </div>
+            </div>
+          </section>
           <p className="event-error-slot" role={formError ? "alert" : undefined}>{formError}</p>
           <div className="od-stickybar">
             <div className="od-summary" aria-live="polite">
@@ -884,9 +899,6 @@ const EventBooking = () => {
               <strong className="od-summary-price">{preview ? formatCurrency(preview.totalAmount) : "—"}</strong>
             </div>
             <div className="event-nav-row">
-              <button type="button" className="btn btn-outline event-back-btn" onClick={() => setStep(2)}>
-                <ArrowLeft size={16} /> Back
-              </button>
               <button type="button" className="btn btn-primary event-nav-btn" onClick={() => nextFrom(validateService)}>
                 Continue <ArrowRight size={17} />
               </button>
@@ -899,10 +911,22 @@ const EventBooking = () => {
       {step === 4 && (
         <div className="ondemand-form-card">
           <div className="event-step-head">
+            <button type="button" className="event-topback" onClick={() => setStep(3)}>
+              <ArrowLeft size={15} aria-hidden="true" /> Back
+            </button>
             <span className="event-step-kicker"><span aria-hidden="true">04</span> Step 4 of 5</span>
             <span className="event-step-tag">Location</span>
           </div>
           <h2 className="ondemand-section-title"><MapPin size={17} /> Event location</h2>
+          <section className="event-form-panel event-panel-location">
+            <header className="event-panel-head">
+              <span className="event-panel-icon" aria-hidden="true"><MapPin size={18} /></span>
+              <div className="event-panel-copy">
+                <h3>Where should we cook?</h3>
+                <p>We'll match a verified cook near your address.</p>
+              </div>
+              <span className="event-panel-tag">Address</span>
+            </header>
           <div className="form-group">
             <label htmlFor="event-address">
               <MapPin size={15} /> Full Address *
@@ -990,12 +1014,10 @@ const EventBooking = () => {
               />
             </div>
           </div>
+          </section>
           <p className="event-error-slot" role={formError ? "alert" : undefined}>{formError}</p>
           <div className="od-stickybar">
             <div className="event-nav-row">
-              <button type="button" className="btn btn-outline event-back-btn" onClick={() => setStep(3)}>
-                <ArrowLeft size={16} /> Back
-              </button>
               <button type="button" className="btn btn-primary event-nav-btn" onClick={goToReview}>
                 View Price <ArrowRight size={16} />
               </button>
@@ -1008,6 +1030,9 @@ const EventBooking = () => {
       {step === 5 && (
         <div className="ondemand-form-card">
           <div className="event-step-head">
+            <button type="button" className="event-topback" onClick={() => setStep(4)}>
+              <ArrowLeft size={15} aria-hidden="true" /> Back
+            </button>
             <span className="event-step-kicker"><span aria-hidden="true">05</span> Step 5 of 5</span>
             <span className="event-step-tag">Review</span>
           </div>
@@ -1057,11 +1082,6 @@ const EventBooking = () => {
                 <span><ShieldCheck size={14} aria-hidden="true" /> No payment now</span>
                 <span><CheckCircle2 size={14} aria-hidden="true" /> Verified cook assigned after request</span>
               </div>
-              {quote?.previewOnly && (
-                <p className="event-estimate-note">
-                  Showing an estimate — the final price is confirmed server-side when you request.
-                </p>
-              )}
             </>
           ) : (
             <div className="no-data">
@@ -1074,9 +1094,6 @@ const EventBooking = () => {
           <p className="event-error-slot" role={formError ? "alert" : undefined}>{formError}</p>
           <div className="od-stickybar">
             <div className="event-nav-row">
-              <button type="button" className="btn btn-outline event-back-btn" onClick={() => setStep(4)}>
-                <ArrowLeft size={16} /> Back
-              </button>
               <button
                 type="button"
                 className="btn btn-primary event-nav-btn"
@@ -1090,13 +1107,10 @@ const EventBooking = () => {
                 )}
               </button>
             </div>
-            <p className="od-sticky-note">
-              No cook to choose — CookMitra assigns a suitable verified cook after your request.
+            <p className="event-pay-link-row">
+              <Link to="/dashboard/event-bookings">View my event bookings</Link>
             </p>
           </div>
-          <p className="event-estimate-note" style={{ textAlign: "center", marginTop: "0.75rem", fontSize: "0.88rem" }}>
-            <Link to="/dashboard/event-bookings">View my event bookings</Link>
-          </p>
         </div>
       )}
 
