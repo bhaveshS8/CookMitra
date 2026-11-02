@@ -1,0 +1,218 @@
+.not-found-page {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  min-height: min(680px, calc(100vh - 180px));
+  place-items: center;
+  overflow: hidden;
+  padding: clamp(2rem, 6vw, 5rem) 1.25rem;
+  background:
+    radial-gradient(ellipse at 18% 15%, rgba(251, 191, 36, 0.18), transparent 38%),
+    radial-gradient(ellipse at 88% 85%, rgba(232, 89, 12, 0.12), transparent 38%),
+    var(--bg-body, #faf9f7);
+}
+
+.not-found-page::before,
+.not-found-page::after {
+  position: absolute;
+  z-index: -1;
+  width: 250px;
+  height: 250px;
+  border: 1px solid rgba(232, 89, 12, 0.1);
+  border-radius: 50%;
+  content: "";
+}
+
+.not-found-page::before {
+  top: -150px;
+  left: -90px;
+}
+
+.not-found-page::after {
+  right: -120px;
+  bottom: -165px;
+  width: 330px;
+  height: 330px;
+}
+
+.not-found-card {
+  display: grid;
+  width: min(100%, 940px);
+  grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.1fr);
+  align-items: center;
+  gap: clamp(2rem, 7vw, 5.5rem);
+  padding: clamp(1.5rem, 5vw, 4rem);
+  border: 1px solid rgba(180, 83, 9, 0.12);
+  border-radius: var(--radius-xl, 28px);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: var(--shadow-lg, 0 24px 60px rgba(15, 23, 42, 0.12));
+  backdrop-filter: blur(12px);
+}
+
+.not-found-art {
+  position: relative;
+  display: grid;
+  width: min(100%, 330px);
+  aspect-ratio: 1;
+  place-items: center;
+  justify-self: center;
+  color: var(--primary, #e8590c);
+}
+
+.not-found-orbit {
+  position: absolute;
+  display: block;
+  border: 1px solid rgba(232, 89, 12, 0.2);
+  border-radius: 50%;
+}
+
+.not-found-orbit-outer {
+  inset: 5%;
+  background: radial-gradient(circle, rgba(255, 237, 213, 0.8), rgba(255, 247, 237, 0.25) 68%, transparent 69%);
+}
+
+.not-found-orbit-inner {
+  inset: 18%;
+  border: 1px dashed rgba(232, 89, 12, 0.3);
+}
+
+.not-found-number {
+  position: absolute;
+  top: 24%;
+  font-size: clamp(4.4rem, 11vw, 7.5rem);
+  font-weight: 900;
+  letter-spacing: -0.09em;
+  line-height: 1;
+  color: rgba(194, 65, 12, 0.12);
+}
+
+.not-found-chef {
+  z-index: 1;
+  display: grid;
+  width: 94px;
+  height: 94px;
+  place-items: center;
+  border: 1px solid rgba(232, 89, 12, 0.15);
+  border-radius: 30px;
+  background: linear-gradient(145deg, #fff7ed, #ffedd5);
+  box-shadow: 0 16px 38px rgba(194, 65, 12, 0.18), inset 0 1px 0 #fff;
+  transform: rotate(-7deg);
+}
+
+.not-found-spark {
+  position: absolute;
+  color: #d97706;
+  text-shadow: 0 4px 12px rgba(217, 119, 6, 0.25);
+}
+
+.not-found-spark-one {
+  top: 19%;
+  right: 20%;
+  font-size: 1.5rem;
+}
+
+.not-found-spark-two {
+  bottom: 23%;
+  left: 18%;
+  font-size: 1rem;
+}
+
+.not-found-copy {
+  max-width: 470px;
+}
+
+.not-found-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+  color: var(--primary-700, #c2410c);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.not-found-copy h1 {
+  margin: 0;
+  color: var(--slate-900, #0f172a);
+  font-size: clamp(2.1rem, 5vw, 3.5rem);
+  font-weight: 850;
+  letter-spacing: -0.055em;
+  line-height: 1.05;
+}
+
+.not-found-copy h1 span {
+  color: var(--primary, #e8590c);
+}
+
+.not-found-copy > p {
+  max-width: 42ch;
+  margin: 1.1rem 0 1.6rem;
+  color: var(--slate-600, #475569);
+  font-size: 1.02rem;
+  line-height: 1.7;
+}
+
+.not-found-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.not-found-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 46px;
+}
+
+.not-found-note {
+  display: block;
+  margin-top: 2rem;
+  color: var(--slate-400, #94a3b8);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+}
+
+@media (max-width: 700px) {
+  .not-found-page {
+    min-height: 0;
+    padding: 2rem 1rem 3rem;
+  }
+
+  .not-found-card {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+    text-align: center;
+  }
+
+  .not-found-art {
+    width: min(68vw, 250px);
+  }
+
+  .not-found-copy {
+    margin: 0 auto;
+  }
+
+  .not-found-copy > p {
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .not-found-actions {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 420px) {
+  .not-found-actions {
+    flex-direction: column;
+  }
+
+  .not-found-actions .btn {
+    width: 100%;
+  }
+}
