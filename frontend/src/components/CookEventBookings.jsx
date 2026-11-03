@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { useSelector } from "react-redux";
 import { useFetch } from "../hooks/useFetch";
 import { formatTime12 } from "../utils/constants";
 import {
@@ -128,6 +129,8 @@ const EMPTY_BOOKINGS = [];
 
 const CookEventBookings = () => {
   const { data, loading, refreshing, error, refetch } = useFetch("/event-bookings/cook");
+  const user = useSelector((state) => state.auth.user);
+  const currentUserId = String(user?.id || user?._id || "");
   const [filter, setFilter] = useState("all");
   const bookings = Array.isArray(data) ? data : EMPTY_BOOKINGS;
 
@@ -240,7 +243,26 @@ const CookEventBookings = () => {
     const extras = Number(booking.extraHours);
     const guests = Number(booking.guestCount);
     const service = EVENT_SERVICE_LABEL(booking.serviceType);
-    const extraCooks = Number(booking.additionalCook);
+    const assignedCooks = (
+      Array.isArray(booking.cookIds) && booking.cookIds.length > 0
+        ? booking.cookIds
+        : [booking.cookId]
+    ).filter(Boolean);
+    const teamCount = assignedCooks.length;
+    const extraCooks = Math.max(0, teamCount - 1);
+    const hasCook = teamCount > 0;
+    const assignedToMe = assignedCooks.some(
+      (cook) => String(cook?._id || cook) === currentUserId
+    );
+    const isLeadCook =
+      hasCook && String(booking.cookId?._id || booking.cookId || "") === currentUserId;
+    const cookTeamNames = assignedCooks
+      .map((cook) => {
+        const name = typeof cook === "object" ? String(cook.name || "").trim() : "";
+        const isMe = String(cook?._id || cook) === currentUserId;
+        return name ? `${name}${isMe ? " (you)" : ""}` : isMe ? "You" : "";
+      })
+      .filter(Boolean);
     const venue = venueLabel(booking);
     const customer =
       booking.customerId && typeof booking.customerId === "object"
@@ -249,11 +271,19 @@ const CookEventBookings = () => {
     const customerPhone = customer?.phone || customer?.mobile || "";
     const customerName = String(customer?.name || "").trim();
     const amount = Number(booking.totalAmount);
-    const hasCook = Boolean(booking.cookId);
 
-    const serviceText = [service, extraCooks > 0 ? `+${extraCooks} cook` : ""]
+    const serviceText = [service, extraCooks > 0 ? `+${extraCooks} cook${extraCooks > 1 ? "s" : ""}` : ""]
       .filter(Boolean)
       .join(" · ");
+    const assignmentText = !hasCook
+      ? "Cook assignment pending"
+      : !assignedToMe
+        ? "Assigned"
+        : teamCount > 1
+          ? isLeadCook
+            ? "Lead cook — assigned to you"
+            : "Supporting cook — assigned to you"
+          : "Assigned to you";
     const durationText =
       duration > 0
         ? `${duration} hr${extras > 0 ? ` + ${extras} extra` : ""}`
@@ -348,6 +378,17 @@ const CookEventBookings = () => {
                   </span>
                 </div>
               )}
+              {hasCook && cookTeamNames.length > 0 && (
+                <div className="cev-fact cev-fact--wide">
+                  <span className="cev-fact-label">
+                    <ChefHat size={12} aria-hidden="true" /> Cook team
+                    {teamCount > 1 ? ` (${teamCount})` : ""}
+                  </span>
+                  <span className="cev-fact-value cev-fact-value--wrap">
+                    {cookTeamNames.join(" · ")}
+                  </span>
+                </div>
+              )}
               {amount > 0 && (
                 <div className="cev-fact cev-fact--amount">
                   <span className="cev-fact-label">
@@ -391,7 +432,7 @@ const CookEventBookings = () => {
         <div className="cev-card-foot">
           <span className="cev-assigned">
             <ChefHat size={14} aria-hidden="true" />
-            {hasCook ? "Assigned to you" : "Cook assignment pending"}
+            {assignmentText}
           </span>
           <Link
             to={`/event-bookings/${booking._id}`}

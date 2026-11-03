@@ -3,7 +3,12 @@ const EventLedgerEntry = require("../models/EventLedgerEntry");
 const User = require("../models/User");
 const { razorpay, isConfigured, keyId } = require("../config/razorpay");
 const { enqueueEventOutbox, deliverOutboxEvent } = require("../utils/eventOutbox");
-const { notifyEventCookConfirmed } = require("../utils/eventWhatsApp");
+const {
+  notifyEventCookConfirmed,
+  resolveEventContacts,
+  buildEventCookConfirmedMessage,
+  buildEventCustomerConfirmedMessage,
+} = require("../utils/eventWhatsApp");
 
 const ACTIVE_REFUND_STATES = ["pending", "processing", "processed", "manual"];
 const ACTIONABLE_REFUND_STATES = ["pending", "processing", "failed"];
@@ -298,15 +303,42 @@ const finalizeEventPayment = async ({
     note: webhook ? "Captured via webhook" : "Captured via checkout verification",
   });
 
-  const customerMessage = `Payment of ₹${Math.round(updated.payment.paidAmount)} received for event booking ${updated.bookingId}. Your booking is confirmed.`;
+  let contacts = { cooks: [], customer: null };
+  try {
+    contacts = await resolveEventContacts(updated);
+  } catch (error) {
+    console.error(
+      `[event-payment] contact lookup failed for ${updated.bookingId}: ${String(error?.message || error).slice(0, 200)}`
+    );
+  }
+  const fallbackCookIds = [
+    ...new Set(
+      [updated.cookId, ...(updated.cookIds || [])]
+        .filter(Boolean)
+        .map((id) => String(id?._id || id))
+    ),
+  ];
+  const assignedCooks = contacts.cooks.length
+    ? contacts.cooks
+    : fallbackCookIds.map((id) => ({ id, name: "", phone: "", deliverable: false }));
+  const customerMessage = buildEventCustomerConfirmedMessage({
+    event: updated,
+    customerName: contacts.customer?.name,
+    cooks: assignedCooks,
+  });
   const recipients = [
     { user: updated.customerId, type: "event_status", message: customerMessage },
   ];
-  if (updated.cookId) {
+  for (const cook of assignedCooks) {
     recipients.push({
-      user: updated.cookId,
+      user: cook.id,
       type: "event_status",
-      message: `Event booking ${updated.bookingId} is confirmed and paid.`,
+      message: buildEventCookConfirmedMessage({
+        event: updated,
+        cookName: cook.name,
+        customer: contacts.customer,
+        cooks: assignedCooks,
+      }),
     });
   }
   await notifyEventPayment(updated, {

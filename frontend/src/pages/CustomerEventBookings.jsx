@@ -167,6 +167,9 @@ const CustomerEventBookings = () => {
     const meta = STATUS_META[status] || STATUS_META.pending;
     const StatusIcon = meta.icon;
     const cook = booking.cookId && typeof booking.cookId === "object" ? booking.cookId : null;
+    const assignedCooks = (
+      Array.isArray(booking.cookIds) && booking.cookIds.length > 0 ? booking.cookIds : [cook]
+    ).filter((c) => c && typeof c === "object");
     const payment = booking.payment || {};
     const isPaid = payment.status === "paid";
     const canPay =
@@ -320,7 +323,10 @@ const CustomerEventBookings = () => {
                   <>
                     <strong>{cook.name}</strong>
                     <span className="meb-cook-tag">
-                      <CheckCircle2 size={11} aria-hidden="true" /> Verified cook
+                      <CheckCircle2 size={11} aria-hidden="true" />{" "}
+                      {assignedCooks.length > 1
+                        ? `${assignedCooks.length} verified cooks`
+                        : "Verified cook"}
                     </span>
                   </>
                 ) : status === "pending" ? (

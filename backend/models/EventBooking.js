@@ -50,10 +50,19 @@ const eventBookingSchema = new mongoose.Schema(
     // different payload is rejected rather than returning an unrelated booking.
     idempotencyFingerprint: { type: String, default: "", trim: true, maxlength: 64 },
     // Assigned by Admin/CookMitra (§11). Null until assignment.
+    // `cookId` is the PRIMARY cook (first in `cookIds`) and is kept for
+    // backward compatibility with payment/notification/display code.
     cookId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
+    },
+    // Every cook assigned to the event. Admin may assign more than one cook;
+    // the first entry mirrors `cookId`. Additional cooks are billed via
+    // `additionalCookAmount` and all assigned cooks are conflict-checked.
+    cookIds: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+      default: [],
     },
     eventType: {
       // Free-text label validated at creation against the admin-managed
@@ -192,6 +201,7 @@ eventBookingSchema.index(
 );
 eventBookingSchema.index({ customerId: 1, bookingStatus: 1 });
 eventBookingSchema.index({ cookId: 1, bookingStatus: 1 });
+eventBookingSchema.index({ cookIds: 1, eventDate: 1, bookingStatus: 1 });
 eventBookingSchema.index({ eventDate: 1, bookingStatus: 1 });
 eventBookingSchema.index({ bookingStatus: 1, createdAt: -1 });
 eventBookingSchema.index({ cookId: 1, eventDate: 1, bookingStatus: 1 });

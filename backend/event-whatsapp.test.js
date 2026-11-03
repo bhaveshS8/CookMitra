@@ -3,6 +3,7 @@ const CookProfile = require("./models/CookProfile");
 const whatsappApi = require("./utils/whatsappApi");
 const {
   buildEventCookConfirmedMessage,
+  buildEventCustomerConfirmedMessage,
   resolveEventCookContact,
   sendEventCookConfirmed,
   notifyEventCookConfirmed,
@@ -89,6 +90,48 @@ whatsappApi.sendWhatsAppText = async (to, body) => {
       cookName: cook.name,
     });
     check("missing venue never gets a fake map link", !noVenue.includes("नकाशा:"), "no-map");
+
+    const sharedCooks = [
+      { name: "Sunita Kulkarni", phone: "9876543210" },
+      { name: "Meera Joshi", phone: "9123456780" },
+    ];
+    const cookShared = buildEventCookConfirmedMessage({
+      event,
+      cookName: cook.name,
+      customer: { name: "Asha Patil", phone: "9988776655" },
+      cooks: sharedCooks,
+    });
+    check(
+      "cook message shares customer name and contact",
+      cookShared.includes("Asha Patil") && cookShared.includes("9988776655"),
+      "customer"
+    );
+    check(
+      "cook message shares every assigned cook name and number",
+      cookShared.includes("Sunita Kulkarni") &&
+        cookShared.includes("9876543210") &&
+        cookShared.includes("Meera Joshi") &&
+        cookShared.includes("9123456780"),
+      "cooks"
+    );
+
+    const customerBody = buildEventCustomerConfirmedMessage({
+      event,
+      customerName: "Asha Patil",
+      cooks: sharedCooks,
+    });
+    check("customer message names all assigned cooks", customerBody.includes("Sunita Kulkarni") && customerBody.includes("Meera Joshi"), "cooks");
+    check("customer message has cook mobile numbers", customerBody.includes("9876543210") && customerBody.includes("9123456780"), "numbers");
+    check(
+      "customer message has full order details",
+      customerBody.includes("EVT-WA-TEST") &&
+        customerBody.includes("Birthday") &&
+        customerBody.includes("Paneer Butter Masala") &&
+        customerBody.includes("Cooking + serving") &&
+        customerBody.includes("Kothrud") &&
+        customerBody.includes("google.com/maps/dir"),
+      "details"
+    );
 
     const ok = await sendEventCookConfirmed(event);
     check("approved active cook is sent the message", ok.ok === true && sent.length === 1, JSON.stringify(ok));

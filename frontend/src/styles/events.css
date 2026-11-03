@@ -3021,6 +3021,35 @@
 .event-admin-inline-actions { margin-top: 0; }
 .event-admin-actions .btn,
 .event-admin-inline-actions .btn { min-height: 36px; }
+.event-admin-inline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.6rem;
+}
+.event-admin-cook-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.4rem;
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 0.15rem;
+}
+.event-admin-cook-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--slate-200);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.event-admin-cook-option.is-selected {
+  border-color: var(--emerald-400, #34d399);
+  background: var(--emerald-50, #ecfdf5);
+}
+.event-admin-cook-option input { accent-color: var(--emerald-600, #059669); }
 
 .event-refund-panel {
   margin-bottom: 1.1rem;

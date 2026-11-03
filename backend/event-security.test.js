@@ -191,6 +191,25 @@ const throwsSync = (fn) => {
     check(`snapshot field ${p} exists`, EventBooking.schema.path(p) != null);
   }
 
+  // ── Timezone: event day anchored at IST noon, not server-local noon ──
+  // A server-local noon west of UTC-06:30 resolves to the NEXT IST day and
+  // silently shifts blocked-date/weekday/overlap checks. Regression guard:
+  const TZ_BACKUP = process.env.TZ;
+  try {
+    for (const tz of ["Asia/Kolkata", "UTC", "America/Los_Angeles", "Pacific/Midway"]) {
+      process.env.TZ = tz;
+      const instant = T.eventDateInstant("2031-01-20");
+      check(
+        `${tz}: event day stays 2031-01-20`,
+        instant instanceof Date && T.istDayStr(instant) === "2031-01-20",
+        instant instanceof Date ? T.istDayStr(instant) : String(instant)
+      );
+    }
+  } finally {
+    if (TZ_BACKUP === undefined) delete process.env.TZ;
+    else process.env.TZ = TZ_BACKUP;
+  }
+
   console.log(failures === 0 ? "ALL EVENT TESTS PASSED" : failures + " FAILURES");
   process.exit(failures === 0 ? 0 : 1);
 })();

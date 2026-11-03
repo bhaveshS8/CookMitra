@@ -5,6 +5,25 @@ const { dayBounds, timeToMinutes, minutesToTime, intervalsOverlap } = require(".
 const REGULAR_BLOCKING_STATUSES = ["accepted", "confirmed", "in_progress"];
 const EVENT_BLOCKING_STATUSES = ["pending", "cook_assigned", "confirmed", "in_progress"];
 
+// An event can have several assigned cooks (cookIds). A cook is busy when they
+// appear in either the legacy primary field or the multi-cook array.
+const eventCooksFilter = (condition) => ({
+  $or: [{ cookId: condition }, { cookIds: condition }],
+});
+
+// All cook ids attached to an event booking (deduped, primary included).
+const assignedCookIds = (booking) => {
+  const ids = [];
+  const push = (id) => {
+    if (!id) return;
+    const key = String(id);
+    if (!ids.some((existing) => String(existing) === key)) ids.push(id);
+  };
+  if (Array.isArray(booking?.cookIds)) booking.cookIds.forEach(push);
+  push(booking?.cookId);
+  return ids;
+};
+
 const hasLiveDb = (model) => Boolean(model && model.db && model.db.client);
 
 const regularWindow = (booking) => {
@@ -70,12 +89,12 @@ const findEventConflict = async ({
   const { start: dayStart, end: dayEnd } = dayBounds(date);
   if (!dayStart || !dayEnd) return null;
   const query = {
-    cookId,
+    ...eventCooksFilter(cookId),
     eventDate: { $gte: dayStart, $lte: dayEnd },
     bookingStatus: { $in: EVENT_BLOCKING_STATUSES },
   };
   if (excludeEventId) query._id = { $ne: excludeEventId };
-  const rivals = await EventBooking.find(query).select("startTime duration extraHours bookingStatus bookingId");
+  const rivals = await EventBooking.find(query).select("startTime duration extraHours bookingStatus bookingId cookId cookIds");
   const clash = (rivals || []).find((rival) => overlaps(mine, eventWindow(rival)));
   if (!clash) return null;
   return {
@@ -93,10 +112,10 @@ const findEventBusyWindows = async ({ cookId, date } = {}) => {
   const { start: dayStart, end: dayEnd } = dayBounds(date);
   if (!dayStart || !dayEnd) return [];
   const rivals = await EventBooking.find({
-    cookId,
+    ...eventCooksFilter(cookId),
     eventDate: { $gte: dayStart, $lte: dayEnd },
     bookingStatus: { $in: EVENT_BLOCKING_STATUSES },
-  }).select("startTime duration extraHours bookingStatus bookingId");
+  }).select("startTime duration extraHours bookingStatus bookingId cookId cookIds");
   return (rivals || []).map((rival) => {
     const window = eventWindow(rival);
     if (!window) return null;
@@ -116,22 +135,26 @@ const findEventBusyWindowsMap = async ({ cookIds = [], date } = {}) => {
   const { start: dayStart, end: dayEnd } = dayBounds(date);
   if (!dayStart || !dayEnd) return map;
   const rivals = await EventBooking.find({
-    cookId: { $in: cookIds },
+    ...eventCooksFilter({ $in: cookIds }),
     eventDate: { $gte: dayStart, $lte: dayEnd },
     bookingStatus: { $in: EVENT_BLOCKING_STATUSES },
-  }).select("cookId startTime duration extraHours bookingStatus bookingId");
+  }).select("cookId cookIds startTime duration extraHours bookingStatus bookingId");
+  const requested = new Set(cookIds.map((id) => String(id)));
   for (const rival of rivals || []) {
     const window = eventWindow(rival);
     if (!window) continue;
-    const key = String(rival.cookId);
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push({
-      startTime: minutesToTime(window.start),
-      endTime: minutesToTime(window.end),
-      window,
-      status: rival.bookingStatus,
-      bookingId: rival.bookingId || String(rival._id),
-    });
+    for (const assigned of assignedCookIds(rival)) {
+      const key = String(assigned);
+      if (!requested.has(key)) continue;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push({
+        startTime: minutesToTime(window.start),
+        endTime: minutesToTime(window.end),
+        window,
+        status: rival.bookingStatus,
+        bookingId: rival.bookingId || String(rival._id),
+      });
+    }
   }
   return map;
 };
@@ -150,24 +173,27 @@ const findEventConflictMap = async ({
   const { start: dayStart, end: dayEnd } = dayBounds(date);
   if (!dayStart || !dayEnd) return map;
   const query = {
-    cookId: { $in: cookIds },
+    ...eventCooksFilter({ $in: cookIds }),
     eventDate: { $gte: dayStart, $lte: dayEnd },
     bookingStatus: { $in: EVENT_BLOCKING_STATUSES },
   };
   if (excludeEventId) query._id = { $ne: excludeEventId };
-  const rivals = await EventBooking.find(query).select("cookId startTime duration extraHours bookingStatus bookingId");
+  const rivals = await EventBooking.find(query).select("cookId cookIds startTime duration extraHours bookingStatus bookingId");
+  const requested = new Set(cookIds.map((id) => String(id)));
   for (const rival of rivals || []) {
     if (!overlaps(mine, eventWindow(rival))) continue;
-    const key = String(rival.cookId);
-    if (map.has(key)) continue;
-    map.set(key, {
-      kind: "event",
-      id: String(rival._id),
-      bookingId: rival.bookingId || String(rival._id),
-      status: rival.bookingStatus,
-      window: eventWindow(rival),
-      message: `This cook already has an event booking (${rival.bookingId || "another event"}) overlapping those hours`,
-    });
+    for (const assigned of assignedCookIds(rival)) {
+      const key = String(assigned);
+      if (!requested.has(key) || map.has(key)) continue;
+      map.set(key, {
+        kind: "event",
+        id: String(rival._id),
+        bookingId: rival.bookingId || String(rival._id),
+        status: rival.bookingStatus,
+        window: eventWindow(rival),
+        message: `This cook already has an event booking (${rival.bookingId || "another event"}) overlapping those hours`,
+      });
+    }
   }
   return map;
 };
@@ -189,4 +215,5 @@ module.exports = {
   findEventBusyWindows,
   findEventBusyWindowsMap,
   findCrossModuleConflict,
+  assignedCookIds,
 };

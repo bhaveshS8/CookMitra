@@ -73,6 +73,7 @@ const signCheckout = (orderId, paymentId) =>
   const EventBooking = require("./models/EventBooking");
   const EventLedgerEntry = require("./models/EventLedgerEntry");
   const User = require("./models/User");
+  const Notification = require("./models/Notification");
   const CookProfile = require("./models/CookProfile");
   const WebhookEvent = require("./models/WebhookEvent");
   const { istMidnight } = require("./utils/time");
@@ -175,6 +176,15 @@ const signCheckout = (orderId, paymentId) =>
       status: "active",
     });
     await CookProfile.create({ user: cook._id, approvalStatus: "approved" });
+    const cook2 = await User.create({
+      name: `${RUN} cook two`,
+      email: `${RUN}-cook2@test.example.com`,
+      password: "Test1234!",
+      phone: "9876543213",
+      role: "COOK",
+      status: "active",
+    });
+    await CookProfile.create({ user: cook2._id, approvalStatus: "approved" });
 
     const createEvent = (suffix, over = {}) =>
       EventBooking.create({
@@ -233,12 +243,21 @@ const signCheckout = (orderId, paymentId) =>
     check("test-mode payment is marked", paid1.payment.testMode === true, String(paid1.payment.testMode));
     check("payment ledger entry created", (await EventLedgerEntry.countDocuments({ eventBooking: paid1._id, type: "event_payment.confirmed" })) === 1, "");
     await new Promise((resolve) => setTimeout(resolve, 100));
+    const cookPaidSend = waSends.find((send) => send.to === "9876543212");
+    const customerPaidSend = waSends.find((send) => send.to === "9876543210");
     check(
-      "confirmed payment sends cook WhatsApp details",
-      waSends.length === 1 &&
-        waSends[0].to === "9876543212" &&
-        waSends[0].body.includes(`${RUN}-A`) &&
-        waSends[0].body.includes("Birthday"),
+      "confirmed payment sends cook and customer WhatsApp details",
+      waSends.length === 2 &&
+        cookPaidSend?.body.includes(`${RUN}-A`) &&
+        cookPaidSend.body.includes("Birthday") &&
+        cookPaidSend.body.includes("Rice, Dal") &&
+        cookPaidSend.body.includes(`${RUN} customer`) &&
+        cookPaidSend.body.includes("9876543210") &&
+        cookPaidSend.body.includes(`${RUN} cook`) &&
+        cookPaidSend.body.includes("9876543212") &&
+        customerPaidSend?.body.includes(`${RUN}-A`) &&
+        customerPaidSend.body.includes(`${RUN} cook`) &&
+        customerPaidSend.body.includes("9876543212"),
       JSON.stringify(waSends.map((send) => send.to))
     );
 
@@ -247,7 +266,67 @@ const signCheckout = (orderId, paymentId) =>
     check("duplicate verification is idempotent", dupVerifyRes.statusCode === 200 && dupVerifyRes.body?.payment?.status === "paid", String(dupVerifyRes.statusCode));
     check("duplicate verification does not duplicate ledger", (await EventLedgerEntry.countDocuments({ eventBooking: paid1._id, type: "event_payment.confirmed" })) === 1, "");
     await new Promise((resolve) => setTimeout(resolve, 50));
-    check("duplicate verification does not resend WhatsApp", waSends.length === 1, String(waSends.length));
+    check("duplicate verification does not resend WhatsApp", waSends.length === 2, String(waSends.length));
+
+    const eventMulti = await createEvent("A2", { cookIds: [cook._id, cook2._id] });
+    const orderMultiRes = mockRes();
+    await payCtrl.createEventOrder(customerReq(eventMulti), orderMultiRes, nextFail);
+    const multiPayment = mintPayment(orderMultiRes.body.orderId, 100000, { id: `pay_${RUN}_multi` });
+    const multiVerifyRes = mockRes();
+    await payCtrl.verifyEventPayment(
+      {
+        ...customerReq(eventMulti),
+        body: {
+          razorpay_order_id: orderMultiRes.body.orderId,
+          razorpay_payment_id: multiPayment.id,
+          razorpay_signature: signCheckout(orderMultiRes.body.orderId, multiPayment.id),
+        },
+      },
+      multiVerifyRes,
+      nextFail
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const multiPaid = await EventBooking.findById(eventMulti._id);
+    const multiSends = waSends.filter((send) => send.body.includes(`${RUN}-A2`));
+    const multiCookASend = multiSends.find((send) => send.to === "9876543212");
+    const multiCookBSend = multiSends.find((send) => send.to === "9876543213");
+    const multiCustomerSend = multiSends.find((send) => send.to === "9876543210");
+    check(
+      "multi-cook payment notifies every cook and the customer",
+      multiPaid.bookingStatus === "confirmed" &&
+        multiPaid.payment.status === "paid" &&
+        multiSends.length === 3 &&
+        Boolean(multiCookASend && multiCookBSend && multiCustomerSend),
+      JSON.stringify(multiSends.map((send) => send.to))
+    );
+    const sharesAllContacts = (body) =>
+      body.includes(`${RUN} cook`) &&
+      body.includes("9876543212") &&
+      body.includes(`${RUN} cook two`) &&
+      body.includes("9876543213") &&
+      body.includes(`${RUN} customer`) &&
+      body.includes("9876543210") &&
+      body.includes("Rice, Dal") &&
+      body.includes("1 Payment Test St");
+    check(
+      "every cook message shares all cook and customer contacts plus order details",
+      sharesAllContacts(multiCookASend?.body || "") && sharesAllContacts(multiCookBSend?.body || ""),
+      ""
+    );
+    const multiNotices = (
+      await Notification.find({ user: { $in: [cook._id, cook2._id] } }).lean()
+    ).filter((notice) => String(notice.message || "").includes(`${RUN}-A2`));
+    check(
+      "multi-cook payment creates an in-app notice for every cook",
+      multiNotices.length === 2 &&
+        multiNotices.every(
+          (notice) =>
+            notice.message.includes(`${RUN} customer`) &&
+            notice.message.includes("9876543210") &&
+            notice.message.includes(`${RUN} cook two`)
+        ),
+      String(multiNotices.length)
+    );
 
     const eventFailed = await createEvent("K");
     const orderFailedRes = mockRes();
@@ -608,9 +687,11 @@ const signCheckout = (orderId, paymentId) =>
     check("webhook dedup row links the event booking", String(webhookDoc?.eventBooking || "") === String(event4._id), String(webhookDoc?.eventBooking || ""));
     await new Promise((resolve) => setTimeout(resolve, 100));
     const webhookSends = waSends.filter((send) => send.body.includes(`${RUN}-D`));
+    const webhookCookSend = webhookSends.find((send) => send.to === "9876543212");
+    const webhookCustomerSend = webhookSends.find((send) => send.to === "9876543210");
     check(
-      "webhook-confirmed payment sends cook WhatsApp details",
-      webhookSends.length === 1 && webhookSends[0].to === "9876543212",
+      "webhook-confirmed payment sends cook and customer WhatsApp details",
+      webhookSends.length === 2 && Boolean(webhookCookSend && webhookCustomerSend),
       String(webhookSends.length)
     );
     const duplicateWebhookSends = waSends.length;

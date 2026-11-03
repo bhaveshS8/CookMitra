@@ -68,7 +68,21 @@ router.post(
   "/:id/assign-cook",
   auth,
   authorize("admin"),
-  [body("cookId").isMongoId().withMessage("Valid cook id is required")],
+  [
+    body("cookId").optional().isMongoId().withMessage("Valid cook id is required"),
+    body("cookIds").optional().isArray({ min: 1, max: 10 }).withMessage("Select between 1 and 10 cooks"),
+    body("cookIds.*").isMongoId().withMessage("Valid cook id is required"),
+    body("distanceKm").isFloat({ min: 0, max: 100000 }).withMessage("Distance must be between 0 and 100000 km"),
+    body("serviceAmount")
+      .optional({ values: "falsy" })
+      .isFloat({ min: 0, max: 10000000 })
+      .withMessage("Service amount must be between 0 and 10000000"),
+    body().custom((value) => {
+      const ids = Array.isArray(value?.cookIds) ? value.cookIds : [];
+      if (ids.length === 0 && !value?.cookId) throw new Error("Valid cook id is required");
+      return true;
+    }),
+  ],
   validate,
   assignCook
 );

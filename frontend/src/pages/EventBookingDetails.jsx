@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { useSelector } from "react-redux";
 import API from "../api/axios";
 import { useFetch } from "../hooks/useFetch";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { formatDate, formatTime12 } from "../utils/constants";
 import {
   formatCurrency,
@@ -40,6 +41,7 @@ const EventBookingDetails = () => {
   const user = useSelector((s) => s.auth.user);
   const showToast = useShowToast();
   const { data: booking, loading, error, refetch } = useFetch(id ? `/event-bookings/${id}` : null);
+  useAutoRefresh(refetch, { enabled: Boolean(id) });
   const status = booking?.bookingStatus || null;
   const isAdmin = user?.role === "admin";
   const assignable = isAdmin && ["pending", "cook_assigned"].includes(status);
@@ -51,7 +53,9 @@ const EventBookingDetails = () => {
   } = useFetch(assignable ? "/cooks" : null);
   const [cancelling, setCancelling] = useState(false);
   const [assigning, setAssigning] = useState(false);
-  const [assignCookId, setAssignCookId] = useState("");
+  const [assignCookIds, setAssignCookIds] = useState([]);
+  const [assignKm, setAssignKm] = useState("");
+  const [assignAmount, setAssignAmount] = useState("");
   const [assignBusy, setAssignBusy] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [verifyKm, setVerifyKm] = useState("");
@@ -89,25 +93,66 @@ const EventBookingDetails = () => {
     (c) => c.approvalStatus === "approved"
   );
 
+  const openAssign = () => {
+    const assigned = Array.isArray(booking?.cookIds) && booking.cookIds.length > 0
+      ? booking.cookIds
+      : booking?.cookId
+        ? [booking.cookId]
+        : [];
+    setAssigning(true);
+    setAssignCookIds(assigned.map((c) => String(c?._id || c)));
+    setAssignKm(String(booking?.distanceKm ?? ""));
+    setAssignAmount(booking?.serviceAmount != null ? String(booking.serviceAmount) : "");
+  };
+
+  const toggleCook = (cookUserId) => {
+    setAssignCookIds((prev) =>
+      prev.includes(cookUserId) ? prev.filter((id) => id !== cookUserId) : [...prev, cookUserId]
+    );
+  };
+
   const handleAssign = async () => {
     if (assignBusy) return;
-    if (!assignCookId) {
-      showToast("Select a verified cook first", "error");
+    if (assignCookIds.length === 0) {
+      showToast("Select at least one verified cook", "error");
       return;
     }
-    const cookEntry = verifiedCooks.find((c) => String(c?.user?._id || "") === String(assignCookId));
+    const rawKm = String(assignKm).trim();
+    const distance = Number(rawKm);
+    if (!rawKm || !Number.isFinite(distance) || distance < 0 || distance > 100000) {
+      showToast("Enter the verified distance in km (0–100000)", "error");
+      return;
+    }
+    let serviceAmount;
+    if (String(assignAmount).trim() !== "") {
+      serviceAmount = Number(assignAmount);
+      if (!Number.isFinite(serviceAmount) || serviceAmount < 0) {
+        showToast("Enter a valid service amount", "error");
+        return;
+      }
+    }
+    const names = assignCookIds
+      .map((cid) => verifiedCooks.find((c) => String(c?.user?._id || "") === String(cid))?.user?.name)
+      .filter(Boolean)
+      .join(", ");
     if (
       !window.confirm(
-        `Assign ${cookEntry?.user?.name || "this cook"} to booking ${booking?.bookingId || id}?`
+        `Assign ${names || `${assignCookIds.length} cook(s)`} to booking ${booking?.bookingId || id} with ${distance} km verified?`
       )
     )
       return;
     setAssignBusy(true);
     try {
-      await API.post(`/event-bookings/${id}/assign-cook`, { cookId: assignCookId });
-      showToast("Cook assigned — customer and cook notified!", "success");
+      await API.post(`/event-bookings/${id}/assign-cook`, {
+        cookIds: assignCookIds,
+        distanceKm: distance,
+        ...(serviceAmount === undefined ? {} : { serviceAmount }),
+      });
+      showToast("Cook(s) assigned, distance verified and amount finalized — everyone notified!", "success");
       setAssigning(false);
-      setAssignCookId("");
+      setAssignCookIds([]);
+      setAssignKm("");
+      setAssignAmount("");
       refetch();
     } catch (err) {
       if (err.response?.status === 409) refetch();
@@ -257,7 +302,7 @@ const EventBookingDetails = () => {
   const distanceVerified = booking.distanceVerified === true;
   const canVerifyDistance = isAdmin && canVerifyEventDistance(booking);
   const payEligible =
-    Boolean(booking.cookId) &&
+    Boolean(assignedCooks.length > 0) &&
     status === "cook_assigned" &&
     distanceVerified &&
     !isPaid &&
@@ -272,7 +317,17 @@ const EventBookingDetails = () => {
     isPaid &&
     payment.refundStatus === "processing" &&
     !payment.testMode;
-  const cook = booking.cookId && typeof booking.cookId === "object" ? booking.cookId : null;
+  let cook = booking.cookId && typeof booking.cookId === "object" ? booking.cookId : null;
+  const assignedCooks = (
+    Array.isArray(booking.cookIds) && booking.cookIds.length > 0 ? booking.cookIds : [cook]
+  ).filter((c) => c && typeof c === "object");
+  if (!cook) cook = assignedCooks[0] || null;
+  const hasCooks = assignedCooks.length > 0;
+  const extraCookNames = assignedCooks
+    .filter((c) => String(c._id) !== String(cook?._id))
+    .map((c) => c.name)
+    .filter(Boolean)
+    .join(", ");
   const cookName = String(cook?.name || "").trim();
   const cookPhone = cook?.phone || cook?.mobile || "";
   const showCookContact = isAdmin || ["confirmed", "in_progress", "completed"].includes(status);
@@ -321,7 +376,7 @@ const EventBookingDetails = () => {
   }
 
   const cookStatusText =
-    !cook
+    !hasCooks
       ? ""
       : status === "cook_assigned"
         ? "Assigned — payment and confirmation are the next steps."
@@ -385,7 +440,7 @@ const EventBookingDetails = () => {
       );
     }
 
-    if (!booking.cookId) {
+    if (assignedCooks.length === 0) {
       return (
         <div className="event-pay-state">
           <div className="event-pay-icon">
@@ -769,11 +824,11 @@ const EventBookingDetails = () => {
       <section className="event-panel" aria-labelledby="event-cook-heading">
         <div className="event-panel-head">
           <h3 id="event-cook-heading">
-            <ChefHat size={18} /> Assigned cook
+            <ChefHat size={18} /> {assignedCooks.length > 1 ? "Assigned cooks" : "Assigned cook"}
           </h3>
-          {cook ? (
+          {hasCooks ? (
             <span className="event-pay-badge event-pay-badge--emerald">
-              <CheckCircle2 size={12} /> Assigned
+              <CheckCircle2 size={12} /> {assignedCooks.length > 1 ? `${assignedCooks.length} cooks assigned` : "Assigned"}
             </span>
           ) : (
             <span className="event-pay-badge event-pay-badge--amber">
@@ -782,7 +837,7 @@ const EventBookingDetails = () => {
           )}
         </div>
 
-        {cook ? (
+        {hasCooks ? (
           <div className="event-cook-profile">
             <span className="event-cook-avatar" aria-hidden="true">
               <CookAvatar
@@ -804,6 +859,11 @@ const EventBookingDetails = () => {
               <span className="event-cook-status">
                 <CheckCircle2 size={13} /> {cookStatusText}
               </span>
+              {extraCookNames && (
+                <span className="event-cook-contact">
+                  Supporting cooks: {extraCookNames}
+                </span>
+              )}
             </div>
           </div>
         ) : (
@@ -839,28 +899,72 @@ const EventBookingDetails = () => {
                   No verified cooks are available right now. Retry after a cook is approved.
                 </p>
               ) : (
-                <div className="form-group event-assign-field">
-                  <label htmlFor={`assign-cook-${id}`}>Verified cook</label>
-                  <select
-                    id={`assign-cook-${id}`}
-                    className="form-control"
-                    value={assignCookId}
-                    onChange={(e) => setAssignCookId(e.target.value)}
-                  >
-                    <option value="">Select a verified cook…</option>
-                    {verifiedCooks.map((c) => (
-                      <option key={c._id} value={c?.user?._id}>
-                        {c?.user?.name} · {c.experienceYears}y · {c.serviceArea || "—"}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <>
+                  <div className="form-group event-assign-field">
+                    <label>Verified cooks</label>
+                    <div className="event-admin-cook-options">
+                      {verifiedCooks.map((c) => {
+                        const cookUserId = String(c?.user?._id || "");
+                        const selected = assignCookIds.includes(cookUserId);
+                        return (
+                          <label
+                            key={c._id}
+                            className={`event-admin-cook-option${selected ? " is-selected" : ""}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => toggleCook(cookUserId)}
+                            />
+                            <span>
+                              {c?.user?.name} · {c.experienceYears}y · {c.serviceArea || "—"}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="event-admin-inline-grid">
+                    <div className="form-group event-assign-field">
+                      <label htmlFor={`assign-km-${id}`}>Verified distance (km) *</label>
+                      <input
+                        id={`assign-km-${id}`}
+                        type="number"
+                        min={0}
+                        max={100000}
+                        step="0.1"
+                        className="form-control"
+                        value={assignKm}
+                        onChange={(e) => setAssignKm(e.target.value)}
+                        placeholder={String(booking?.distanceKm ?? 0)}
+                      />
+                    </div>
+                    <div className="form-group event-assign-field">
+                      <label htmlFor={`assign-amount-${id}`}>Service amount (Rs.)</label>
+                      <input
+                        id={`assign-amount-${id}`}
+                        type="number"
+                        min={0}
+                        step="1"
+                        className="form-control"
+                        value={assignAmount}
+                        onChange={(e) => setAssignAmount(e.target.value)}
+                        placeholder={String(booking?.serviceAmount ?? 0)}
+                      />
+                    </div>
+                  </div>
+                  <p className="event-inline-note">
+                    {assignCookIds.length} cook(s) selected ·{" "}
+                    {Math.max(0, assignCookIds.length - 1)} additional cook(s) billed at the current rate.
+                    Leave the amount blank to keep the original quote.
+                  </p>
+                </>
               )}
               <div className="event-assign-actions">
                 <button
                   type="button"
                   className="btn btn-success btn-sm"
-                  disabled={assignBusy || cooksLoading || Boolean(cooksError) || verifiedCooks.length === 0}
+                  disabled={assignBusy || cooksLoading || Boolean(cooksError) || verifiedCooks.length === 0 || assignCookIds.length === 0}
                   onClick={handleAssign}
                 >
                   <CheckCircle2 size={15} aria-hidden="true" /> {assignBusy ? "Assigning…" : "Confirm assign"}
@@ -870,7 +974,9 @@ const EventBookingDetails = () => {
                   className="btn btn-outline btn-sm"
                   onClick={() => {
                     setAssigning(false);
-                    setAssignCookId("");
+                    setAssignCookIds([]);
+                    setAssignKm("");
+                    setAssignAmount("");
                   }}
                 >
                   <XCircle size={15} aria-hidden="true" /> Close
@@ -882,12 +988,9 @@ const EventBookingDetails = () => {
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
-                onClick={() => {
-                  setAssigning(true);
-                  setAssignCookId(cook ? String(cook._id) : "");
-                }}
+                onClick={openAssign}
               >
-                <UserCheck size={15} aria-hidden="true" /> {cook ? "Reassign cook" : "Assign cook"}
+                <UserCheck size={15} aria-hidden="true" /> {hasCooks ? "Reassign cook" : "Assign cook"}
               </button>
             </div>
           ))}

@@ -13,6 +13,7 @@
 
 require("dotenv").config();
 const mongoose = require("mongoose");
+const { istMidnight, istWeekday } = require("./utils/time");
 
 process.env.EVENT_PAYMENTS_REQUIRED = "false";
 
@@ -118,10 +119,14 @@ const futureDateStr = (daysAhead) => {
     await bookingCtrl.createEventBooking(req, res, failNext);
     return res;
   };
-  const callAssign = (bookingId, cookId, admin) => {
+  const callAssign = (bookingId, cookId, admin, overrides = {}) => {
     const res = mockRes();
+    const body =
+      Array.isArray(cookId)
+        ? { cookIds: cookId.map(String), distanceKm: 0, ...overrides }
+        : { cookId: String(cookId), distanceKm: 0, ...overrides };
     return bookingCtrl
-      .assignCook({ params: { id: String(bookingId) }, body: { cookId: String(cookId) }, user: asUser(admin, "ADMIN") }, res, failNext)
+      .assignCook({ params: { id: String(bookingId) }, body, user: asUser(admin, "ADMIN") }, res, failNext)
       .then(() => res);
   };
   // Permission probe: same controller invoked under ANY role. The route's
@@ -783,12 +788,11 @@ const futureDateStr = (daysAhead) => {
     // 16g. Event assignment must respect regular CookMitra bookings.
     const regularCook = await mkCook("regularClash");
     const regEvent = await callCreate(customer, { startTime: "09:00", duration: 2 });
-    const [ry, rm, rd] = DAY.split("-").map(Number);
     await Booking.create({
       customer: customer._id,
       cook: regularCook._id,
       serviceType: "cook_for_me",
-      date: new Date(ry, rm - 1, rd, 12, 0, 0, 0),
+      date: istMidnight(DAY),
       startTime: "09:30",
       endTime: "11:00",
       address: "1 Test St",
@@ -813,7 +817,7 @@ const futureDateStr = (daysAhead) => {
     );
 
     const hoursCook = await mkCook("weeklyHours");
-    const weekday = new Date(ry, rm - 1, rd).getDay();
+    const weekday = istWeekday(DAY);
     await CookProfile.updateOne(
       { user: hoursCook._id },
       { $set: { "schedule.weekly": [{ day: weekday, startTime: "09:00", endTime: "12:00", enabled: true }] } }
@@ -837,7 +841,7 @@ const futureDateStr = (daysAhead) => {
     const regularRequest = await Booking.create({
       customer: customer._id,
       serviceType: "cook_for_me",
-      date: new Date(ry, rm - 1, rd, 12, 0, 0, 0),
+      date: istMidnight(DAY),
       startTime: "14:30",
       endTime: "15:30",
       address: "1 Test St",
@@ -985,10 +989,9 @@ const futureDateStr = (daysAhead) => {
         select: async () => {
           revFinds += 1;
           if (revFinds >= 2) {
-            const [y, m, d] = DAY.split("-").map(Number);
             return [
               {
-                eventDate: new Date(y, m - 1, d, 12, 0, 0, 0),
+                eventDate: istMidnight(DAY),
                 startTime: "20:30",
                 duration: 1,
                 extraHours: 0,
@@ -1252,6 +1255,103 @@ const futureDateStr = (daysAhead) => {
         "23 backfill aborts on db-name mismatch",
         bfWrong.status === 1 && /Target mismatch/i.test(`${bfWrong.stderr || ""}${bfWrong.stdout || ""}`),
         `status=${bfWrong.status} ${(`${bfWrong.stderr || ""}`).slice(0, 160)}`
+      );
+    }
+
+    // ── 24. Multi-cook assignment + one-action distance verification ──
+    {
+      const mCookA = await mkCook("multiA");
+      const mCookB = await mkCook("multiB");
+      const mb = await callCreate(customer, { startTime: "13:00", duration: 2 });
+      const mres = await callAssign(mb.body._id, [mCookA._id, mCookB._id], admin, {
+        distanceKm: 12,
+        serviceAmount: 2500,
+      });
+      check("24 multi-cook assign → 200", mres.statusCode === 200, `got ${mres.statusCode} ${mres.body?.message || ""}`);
+      const mDoc = await EventBooking.findById(mb.body._id);
+      check(
+        "24 both cooks recorded, primary mirrors first",
+        mDoc.cookIds.length === 2 &&
+          String(mDoc.cookIds[0]) === String(mCookA._id) &&
+          String(mDoc.cookIds[1]) === String(mCookB._id) &&
+          String(mDoc.cookId) === String(mCookA._id),
+        JSON.stringify(mDoc.cookIds)
+      );
+      check(
+        "24 assignment verifies distance in the same action",
+        mDoc.distanceVerified === true && Number(mDoc.distanceKm) === 12,
+        `verified=${mDoc.distanceVerified} km=${mDoc.distanceKm}`
+      );
+      const table = await EventPricing.findOne({ key: "default" });
+      const expectedTravel = Math.round(travelChargeForDistance(table.travelSlabs, 12));
+      const expectedAdditional = Number(table.additionalCookPrice || 0);
+      check(
+        "24 additional cook billed and total repriced",
+        mDoc.additionalCook === 1 &&
+          mDoc.additionalCookAmount === expectedAdditional &&
+          mDoc.serviceAmount === 2500 &&
+          mDoc.totalAmount === Math.round(2500 + expectedAdditional + Number(mDoc.extraHourAmount || 0) + expectedTravel),
+        `cooks=${mDoc.additionalCook} add=${mDoc.additionalCookAmount} total=${mDoc.totalAmount}`
+      );
+      for (const [label, id] of [["A", mCookA._id], ["B", mCookB._id]]) {
+        const n = await Notification.countDocuments({ user: id, type: "event_assignment" });
+        check(`24 cook ${label} got exactly one assignment notice`, n === 1, `count=${n}`);
+      }
+      const custAssign = await Notification.findOne({
+        user: customer._id,
+        type: "event_cook_assigned",
+        message: { $regex: mCookA.name },
+      });
+      check(
+        "24 customer notice names every assigned cook",
+        !!custAssign &&
+          custAssign.message.includes(mCookA.name) &&
+          custAssign.message.includes(mCookB.name),
+        custAssign ? custAssign.message : "missing"
+      );
+
+      const listRes = mockRes();
+      await bookingCtrl.getCookEventBookings(
+        { user: { id: String(mCookB._id), role: "COOK" }, query: {} },
+        listRes,
+        failNext
+      );
+      const list = Array.isArray(listRes.body) ? listRes.body : [];
+      check(
+        "24 supporting cook sees the booking in their list",
+        list.some((b) => String(b._id) === String(mb.body._id)),
+        `rows=${list.length}`
+      );
+
+      const detailRes = mockRes();
+      await bookingCtrl.getEventBookingById(
+        { params: { id: String(mb.body._id) }, user: { id: String(mCookB._id), role: "COOK" } },
+        detailRes,
+        failNext
+      );
+      check(
+        "24 supporting cook can open the booking details",
+        detailRes.statusCode === 200 && String(detailRes.body?._id) === String(mb.body._id),
+        `got ${detailRes.statusCode}`
+      );
+
+      const clash = await callCreate(customer, { startTime: "13:00", duration: 2 });
+      const clashRes = await callAssign(clash.body._id, mCookB._id, admin, { distanceKm: 5 });
+      check(
+        "24 every assigned cook is conflict-protected",
+        clashRes.statusCode === 409,
+        `got ${clashRes.statusCode} ${clashRes.body?.message || ""}`
+      );
+
+      const single = await callAssign(mb.body._id, mCookA._id, admin, { distanceKm: 12 });
+      const singleDoc = await EventBooking.findById(mb.body._id);
+      check(
+        "24 reassigning to one cook reprices without additional cooks",
+        single.statusCode === 200 &&
+          singleDoc.cookIds.length === 1 &&
+          singleDoc.additionalCook === 0 &&
+          singleDoc.additionalCookAmount === 0,
+        `status=${single.statusCode} cooks=${singleDoc.cookIds.length} add=${singleDoc.additionalCook}`
       );
     }
   } finally {

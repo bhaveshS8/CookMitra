@@ -11,12 +11,14 @@ const {
   recordEventLedger,
 } = require("../services/eventPaymentService");
 const EventOutbox = require("../models/EventOutbox");
-const { istDayRange, istWeekday } = require("../utils/time");
+const { istDayRange, istWeekday, istEventInstant } = require("../utils/time");
 const {
   calculateEventPrice,
   travelChargeForDistance,
   getPricingTable,
   getPricingSnapshot,
+  MAX_PRICE,
+  MAX_DISTANCE_KM,
 } = require("../utils/eventPricing");
 const { paginationParams, applyPagination, sendList, HARD_CAP } = require("../utils/pagination");
 const {
@@ -24,6 +26,9 @@ const {
   deliverOutboxEvent,
   withEventTransaction,
 } = require("../utils/eventOutbox");
+
+// Guardrail on how many cooks one admin action may attach to an event.
+const EVENT_MAX_COOKS = 10;
 
 // Human-readable id: EVT-XXXXXX (unique).
 const generateBookingId = () =>
@@ -107,6 +112,11 @@ const timeToMinutes = (t) => {
 
 const sameDayIST = (a, b) => istDayStr(a) === istDayStr(b);
 
+// Absolute instant for a YYYY-MM-DD event day, anchored at IST noon. The
+// Date's IST calendar day always equals the requested day regardless of the
+// server's own timezone (a server-local noon does not, west of UTC-06:30).
+const eventDateInstant = (dayStr) => istEventInstant(dayStr, "12:00");
+
 // Session window a booking occupies: start → start + duration + extraHours.
 // duration = base booked service hours (1–8); extraHours = additional hours
 // billed via the extra-hour table (0–12). Effective total = duration +
@@ -159,6 +169,21 @@ const findScheduleConflict = async (cookId, eventDate, window) => {
   return fits
     ? null
     : { kind: "hours", message: "This cook's configured working hours do not cover those event hours" };
+};
+
+// Every cook attached to a booking (multi-cook `cookIds` plus the legacy
+// primary `cookId`), deduped. Used for notifications and cook-scoped queries.
+const eventCookIds = (booking) => {
+  const ids = [];
+  const push = (id) => {
+    const value = id?._id || id;
+    if (!value) return;
+    const key = String(value);
+    if (!ids.includes(key)) ids.push(key);
+  };
+  if (Array.isArray(booking?.cookIds)) booking.cookIds.forEach(push);
+  push(booking?.cookId);
+  return ids;
 };
 
 const findAssignmentConflict = async (cookId, eventDate, window, excludeId = null) => {
@@ -264,16 +289,31 @@ const flagRevertFailureForAdmins = async (bookingPublicId, detail) => {
 // status — so a reassignment or any other mutation that moved the document
 // in between makes the revert miss (never undo someone else's change).
 // Returns the reverted doc or null.
-const revertAssignment = async ({ updated, prevCook, prevStatus, note }) =>
-  EventBooking.findOneAndUpdate(
-    { _id: updated._id, __v: updated.__v, bookingStatus: "cook_assigned", cookId: updated.cookId },
+const revertAssignment = async ({ updated, prevCook, prevCookIds, prevStatus, prevSnapshot, note }) => {
+  const filter = {
+    _id: updated._id,
+    __v: updated.__v,
+    bookingStatus: "cook_assigned",
+    cookId: updated.cookId,
+  };
+  // Match the exact multi-cook set we wrote so a reassignment in between can
+  // never be undone by a stale revert.
+  if (Array.isArray(updated.cookIds) && updated.cookIds.length > 0) {
+    filter.cookIds = updated.cookIds;
+  }
+  const restore = { cookId: prevCook || null, bookingStatus: prevStatus };
+  if (Array.isArray(prevCookIds)) restore.cookIds = prevCookIds;
+  if (prevSnapshot && typeof prevSnapshot === "object") Object.assign(restore, prevSnapshot);
+  return EventBooking.findOneAndUpdate(
+    filter,
     {
-      $set: { cookId: prevCook || null, bookingStatus: prevStatus },
+      $set: restore,
       $push: { statusHistory: { status: prevStatus, note, actor: null, actorRole: "SYSTEM" } },
       $inc: { __v: 1 },
     },
     { new: true }
   );
+};
 
 const classifyUpdateMiss = async (bookingId) => {
   const current = await EventBooking.findById(bookingId).select("bookingStatus");
@@ -414,7 +454,13 @@ exports.createEventBooking = async (req, res, next) => {
         return res.status(400).json({ message: "Valid event date is required" });
       }
       eventDayStr = eventDate.trim();
-      day = new Date(y, m - 1, d, 12, 0, 0, 0); // noon local avoids DST edges
+      // Anchor at IST noon (absolute instant), NOT server-local noon: a local
+      // noon on hosts west of UTC-06:30 lands on the *next* IST calendar day,
+      // which shifts blocked-date/weekday/overlap checks and notifications.
+      day = eventDateInstant(eventDayStr);
+      if (!day) {
+        return res.status(400).json({ message: "Valid event date is required" });
+      }
     } else {
       day = new Date(eventDate);
       if (Number.isNaN(day.getTime())) {
@@ -660,7 +706,8 @@ exports.createEventBooking = async (req, res, next) => {
 const populateBooking = (q) =>
   q
     .populate("customerId", "name email phone mobile")
-    .populate("cookId", "name email phone mobile avatar");
+    .populate("cookId", "name email phone mobile avatar")
+    .populate("cookIds", "name email phone mobile avatar");
 
 exports.getMyEventBookings = async (req, res, next) => {
   try {
@@ -679,7 +726,7 @@ exports.getMyEventBookings = async (req, res, next) => {
 
 exports.getCookEventBookings = async (req, res, next) => {
   try {
-    const filter = { cookId: req.user.id };
+    const filter = { $or: [{ cookId: req.user.id }, { cookIds: req.user.id }] };
     if (!applyStatusFilter(filter, req.query.status, res)) return;
     const pg = paginationParams(req);
     const bookings = await applyPagination(
@@ -716,8 +763,8 @@ exports.getEventBookingById = async (req, res, next) => {
     if (!booking) return res.status(404).json({ message: "Event booking not found" });
     const role = String(req.user.role).toUpperCase();
     const mine =
-      String(booking.customerId?._id || booking.customerId) === req.user.id ||
-      (booking.cookId && String(booking.cookId?._id || booking.cookId) === req.user.id);
+      String(booking.customerId?._id || booking.customerId) === String(req.user.id) ||
+      eventCookIds(booking).some((cookId) => cookId === String(req.user.id));
     if (role !== "ADMIN" && !mine) {
       return res.status(403).json({ message: "Not authorized for this action" });
     }
@@ -820,35 +867,107 @@ exports.assignCook = async (req, res, next) => {
     if (!["pending", "cook_assigned"].includes(booking.bookingStatus)) {
       return res.status(400).json({ message: "Only pending bookings can be assigned a cook" });
     }
-    const { cookId } = req.body || {};
-    if (!cookId || !mongoose.isValidObjectId(cookId)) {
-      return res.status(400).json({ message: "Valid cook id is required" });
+    // Accept the multi-cook array (`cookIds`) or the legacy single `cookId`.
+    const rawCooks =
+      Array.isArray(req.body?.cookIds) && req.body.cookIds.length > 0
+        ? req.body.cookIds
+        : [req.body?.cookId];
+    const cookIds = [];
+    for (const raw of rawCooks) {
+      const cookId = typeof raw === "string" ? raw.trim() : raw;
+      if (!cookId || !mongoose.isValidObjectId(cookId)) {
+        return res.status(400).json({ message: "Valid cook id is required" });
+      }
+      if (!cookIds.some((id) => String(id) === String(cookId))) cookIds.push(cookId);
+    }
+    if (cookIds.length === 0) {
+      return res.status(400).json({ message: "At least one cook is required" });
+    }
+    if (cookIds.length > EVENT_MAX_COOKS) {
+      return res.status(400).json({ message: `At most ${EVENT_MAX_COOKS} cooks can be assigned to one event` });
     }
 
-    // Idempotent retry: same cook already assigned → success without duplicate
-    // history or notifications.
-    if (booking.bookingStatus === "cook_assigned" && String(booking.cookId) === String(cookId)) {
+    // Distance verification is folded into assignment (required km field).
+    const distanceKm = strictNumber(req.body?.distanceKm);
+    if (!Number.isFinite(distanceKm) || distanceKm < 0 || distanceKm > MAX_DISTANCE_KM) {
+      return res.status(400).json({ message: `Distance must be a number between 0 and ${MAX_DISTANCE_KM} km` });
+    }
+
+    // Admin may adjust the service amount based on the agreed menu.
+    let serviceOverride;
+    if (
+      req.body?.serviceAmount !== undefined &&
+      req.body?.serviceAmount !== null &&
+      req.body?.serviceAmount !== ""
+    ) {
+      const parsed = strictNumber(req.body.serviceAmount);
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > MAX_PRICE) {
+        return res.status(400).json({ message: `Service amount must be a number between 0 and ${MAX_PRICE}` });
+      }
+      serviceOverride = Math.round(parsed * 100) / 100;
+    }
+
+    // Idempotent retry: same cook set + distance already recorded → success
+    // without duplicate history or notifications.
+    const assignedAlready = eventCookIds(booking);
+    const sameCookSet =
+      booking.bookingStatus === "cook_assigned" &&
+      cookIds.length === assignedAlready.length &&
+      cookIds.every((id) => assignedAlready.some((prev) => String(prev) === String(id))) &&
+      Number(booking.distanceKm) === distanceKm &&
+      booking.distanceVerified === true &&
+      (serviceOverride === undefined || Number(booking.serviceAmount) === serviceOverride);
+    if (sameCookSet) {
       const current = await populateBooking(EventBooking.findById(booking._id));
       return res.json(current);
     }
 
-    const eligibility = await checkCookEligible(cookId);
-    if (!eligibility.ok) return res.status(400).json({ message: eligibility.message });
-    const { cookUser } = eligibility;
+    // Validate every selected cook before touching the booking.
+    const eligibilities = [];
+    for (const cookId of cookIds) {
+      const eligibility = await checkCookEligible(cookId);
+      if (!eligibility.ok) return res.status(400).json({ message: eligibility.message });
+      eligibilities.push({ cookId, cookUser: eligibility.cookUser });
+    }
 
     const window = bookingWindow(booking);
     if (!window) return res.status(400).json({ message: "Booking has an invalid time window" });
     if (window.end > 24 * 60) {
       return res.status(400).json({ message: "Overnight events are not supported" });
     }
-    const conflict = await findAssignmentConflict(cookId, booking.eventDate, window, booking._id);
-    if (conflict) {
-      return res.status(409).json({ message: conflict.message });
+    for (const cookId of cookIds) {
+      const conflict = await findAssignmentConflict(cookId, booking.eventDate, window, booking._id);
+      if (conflict) {
+        return res.status(409).json({ message: conflict.message });
+      }
     }
 
     const prevCook = booking.cookId;
+    const prevCookIds = eventCookIds(booking);
     const prevStatus = booking.bookingStatus;
     const prevVersion = booking.__v;
+    const prevSnapshot = {
+      distanceKm: booking.distanceKm,
+      distanceVerified: booking.distanceVerified,
+      serviceAmount: booking.serviceAmount,
+      additionalCook: booking.additionalCook,
+      additionalCookAmount: booking.additionalCookAmount,
+      travelCharge: booking.travelCharge,
+      totalAmount: booking.totalAmount,
+      pricingVersion: booking.pricingVersion,
+    };
+
+    // Reprice from the live pricing table: N cooks = N-1 additional cooks.
+    const pricingSnapshot = await getPricingSnapshot();
+    const additionalCook = Math.max(0, cookIds.length - 1);
+    const additionalCookAmount = Math.round(
+      additionalCook * Number(pricingSnapshot.table.additionalCookPrice || 0)
+    );
+    const serviceAmount = serviceOverride === undefined ? Number(booking.serviceAmount || 0) : serviceOverride;
+    const extraHourAmount = Number(booking.extraHourAmount || 0);
+    const travelCharge = Math.round(travelChargeForDistance(pricingSnapshot.table.travelSlabs, distanceKm));
+    const totalAmount = Math.round(serviceAmount + additionalCookAmount + extraHourAmount + travelCharge);
+    const cookNames = eligibilities.map((e) => e.cookUser.name || "A cook").join(", ");
 
     // Atomic claim + durable enqueue commit together when transactions are
     // available: only one concurrent request can win (status + version), and
@@ -859,14 +978,28 @@ exports.assignCook = async (req, res, next) => {
     let assignOutbox = null;
     let assignIneligible = null;
     await commitBookingMutation(async (session) => {
-      const guard = await guardCookEligibilityForAssign(cookId, session);
-      if (!guard.ok) return { updated: null, outboxDoc: null, ineligible: true };
+      for (const cookId of cookIds) {
+        const guard = await guardCookEligibilityForAssign(cookId, session);
+        if (!guard.ok) return { updated: null, outboxDoc: null, ineligible: cookId };
+      }
       const u = await atomicBookingUpdate(
         {
           bookingId: booking._id,
           expectedVersion: prevVersion,
           expectedStatuses: ["pending", "cook_assigned"],
-          set: { cookId, bookingStatus: "cook_assigned" },
+          set: {
+            cookId: cookIds[0],
+            cookIds,
+            bookingStatus: "cook_assigned",
+            distanceKm,
+            distanceVerified: true,
+            serviceAmount,
+            additionalCook,
+            additionalCookAmount,
+            travelCharge,
+            totalAmount,
+            pricingVersion: pricingSnapshot.version,
+          },
           pushHistory: {
             status: "cook_assigned",
             note: "Cook assigned by admin",
@@ -887,13 +1020,13 @@ exports.assignCook = async (req, res, next) => {
             {
               user: u.customerId,
               type: "event_cook_assigned",
-              message: `Good news! ${cookUser.name || "A cook"} has been assigned to your ${u.customEventType || u.eventType} on ${istDayStr(u.eventDate)}.`,
+              message: `Good news! ${cookNames} assigned to your ${u.customEventType || u.eventType} on ${istDayStr(u.eventDate)} — final amount Rs.${totalAmount}.`,
             },
-            {
+            ...cookIds.map((cookId) => ({
               user: cookId,
               type: "event_assignment",
               message: `New event assignment: ${u.customEventType || u.eventType} on ${istDayStr(u.eventDate)}, ${u.startTime} — ${u.guestCount} guests.`,
-            },
+            })),
           ],
         },
         session
@@ -902,13 +1035,13 @@ exports.assignCook = async (req, res, next) => {
     }).then(({ result }) => {
       updated = result.updated;
       assignOutbox = result.outboxDoc;
-      assignIneligible = result.ineligible === true;
+      assignIneligible = result.ineligible || null;
     });
     if (assignIneligible) {
       // Eligibility flipped between the pre-check and the guarded commit (or
       // was already gone when the guard ran). Fresh authoritative read for the
       // precise reason; generic fallback if it flip-flopped again.
-      const fresh = await checkCookEligible(cookId);
+      const fresh = await checkCookEligible(assignIneligible);
       const message = fresh.ok
         ? "Cook eligibility changed during assignment — please reload and retry."
         : fresh.message;
@@ -957,14 +1090,21 @@ exports.assignCook = async (req, res, next) => {
     // always observes the earlier commit (primary reads), so at least one
     // side reverts. A transaction would not fix this either (different
     // documents → no write conflict under snapshot isolation).
-    const postConflict = await findAssignmentConflict(cookId, updated.eventDate, bookingWindow(updated), updated._id);
+    let postConflict = null;
+    const updatedWindow = bookingWindow(updated);
+    for (const cookId of cookIds) {
+      postConflict = await findAssignmentConflict(cookId, updated.eventDate, updatedWindow, updated._id);
+      if (postConflict) break;
+    }
     if (postConflict) {
       let reverted = null;
       try {
         reverted = await revertAssignment({
           updated,
           prevCook,
+          prevCookIds,
           prevStatus,
+          prevSnapshot,
           note: "Auto-reverted: assignment conflict detected",
         });
       } catch (e) {
@@ -998,14 +1138,20 @@ exports.assignCook = async (req, res, next) => {
     // was valid at commit, notices reflect true DB state, and the admin can
     // reassign. Eligibility writes are comparatively rare (manual admin/cook
     // actions), so the window is negligible in practice.
-    const stillEligible = await checkCookEligible(cookId);
+    let stillEligible = { ok: true };
+    for (const cookId of cookIds) {
+      stillEligible = await checkCookEligible(cookId);
+      if (!stillEligible.ok) break;
+    }
     if (!stillEligible.ok) {
       let reverted = null;
       try {
         reverted = await revertAssignment({
           updated,
           prevCook,
+          prevCookIds,
           prevStatus,
+          prevSnapshot,
           note: "Auto-reverted: cook became ineligible after assignment",
         });
       } catch (e) {
@@ -1073,7 +1219,7 @@ exports.updateEventBookingStatus = async (req, res, next) => {
         message: `Cannot move from ${booking.bookingStatus} to ${status || "(none)"}`,
       });
     }
-    if (["confirmed", "in_progress", "completed"].includes(status) && !booking.cookId) {
+    if (["confirmed", "in_progress", "completed"].includes(status) && eventCookIds(booking).length === 0) {
       return res.status(400).json({ message: "Assign a cook before confirming this booking" });
     }
     if (status === "confirmed" && eventPaymentsRequired() && booking.payment?.status !== "paid") {
@@ -1112,9 +1258,9 @@ exports.updateEventBookingStatus = async (req, res, next) => {
           message: `Your event booking ${u.bookingId} is now ${status.replace(/_/g, " ").toUpperCase()}.`,
         },
       ];
-      if (u.cookId) {
+      for (const cookId of eventCookIds(u)) {
         recipients.push({
-          user: u.cookId,
+          user: cookId,
           type: "event_status",
           message: `Event booking ${u.bookingId} is now ${status.replace(/_/g, " ").toUpperCase()}.`,
         });
@@ -1233,9 +1379,9 @@ exports.cancelEventBooking = async (req, res, next) => {
           message: `Your event booking ${u.bookingId} has been cancelled by CookMitra.${refundMessage}`,
         });
       }
-      if (u.cookId) {
+      for (const cookId of eventCookIds(u)) {
         recipients.push({
-          user: u.cookId,
+          user: cookId,
           type: "event_cancelled",
           message: `Event booking ${u.bookingId} has been cancelled.`,
         });
@@ -1464,6 +1610,7 @@ exports._test = {
   bookingWindow,
   windowsOverlap,
   sameDayIST,
+  eventDateInstant,
   istTodayStr,
   istDayStr,
   ALLOWED_TRANSITIONS,
